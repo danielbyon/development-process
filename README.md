@@ -7,7 +7,7 @@ This private repository is the canonical source for the owner-approved Unified D
 - [Unified Development Process v1.0](docs/PROCESS.md) is the normative policy.
 - [Issue #1](https://github.com/danielbyon/development-process/issues/1) records the approved initial scope and contract.
 - [docs/DECISIONS.md](docs/DECISIONS.md) preserves the approved rationale, alternatives, constraints, and known limitations.
-- [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md) records the initial Git baseline, task identity, and validation and review evidence.
+- [PR #6](https://github.com/danielbyon/development-process/pull/6) preserves the one-time bootstrap, task identity, validation, and review evidence; these historical details are not a permanent policy document.
 - [AGENTS.md](AGENTS.md) points project work to the canonical policy.
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) checks the committed PR integration diff.
 
