@@ -1,0 +1,42 @@
+docs/PROCESS.md
+  s_5da9b5c5a5a4a7::t_09a5a8dcbf9944 35
+  s_5da9b5c5a5a4a7::t_a9ee5a4cdf72cb 1-2,6-17,19-34,36-47,49-75,77-82,84-111
+  s_5da9b5c5a5a4a7::t_9cd2f4ab1d319b 48
+  s_5da9b5c5a5a4a7::t_f1c6afd08ae6c4 18,76,83
+  s_5da9b5c5a5a4a7::t_8168b339527ba0 3-5
+docs/DECISIONS.md
+  s_5da9b5c5a5a4a7::t_9e8166f1d14b56 1-35
+AGENTS.md
+  s_5da9b5c5a5a4a7::t_9e8166f1d14b56 1-3
+docs/BOOTSTRAP.md
+  s_5da9b5c5a5a4a7::t_411540eee2dc18 43-47,49-54,66
+  s_5da9b5c5a5a4a7::t_9e8166f1d14b56 1-6,9-15,17-42,48,55-58,60,62,76,81-82
+  s_5da9b5c5a5a4a7::t_9cd2f4ab1d319b 7-8,64,68,74-75,77-80
+  s_5da9b5c5a5a4a7::t_4d39a71ed9aa54 71-72
+  s_5da9b5c5a5a4a7::t_ecd1c2080b388c 61
+  s_5da9b5c5a5a4a7::t_6d1d000da0defa 69-70
+  s_5da9b5c5a5a4a7::t_f045fa3918e863 16,59
+  s_5da9b5c5a5a4a7::t_b265defa5eafff 63,65,67,73
+.github/workflows/ci.yml
+  s_5da9b5c5a5a4a7::t_f405f4e47cc0a7 56-68,71-72
+  s_5da9b5c5a5a4a7::t_4dc0e5a88f318b 19,25-27
+  s_5da9b5c5a5a4a7::t_9e8166f1d14b56 1-18,20-24,28-55,69-70,73-78
+README.md
+  s_5da9b5c5a5a4a7::t_9e8166f1d14b56 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e97018b5a940fbd1d4bbfec669e0825bb9b4e5a6",
+  "prompts": {},
+  "sessions": {
+    "s_5da9b5c5a5a4a7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c60a-2857-7732-906e-2b5284532229",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Daniel Byon <327737+danielbyon@users.noreply.github.com>"
+    }
+  }
+}
