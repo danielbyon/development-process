@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  committed-pr-diff:
+    name: Validate committed PR integration diff
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the synthetic merge commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Verify revision and check committed diff
+        shell: bash
+        env:
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_TEST_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          actual_test_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_test_sha" != "$EXPECTED_TEST_SHA" ]]; then
+            echo "::error::HEAD does not match the pull-request integration SHA."
+            exit 1
+          fi
+
+          git cat-file -e "$EXPECTED_TEST_SHA^{commit}"
+
+          parent_count="$(git rev-list --parents -n 1 HEAD | awk '{ print NF - 1 }')"
+          if [[ "$parent_count" -ne 2 ]]; then
+            echo "::error::Expected the GitHub pull-request synthetic merge commit."
+            exit 1
+          fi
+
+          actual_base_sha="$(git rev-parse HEAD^1)"
+          actual_head_sha="$(git rev-parse HEAD^2)"
+          if [[ "$actual_base_sha" != "$EXPECTED_BASE_SHA" ]]; then
+            echo "::error::Synthetic merge first parent does not match the event base SHA."
+            exit 1
+          fi
+          if [[ "$actual_head_sha" != "$EXPECTED_HEAD_SHA" ]]; then
+            echo "::error::Synthetic merge second parent does not match the PR head SHA."
+            exit 1
+          fi
+
+          set +e
+          git diff --quiet HEAD^1 HEAD
+          diff_status=$?
+          set -e
+
+          case "$diff_status" in
+            0)
+              echo "::error::The committed PR integration diff is empty."
+              exit 1
+              ;;
+            1)
+              ;;
+            *)
+              echo "::error::Unable to inspect the committed PR integration diff."
+              exit "$diff_status"
+              ;;
+          esac
+
+          printf 'PR HEAD: %s\n' "$EXPECTED_HEAD_SHA"
+          printf 'Tested integration revision: %s\n' "$EXPECTED_TEST_SHA"
+          printf 'Tested base revision: %s\n' "$EXPECTED_BASE_SHA"
+
+          git diff --check HEAD^1 HEAD
