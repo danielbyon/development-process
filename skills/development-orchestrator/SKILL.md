@@ -9,7 +9,7 @@ This Skill helps ChatGPT sessions select approved work, prepare task handoffs, a
 
 ## Policy and evidence
 
-This Skill is pinned to policy commit `beb7c955b054dafa3eb1a45e5e13e519720e654a`. Read [`docs/PROCESS.md` at that revision](https://github.com/danielbyon/development-process/blob/beb7c955b054dafa3eb1a45e5e13e519720e654a/docs/PROCESS.md) before applying the workflow.
+For new tasks using this Skill revision, pin policy commit `42b0ea58b5fff57deadbe5c360ebf9ea28ea2b08`. Read [`docs/PROCESS.md` at that revision](https://github.com/danielbyon/development-process/blob/42b0ea58b5fff57deadbe5c360ebf9ea28ea2b08/docs/PROCESS.md) before applying the workflow. Keep already-started tasks on their existing policy/Skill revisions unless the owner explicitly approves migration. Do not treat this candidate policy revision as active before its approved integration.
 
 - Use `gpt-repo-local` first for connected repository source. Use the GitHub connection that matches the repository owner for issues and pull requests.
 - Verify the repository root, read-only checkout revision, and active task identity from current evidence. If a task worktree exists, verify its path, branch, HEAD, and task identity; if none exists during planning, label any worktree/branch as proposed rather than verified. Inspect project instructions, accepted issues and specifications, decision records, source, tests, and active work as relevant.
