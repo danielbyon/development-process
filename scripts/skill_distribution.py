@@ -34,7 +34,10 @@ SKILL_NAMES = {
     "delegation-executor",
 }
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-LOCAL_LINK_PATTERN = re.compile(r"(?<!)\[[^\]]*\]\(([^)]+)\)")
+# Validate inline links and images; honor escaped brackets and even backslash runs.
+LOCAL_LINK_PATTERN = re.compile(
+    r"(?<!\\)(?:\\\\)*(?:!\[[^\]]*\]|(?<!!)\[[^\]]*\])\(([^)]+)\)"
+)
 
 
 class DistributionError(Exception):

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import io
 import hashlib
 import json
 import shutil
@@ -8,6 +10,7 @@ import subprocess
 import tempfile
 import unittest
 import zipfile
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +21,7 @@ from scripts.skill_distribution import (
     install_archive,
     resolve_task_policy,
     initialize_staging_root,
+    main,
     validate_distribution,
     verify_packages,
 )
@@ -75,6 +79,184 @@ class SkillDistributionTests(unittest.TestCase):
             set(validate_distribution(self.source_root)),
             set(SKILL_NAMES),
         )
+
+    def test_manifest_rejects_invalid_distribution_shapes(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        original = json.loads(manifest_path.read_text())
+        cases = [
+            ("unsupported schema", lambda value: value.update(schema_version=2)),
+            ("skills must be a list", lambda value: value.update(skills="invalid")),
+            ("entry must be an object", lambda value: value["skills"].__setitem__(0, "invalid")),
+            ("duplicate Skill", lambda value: value["skills"][1].update(name=value["skills"][0]["name"])),
+            ("unsafe source path", lambda value: value["skills"][0].update(source_dir="../escape")),
+            ("wrong source directory", lambda value: value["skills"][0].update(source_dir="skills/other")),
+            ("files must be a list", lambda value: value["skills"][0].update(files="SKILL.md")),
+            ("file path must be a string", lambda value: value["skills"][0]["files"].append(None)),
+            ("empty file path", lambda value: value["skills"][0]["files"].append("")),
+            ("absolute file path", lambda value: value["skills"][0]["files"].append("/outside")),
+            ("backslash file path", lambda value: value["skills"][0]["files"].append("agents\\openai.yaml")),
+            ("duplicate file", lambda value: value["skills"][0]["files"].append("SKILL.md")),
+            ("required file omitted", lambda value: value["skills"][0].update(files=["SKILL.md"])),
+            ("test file included", lambda value: value["skills"][0]["files"].append("tests/scenarios.md")),
+            ("Skill omitted", lambda value: value["skills"].pop()),
+        ]
+
+        for label, mutate in cases:
+            with self.subTest(case=label):
+                manifest = copy.deepcopy(original)
+                mutate(manifest)
+                manifest_path.write_text(json.dumps(manifest))
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+
+    def test_manifest_must_be_valid_json_object(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        for invalid_content in ("{", "[]"):
+            with self.subTest(content=invalid_content):
+                manifest_path.write_text(invalid_content)
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+
+    def test_skill_frontmatter_and_local_links_fail_closed(self) -> None:
+        skill_path = self.source_root / "skills" / SKILL_NAMES[0] / "SKILL.md"
+        original = skill_path.read_text()
+        invalid_frontmatter = [
+            "plain text without frontmatter\n",
+            "---\nname: example\ndescription: missing close\n",
+            "---\nname: [unterminated\n---\n",
+            "---\n- a sequence\n---\n",
+            "---\nname: other-skill\ndescription: valid\n---\n",
+            f"---\nname: {SKILL_NAMES[0]}\ndescription: '   '\n---\n",
+        ]
+        for content in invalid_frontmatter:
+            with self.subTest(frontmatter=content[:30]):
+                skill_path.write_text(content)
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+
+        skill_path.write_bytes(b"\xff\xfe")
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+        for destination in ("../outside.md", "missing-resource.md"):
+            with self.subTest(destination=destination):
+                skill_path.write_text(original + f"\n[resource]({destination})\n")
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+
+        skill_path.write_text(original)
+
+    def test_escaped_links_are_ignored_and_image_resources_are_checked(self) -> None:
+        skill_path = self.source_root / "skills" / SKILL_NAMES[0] / "SKILL.md"
+        original = skill_path.read_text()
+        escaped_link = "\\" + "[literal](missing-resource.md)"
+        skill_path.write_text(original + f"\n{escaped_link}\n")
+        self.assertEqual(set(validate_distribution(self.source_root)), set(SKILL_NAMES))
+
+        skill_path.write_text(original + "\n![image](missing-image.png)\n")
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+        even_backslashes = "\\\\" + "[link](missing-resource.md)"
+        skill_path.write_text(original + f"\n{even_backslashes}\n")
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+    def test_skill_policy_link_and_included_local_resource_are_validated(self) -> None:
+        skill_dir = self.source_root / "skills" / SKILL_NAMES[0]
+        skill_path = skill_dir / "SKILL.md"
+        original_skill = skill_path.read_text()
+        policy_url = (
+            "https://github.com/danielbyon/development-process/blob/"
+            f"{POLICY_REVISION}/docs/PROCESS.md"
+        )
+        skill_path.write_text(original_skill.replace(policy_url, "https://example.com/policy"))
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+        resource = skill_dir / "reference.md"
+        resource.write_text("Included local reference.\n")
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["skills"][0]["files"].append("reference.md")
+        manifest_path.write_text(json.dumps(manifest))
+        skill_path.write_text(original_skill + "\n[reference](reference.md)\n")
+        self.assertIn(SKILL_NAMES[0], validate_distribution(self.source_root))
+
+    def test_official_validator_rejection_and_missing_copy_are_reported(self) -> None:
+        skill_path = self.source_root / "skills" / SKILL_NAMES[0] / "SKILL.md"
+        original_skill = skill_path.read_text()
+        skill_path.write_text(original_skill + "\n[TODO: remove this placeholder]\n")
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+        skill_path.write_text(original_skill)
+        validator = self.source_root / "scripts" / "vendor" / "quick_validate.py"
+        original_validator = validator.read_bytes()
+        validator.unlink()
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+        validator.write_bytes(original_validator)
+
+    def test_invalid_skill_metadata_is_rejected(self) -> None:
+        metadata_path = (
+            self.source_root
+            / "skills"
+            / SKILL_NAMES[0]
+            / "agents"
+            / "openai.yaml"
+        )
+        original = metadata_path.read_text()
+        for content in ("interface: [invalid\n", "{}\n"):
+            with self.subTest(metadata=content):
+                metadata_path.write_text(content)
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+        metadata_path.write_text(original)
+
+    def test_missing_symlinked_and_non_file_skill_sources_are_refused(self) -> None:
+        skill_dir = self.source_root / "skills" / SKILL_NAMES[0]
+        metadata_path = skill_dir / "agents" / "openai.yaml"
+        original = metadata_path.read_bytes()
+        in_repo_target = self.source_root / "skills" / SKILL_NAMES[1] / "agents" / "openai.yaml"
+        outside_target = self.temp_root / "outside-openai.yaml"
+        outside_target.write_bytes(original)
+
+        for kind in ("missing", "symlink-inside", "symlink-outside", "directory"):
+            with self.subTest(kind=kind):
+                if kind == "missing":
+                    metadata_path.unlink()
+                elif kind == "symlink-inside":
+                    metadata_path.unlink()
+                    metadata_path.symlink_to(in_repo_target)
+                elif kind == "symlink-outside":
+                    metadata_path.unlink()
+                    metadata_path.symlink_to(outside_target)
+                else:
+                    metadata_path.unlink()
+                    metadata_path.mkdir()
+
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+
+                if metadata_path.is_symlink() or metadata_path.is_file():
+                    metadata_path.unlink()
+                elif metadata_path.is_dir():
+                    metadata_path.rmdir()
+                metadata_path.write_bytes(original)
+
+    def test_skill_source_directory_symlink_is_refused(self) -> None:
+        skill_dir = self.source_root / "skills" / SKILL_NAMES[0]
+        backup = self.temp_root / "original-skill"
+        other_skill = self.source_root / "skills" / SKILL_NAMES[1]
+        skill_dir.rename(backup)
+        skill_dir.symlink_to(other_skill, target_is_directory=True)
+
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+        skill_dir.unlink()
+        backup.rename(skill_dir)
 
     def test_archives_are_deterministic_separate_and_provenanced(self) -> None:
         first = build_packages(
@@ -140,6 +322,30 @@ class SkillDistributionTests(unittest.TestCase):
     def test_blank_inflight_policy_pin_fails_closed(self) -> None:
         with self.assertRaises(DistributionError):
             resolve_task_policy(self.source_root, "")
+
+    def test_policy_command_preserves_a_supplied_historical_pin(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = main(
+                [
+                    "policy",
+                    "--root",
+                    str(self.source_root),
+                    "--task-policy-revision",
+                    HISTORICAL_POLICY_REVISION,
+                ]
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue().strip(), HISTORICAL_POLICY_REVISION)
+
+    def test_cli_reports_distribution_errors_without_traceback(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        manifest_path.write_text("not JSON")
+        error_output = io.StringIO()
+        with redirect_stderr(error_output):
+            result = main(["validate", "--root", str(self.source_root)])
+        self.assertEqual(result, 1)
+        self.assertIn("ERROR:", error_output.getvalue())
 
     def test_stage_first_install_is_idempotent_and_preserves_other_skills(self) -> None:
         archive = build_packages(
@@ -209,6 +415,90 @@ class SkillDistributionTests(unittest.TestCase):
                 staging_root,
                 expected_policy_revision=POLICY_REVISION,
             )
+        self.assertFalse((staging_root / ".agents").exists())
+
+    def test_staging_initialization_refuses_a_nonempty_root(self) -> None:
+        staging_root = self.temp_root / "nonempty-staging"
+        staging_root.mkdir()
+        existing_file = staging_root / "README.md"
+        existing_file.write_text("keep this file\n")
+
+        with self.assertRaises(DistributionError):
+            initialize_staging_root(self.source_root, staging_root)
+
+        self.assertEqual(existing_file.read_text(), "keep this file\n")
+        self.assertFalse((staging_root / ".codex-skill-staging.json").exists())
+
+    def test_staging_root_must_not_overlap_source_repository(self) -> None:
+        for staging_root in (self.source_root, self.temp_root):
+            with self.subTest(root=staging_root.name):
+                with self.assertRaises(DistributionError):
+                    initialize_staging_root(self.source_root, staging_root)
+
+    def test_staging_layout_refuses_non_directory_agents_paths(self) -> None:
+        archive = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        for kind in ("agents-file", "skills-file"):
+            with self.subTest(kind=kind):
+                staging_root = self.temp_root / kind
+                staging_root.mkdir()
+                initialize_staging_root(self.source_root, staging_root)
+                agents = staging_root / ".agents"
+                if kind == "agents-file":
+                    agents.write_text("not a directory\n")
+                else:
+                    agents.mkdir()
+                    (agents / "skills").write_text("not a directory\n")
+
+                with self.assertRaises(DistributionError):
+                    install_archive(
+                        self.source_root,
+                        archive,
+                        staging_root,
+                        expected_policy_revision=POLICY_REVISION,
+                    )
+
+    def test_skill_target_symlink_is_never_followed(self) -> None:
+        archive = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        staging_root = self.temp_root / "staging"
+        staging_root.mkdir()
+        initialize_staging_root(self.source_root, staging_root)
+        outside = self.temp_root / "outside-skill"
+        outside.mkdir()
+        skills_dir = staging_root / ".agents" / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / archive.stem).symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaises(DistributionError):
+            install_archive(
+                self.source_root,
+                archive,
+                staging_root,
+                expected_policy_revision=POLICY_REVISION,
+            )
+
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_invalid_staging_marker_is_refused(self) -> None:
+        archive = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        staging_root = self.temp_root / "staging"
+        staging_root.mkdir()
+        initialize_staging_root(self.source_root, staging_root)
+        (staging_root / ".codex-skill-staging.json").write_text("{}\n")
+
+        with self.assertRaises(DistributionError):
+            install_archive(
+                self.source_root,
+                archive,
+                staging_root,
+                expected_policy_revision=POLICY_REVISION,
+            )
+
         self.assertFalse((staging_root / ".agents").exists())
 
     def test_personal_skill_path_is_refused_without_writing_into_it(self) -> None:
@@ -293,6 +583,62 @@ class SkillDistributionTests(unittest.TestCase):
         self.assertIn("Upgrade fixture marker.", installed_skill.read_text())
         self.assertEqual(sentinel.read_text(), "keep me\n")
 
+    def test_failed_upgrade_restores_the_previous_skill(self) -> None:
+        archive_v1 = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        staging_root = self.temp_root / "staging"
+        staging_root.mkdir()
+        initialize_staging_root(self.source_root, staging_root)
+        install_archive(
+            self.source_root,
+            archive_v1,
+            staging_root,
+            expected_policy_revision=POLICY_REVISION,
+        )
+        skill_path = self.source_root / "skills" / archive_v1.stem / "SKILL.md"
+        with skill_path.open("a") as skill:
+            skill.write("\nSecond committed source version.\n")
+        git(self.source_root, "add", str(skill_path.relative_to(self.source_root)))
+        git(self.source_root, "-c", "user.name=Issue 5 Test", "-c",
+            "user.email=issue5-test@example.invalid", "commit", "--quiet",
+            "-m", "Test rollback source")
+        archive_v2 = build_packages(
+            self.source_root,
+            self.temp_root / "packages-v2",
+            git(self.source_root, "rev-parse", "HEAD"),
+        )[0]
+
+        target = staging_root / ".agents" / "skills" / archive_v1.stem
+        installed_skill = target / "SKILL.md"
+        original_content = installed_skill.read_text()
+        original_replace = distribution_module.os.replace
+        replace_calls = 0
+
+        def fail_second_replace(source: str | Path, destination: str | Path) -> None:
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 2:
+                raise OSError("simulated atomic promotion failure")
+            original_replace(source, destination)
+
+        with patch.object(
+            distribution_module.os,
+            "replace",
+            side_effect=fail_second_replace,
+        ):
+            with self.assertRaises(DistributionError):
+                install_archive(
+                    self.source_root,
+                    archive_v2,
+                    staging_root,
+                    expected_policy_revision=POLICY_REVISION,
+                    upgrade=True,
+                )
+
+        self.assertEqual(replace_calls, 3)
+        self.assertEqual(installed_skill.read_text(), original_content)
+
     def test_unknown_existing_skill_is_never_overwritten(self) -> None:
         archive = build_packages(
             self.source_root, self.artifacts, self.source_revision
@@ -367,6 +713,40 @@ class SkillDistributionTests(unittest.TestCase):
                 self.source_revision,
             )
 
+    def test_archive_duplicate_member_is_refused(self) -> None:
+        archive = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        with zipfile.ZipFile(archive, "a") as package:
+            package.writestr(f"{archive.stem}/SKILL.md", b"duplicate member\n")
+        sidecar_path = archive.with_suffix(".provenance.json")
+        sidecar = json.loads(sidecar_path.read_text())
+        sidecar["archive_sha256"] = hashlib.sha256(archive.read_bytes()).hexdigest()
+        sidecar_path.write_text(json.dumps(sidecar))
+
+        with self.assertRaises(DistributionError):
+            verify_packages(self.source_root, self.artifacts, self.source_revision)
+
+    def test_missing_and_symlinked_provenance_sidecars_are_refused(self) -> None:
+        archive = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        sidecar_path = archive.with_suffix(".provenance.json")
+        original = sidecar_path.read_bytes()
+
+        sidecar_path.unlink()
+        with self.assertRaises(DistributionError):
+            verify_packages(self.source_root, self.artifacts, self.source_revision)
+
+        external_sidecar = self.temp_root / "external-provenance.json"
+        external_sidecar.write_bytes(original)
+        sidecar_path.symlink_to(external_sidecar)
+        with self.assertRaises(DistributionError):
+            verify_packages(self.source_root, self.artifacts, self.source_revision)
+
+        sidecar_path.unlink()
+        sidecar_path.write_bytes(original)
+
     def test_archive_symlink_member_is_refused(self) -> None:
         archive = build_packages(
             self.source_root, self.artifacts, self.source_revision
@@ -392,6 +772,36 @@ class SkillDistributionTests(unittest.TestCase):
 
         with self.assertRaises(DistributionError):
             verify_packages(self.source_root, self.artifacts, self.source_revision)
+
+    def test_provenance_sidecar_metadata_is_verified(self) -> None:
+        archive = build_packages(
+            self.source_root, self.artifacts, self.source_revision
+        )[0]
+        sidecar_path = archive.with_suffix(".provenance.json")
+        original = json.loads(sidecar_path.read_text())
+        mutations = [
+            ("schema", lambda value: value.update(schema_version=2)),
+            ("Skill identity", lambda value: value.update(skill_name="other")),
+            ("policy pin", lambda value: value.update(policy_revision=HISTORICAL_POLICY_REVISION)),
+            ("source revision", lambda value: value.update(source_revision="invalid")),
+            ("source paths", lambda value: value.update(source_files={})),
+            ("payload hash set", lambda value: value.update(payload_sha256={})),
+            ("archive digest", lambda value: value.update(archive_sha256="0" * 64)),
+            ("hash scope", lambda value: value.update(hash_scope="recursive")),
+        ]
+        for label, mutate in mutations:
+            with self.subTest(field=label):
+                provenance = copy.deepcopy(original)
+                mutate(provenance)
+                sidecar_path.write_text(json.dumps(provenance))
+                with self.assertRaises(DistributionError):
+                    verify_packages(
+                        self.source_root,
+                        self.artifacts,
+                        self.source_revision,
+                    )
+
+        sidecar_path.write_text(json.dumps(original))
 
     def test_staging_rechecks_payload_after_archive_verification(self) -> None:
         archive = build_packages(
@@ -475,6 +885,45 @@ class SkillDistributionTests(unittest.TestCase):
                 self.artifacts,
                 HISTORICAL_POLICY_REVISION,
             )
+
+    def test_package_refuses_uncommitted_skill_changes(self) -> None:
+        skill_path = self.source_root / "skills" / SKILL_NAMES[0] / "SKILL.md"
+        with skill_path.open("a") as skill:
+            skill.write("\nUncommitted source change.\n")
+        with self.assertRaises(DistributionError):
+            build_packages(
+                self.source_root,
+                self.artifacts,
+                self.source_revision,
+            )
+
+    def test_package_refuses_manifest_changes_after_declared_source_commit(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["skills"][0]["files"].reverse()
+        manifest_path.write_text(json.dumps(manifest))
+
+        with self.assertRaises(DistributionError):
+            build_packages(
+                self.source_root,
+                self.artifacts,
+                self.source_revision,
+            )
+
+    def test_atomic_package_write_removes_temporary_file_on_failure(self) -> None:
+        with patch.object(
+            distribution_module.os,
+            "replace",
+            side_effect=OSError("simulated atomic replace failure"),
+        ):
+            with self.assertRaises(OSError):
+                distribution_module._atomic_write(
+                    self.artifacts / "package.zip",
+                    b"package content",
+                )
+
+        self.assertFalse((self.artifacts / "package.zip").exists())
+        self.assertEqual(list(self.artifacts.glob("*.tmp")), [])
 
 
 if __name__ == "__main__":

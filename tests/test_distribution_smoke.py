@@ -13,6 +13,17 @@ from test_skill_distribution import (
 )
 
 
+def python_environment() -> dict[str, str]:
+    python_paths = [str(ROOT)]
+    inherited_python_path = os.environ.get("PYTHONPATH")
+    if inherited_python_path:
+        python_paths.append(inherited_python_path)
+    return {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(python_paths),
+    }
+
+
 class DistributionSmokeTests(unittest.TestCase):
     def test_cli_packages_verifies_and_stages_shipped_skill_in_temp_codex_root(self) -> None:
         with tempfile.TemporaryDirectory(prefix="issue5-workflow-") as directory:
@@ -32,7 +43,7 @@ class DistributionSmokeTests(unittest.TestCase):
                 check=True,
                 capture_output=True,
                 text=True,
-                env={**os.environ, "PYTHONPATH": str(ROOT)},
+                env=python_environment(),
             )
             unrelated = staging_root / ".agents" / "skills" / "unrelated"
             unrelated.mkdir(parents=True)
@@ -64,7 +75,7 @@ class DistributionSmokeTests(unittest.TestCase):
                     check=True,
                     capture_output=True,
                     text=True,
-                    env={**os.environ, "PYTHONPATH": str(ROOT)},
+                    env=python_environment(),
                 )
 
             archive = package_dir / "delegation-executor.zip"
@@ -80,7 +91,7 @@ class DistributionSmokeTests(unittest.TestCase):
                 check=True,
                 capture_output=True,
                 text=True,
-                env={**os.environ, "PYTHONPATH": str(ROOT)},
+                env=python_environment(),
             )
             self.assertIn("installed", staged.stdout)
             self.assertTrue(
@@ -106,7 +117,7 @@ class DistributionSmokeTests(unittest.TestCase):
                 check=True,
                 capture_output=True,
                 text=True,
-                env={**os.environ, "PYTHONPATH": str(ROOT)},
+                env=python_environment(),
             )
             self.assertIn("unchanged", repeat.stdout)
 
