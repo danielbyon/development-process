@@ -1,10 +1,10 @@
 # Scenario validation
 
-These cases check the decisions the `development-orchestrator` Skill must make. The first five are Issue #2 acceptance cases; the last two cover corrective variants. Treat each setup as a frozen scenario snapshot. Run each case in a fresh Codex execution with the Skill loaded from this directory. If the host cannot load this unpublished Skill, include the exact current `SKILL.md` text in that execution. Do not expose expected outcomes to the evaluator before it responds.
+These cases check the decisions the `development-orchestrator` Skill must make. The first seven preserve Issue #2 acceptance and corrective evidence; the final three are Issue #12 plan-first regressions. Treat each setup as a frozen scenario snapshot. Run each case in a fresh Codex execution with the Skill loaded from this directory. If the host cannot load this unpublished Skill, include the exact current `SKILL.md` text in that execution. Do not expose expected outcomes to the evaluator before it responds.
 
 Record the evaluator execution ID, its observed result, and the relevant response excerpt for every case. A fixture is only a test input; leave a case `UNVERIFIED` until it has been run.
 
-The policy pin for these cases is `beb7c955b054dafa3eb1a45e5e13e519720e654a`.
+The first seven historical Issue #2 cases pin `beb7c955b054dafa3eb1a45e5e13e519720e654a`. Their recorded PASS observations were produced against that earlier policy/Skill and do not verify this revised Skill. The three new Issue #12 cases pin `42b0ea58b5fff57deadbe5c360ebf9ea28ea2b08` and remain `UNVERIFIED` until separately executed.
 
 ## NEXT-01: `next task` with active local work
 
@@ -120,7 +120,7 @@ The policy pin for these cases is `beb7c955b054dafa3eb1a45e5e13e519720e654a`.
 
 ---
 
-The following Issue #12 scenarios exercise the proposed plan-first clarification. They supplement the historical cases above and do not retroactively change those recorded evaluator results or their pinned policy revision.
+The following Issue #12 scenarios exercise the plan-first policy at immutable commit `42b0ea58b5fff57deadbe5c360ebf9ea28ea2b08`. They supplement the historical cases above and do not retroactively change those recorded evaluator results or their pinned policy revision.
 
 ## PLAN-READONLY-01: new task has no worktree in Codex Plan mode
 
