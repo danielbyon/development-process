@@ -1,0 +1,3 @@
+interface:
+  display_name: "Development Review"
+  short_description: "Review changes, PR feedback, and merge readiness"
