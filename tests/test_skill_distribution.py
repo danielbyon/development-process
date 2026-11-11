@@ -195,18 +195,31 @@ class SkillDistributionTests(unittest.TestCase):
         for skill_name in SKILL_NAMES:
             skill_path = self.source_root / "skills" / skill_name / "SKILL.md"
             for revision, path in immutable_link.findall(skill_path.read_text()):
-                result = subprocess.run(
-                    ["git", "cat-file", "-e", f"{revision}:{path}"],
+                revision_type = subprocess.run(
+                    ["git", "cat-file", "-t", revision],
                     cwd=self.source_root,
                     capture_output=True,
                     text=True,
                 )
                 self.assertEqual(
-                    result.returncode,
-                    0,
-                    f"{skill_path.relative_to(self.source_root)} links to missing "
-                    "local Git object "
-                    f"{revision}:{path}: {result.stderr.strip()}",
+                    revision_type.stdout.strip(),
+                    "commit",
+                    f"{skill_path.relative_to(self.source_root)} uses a missing or "
+                    f"non-commit revision {revision}: {revision_type.stderr.strip()}",
+                )
+                target_type = subprocess.run(
+                    ["git", "cat-file", "-t", f"{revision}:{path}"],
+                    cwd=self.source_root,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(
+                    target_type.stdout.strip(),
+                    "blob",
+                    f"{skill_path.relative_to(self.source_root)} points to "
+                    f"{revision}:{path}, whose object type is "
+                    f"{target_type.stdout.strip() or 'missing'}: "
+                    f"{target_type.stderr.strip()}",
                 )
                 checked_links += 1
 
