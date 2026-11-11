@@ -1,6 +1,6 @@
 # Decision record
 
-This record summarizes decisions present in the owner-approved v1.0 contract. The contract in [docs/PROCESS.md](PROCESS.md) remains authoritative.
+This record summarizes foundational v1.0 decisions and subsequent owner-approved amendments. The contract in [docs/PROCESS.md](PROCESS.md) remains authoritative.
 
 ## Provenance
 
@@ -21,6 +21,8 @@ The issue also identifies three final amendments: tasks use an isolated worktree
 9. **Preserve obligations when work is deferred.** Record criterion identifiers, content, rationale, and status; transfer tracking only when authorized. Distinguish merge permission from a substantive waiver and keep failed or unrun checks truthful.
 10. **Scope Issue #1 to the repository foundation.** Do not implement or install the three Skills or an installer here. Existing follow-up issues #2–#5 own those slices. The policy must have an owner-approved immutable commit revision before Skills are distributed.
 11. **Adopt prospectively and clean up only with evidence.** Do not rewrite historical delegations. Before deleting a worktree, prove that no valuable unmerged work or sole-copy evidence would be lost.
+
+12. **Owner-controlled MCP lifecycle (Issue #7, approved 2026-11-10).** Codex is responsible for locating and safely updating only the active MCP configuration, validating changes statically, and reporting the exact file, changes, validation, and pending checks. The owner alone restarts and reconnects the shared MCP server. **Rationale:** autonomous restarts can interrupt active MCP connections, ChatGPT/Codex sessions, and unrelated tasks. **Rejected alternative:** Codex-initiated lifecycle actions, directly or through scripts, tools, or recovery wrappers, even for stale registrations, failed connections, and cleanup. **Failure modes:** editing an inactive config, damaging unrelated entries, disrupting active connections, and falsely treating the old server view as proof of activation. A configuration change remains pending until the owner restarts/reconnects; Codex then performs read-only verification.
 
 ## Rejected alternatives and constraints
 
