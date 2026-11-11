@@ -1,6 +1,6 @@
 ---
 name: development-review
-description: Review implemented software changes, GitHub feedback, merge readiness, and owner-authorized merge or closeout against the approved development policy.
+description: Use when a user says `implemented`, asks for `review feedback` or merge readiness, says `merge`, or asks to `close this out`.
 ---
 
 # Development review
@@ -13,14 +13,15 @@ The issue defines accepted scope, and the pinned policy governs roles and proces
 
 - Read [`docs/PROCESS.md` at policy commit `beb7c955b054dafa3eb1a45e5e13e519720e654a`](https://github.com/danielbyon/development-process/blob/beb7c955b054dafa3eb1a45e5e13e519720e654a/docs/PROCESS.md) before applying the workflow. Verify that any local policy copy has the same source revision; otherwise read the pinned file through GitHub. Do not silently adopt a newer policy.
 - Verify the repository, issue, task identity, worktree, branch, baseline, HEAD, PR, and candidate paths from current evidence. Read relevant instructions and accepted specifications.
-- Read the final source and tests directly through gpt-repo-local or the GitHub connection for the repository owner. Reports and summaries do not establish source-review evidence. If source or tests are unavailable, return `BLOCKED` for readiness.
+- Always inspect the candidate source directly through gpt-repo-local or the GitHub connection for the repository owner. Reports and summaries do not establish source-review evidence. If source is unavailable, return `BLOCKED` for readiness.
+- Inspect applicable source-adjacent tests and validation evidence. If applicable tests exist but cannot be inspected, record them as `UNVERIFIED` and return `BLOCKED`. If no tests apply, such as for a documentation-only change, record that determination and its rationale and assess the applicable validation evidence. Do not block solely because no tests apply, and do not report absent or unrun tests as passing.
 - Separate evidence from inference. Report unavailable or stale evidence as `UNVERIFIED` until checked.
 
 ## Review a completed change
 
 When the user says `implemented` or asks for readiness:
 
-1. Read the accepted issue and approved plan. Verify the candidate identity and compare the complete change with accepted scope, exclusions, and the approved plan. Inspect final source and tests directly.
+1. Read the accepted issue and approved plan. Verify the candidate identity and compare the complete change with accepted scope, exclusions, and the approved plan. Inspect final source, applicable tests, and validation evidence directly.
 2. Check each PAC/TAC and required validation criterion. Record each as `PASS`, `FAIL`, `UNVERIFIED`, or `WAIVED` only when a real authorized waiver applies. Preserve the actual failure or unrun state when an integration exception is granted.
 3. Verify a separate, non-authoring execution reviewed the full diff. Confirm that later corrections also received independent review and that the cumulative evidence covers the final candidate. Prefer local Cubic; use a separate Codex execution when local Cubic is unavailable. Do not assume a human review will occur. Cubic CI quota exhaustion does not block when independent local review is complete.
 4. Assess findings against policy §6. Fix or factually disprove a confirmed P0/P1 defect that the candidate introduces, materially worsens, or includes in accepted scope. A true in-scope P0/P1 cannot be waived. Fix material in-scope P2 findings. Track justified out-of-scope P2 deferrals; report P3 findings as advisory unless evidence supports elevating them.
@@ -37,7 +38,7 @@ When the user says `implemented` or asks for readiness:
 Use exactly one verdict:
 
 - `READY`: all mandatory gates pass.
-- `BLOCKED`: a mandatory gate fails or remains unverified, source inspection is unavailable, or independent review does not cover the final candidate.
+- `BLOCKED`: a mandatory gate fails or remains unverified, source inspection or applicable test inspection is unavailable, or independent review does not cover the final candidate.
 - `READY WITH EXPLICIT EXCEPTION`: the owner has authorized a policy-permitted integration exception, every non-waivable gate passes, and the report states the unmet criteria, evidence, residual risk, permitted scope, and follow-up.
 
 Authorization does not change a failed or unverified criterion into a pass. A permitted exception cannot waive required source inspection, independent review, a confirmed in-scope P0/P1 defect, or an approved security boundary.
@@ -58,8 +59,10 @@ When the owner says `merge`, `close this out`, or gives another explicit merge i
 1. Independently determine current-head readiness from direct source and test inspection, independent review, required CI, issue scope, and policy. Merge only for `READY` or a `READY WITH EXPLICIT EXCEPTION` whose exception has separate owner authorization. If a mandatory gate fails or remains unverified, do not merge even when the owner authorized it.
 2. Before merging, confirm the PR head, target branch, checks, and authorization still match the inspected candidate. ChatGPT may execute the merge under the owner's authorization. Codex does not approve or merge its own work.
 3. After the merge, verify the merge commit and applicable checks. Do not require a new post-merge pipeline unless an existing policy or repository requirement calls for one. Close the implementation issue only when required post-merge checks pass and accepted scope is complete. Keep deferred qualification, product, and release obligations tracked with their identifiers and status.
-4. Preserve the rationale, findings, review identities, CI evidence, and any sole-copy artifacts before cleanup. Remove a worktree only after confirming it contains no valuable unmerged changes or sole-copy evidence. If cleanup safety is uncertain, report `MERGED — CLEANUP PENDING` and retain the worktree.
-5. Never start, stop, restart, reload, kill, reconnect, or replace an MCP server. For a required MCP lifecycle action, state the exact owner action and leave it to the owner.
+4. Verify the exact task worktree identity and preserve the rationale, findings, review identities, CI evidence, and any sole-copy artifacts before cleanup. Remove only that verified worktree after confirming it contains no valuable unmerged changes or sole-copy evidence. If cleanup safety is uncertain, report `MERGED — CLEANUP PENDING` and retain the worktree.
+5. If a task-specific MCP root registration exists, verify its identity and discover and validate the exact active MCP configuration file before changing it. Remove only that registration and preserve unrelated configuration. Validate the change statically or offline; do not assume a configuration path or claim that the active server recognizes a change that has not been verified. If no task registration exists, record that determination.
+6. If authorized cleanup is blocked by available tooling, provide exact guarded operator commands using verified absolute paths and the precise registration identity. Do not use broad or unguarded removal commands. Retain the worktree and report `MERGED — CLEANUP PENDING` while a stale registration, unverified config change, or other cleanup risk remains.
+7. If activation requires a restart, report `MCP RESTART REQUIRED — OWNER ACTION` with the configuration path, exact changes, validation results, and pending verification. Never start, stop, restart, reload, kill, reconnect, replace, or otherwise manage an MCP server. Leave any required lifecycle action to the owner.
 
 ## Response format
 

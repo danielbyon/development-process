@@ -19,6 +19,7 @@ Run record: `PASS`
 - Evaluation role and ID: Bulbasaur, `01a1c90e-b18c-7d80-8ca2-0d049cae6513`.
 - Observed result: `BLOCKED` because the reviewer could not inspect the candidate source or tests.
 - Evidence: The evaluator rejected author reports and green check summaries as substitutes for direct inspection.
+- Verbatim evaluator excerpt: “The source and test files aren’t available, so I can’t inspect the final change or verify it against Issue #48’s full accepted scope.”
 
 ## P1-IN-SCOPE: accepted authorization defect
 
@@ -35,6 +36,7 @@ Run record: `PASS`
 - Evaluation role and ID: Charmander, `01a1c90e-b1c2-7fc1-a1aa-0e3234145f62`.
 - Observed result: `BLOCKED` for the confirmed in-scope P1; the unrelated parser finding was kept out of scope.
 - Evidence: The evaluator rejected downgrading or waiving the accepted authorization defect.
+- Verbatim evaluator excerpt: “The missing authorization check violates Issue #49’s accepted scope.”
 
 ## CUBIC-DELTA: review coverage across corrections
 
@@ -56,6 +58,7 @@ Run record: `PASS`
 - Evaluation role and ID: Squirtle, `01a1c90e-b1e4-7f73-a461-71f262edd842`.
 - Observed result: Snapshot A was `READY`; Snapshot B was `BLOCKED` for missing delta review.
 - Evidence: The initial review and separate Codex delta review cumulatively covered Snapshot A. Cubic CI quota exhaustion alone did not block it.
+- Verbatim evaluator excerpt: “With no independent review of the correction delta, the final candidate lacks required review coverage, even though the other criteria pass.”
 
 ## CI-MERGE-SHA: valid synthetic merge evidence
 
@@ -72,6 +75,7 @@ Run record: `PASS`
 - Evaluation role and ID: Pikachu, `01a1c90e-b234-70c2-b36b-5f2964a9e3f5`.
 - Observed result: The synthetic merge checks remained valid for the stated PR head and base; the SHA difference alone did not require a rerun.
 - Evidence: The evaluator verified the first and second parents against the event base and PR head.
+- Verbatim evaluator excerpt: “Rerunning checks is unnecessary before assessing this CI evidence.”
 
 ## CI-STALE-BASE: target advanced after testing
 
@@ -88,6 +92,7 @@ Run record: `PASS`
 - Evaluation role and ID: Eevee, `01a1c90e-b300-7f91-a884-a94e8194c132`.
 - Observed result: `BLOCKED` pending integration checks against the advanced target.
 - Evidence: The evaluator kept the source review and independent review current while marking affected CI evidence unverified.
+- Verbatim evaluator excerpt: “The existing green run therefore does not establish current integration readiness.”
 
 ## CI-SKIPPED: green job skipped a required suite
 
@@ -104,6 +109,7 @@ Run record: `PASS`
 - Evaluation role and ID: Snorlax, `01a1c90e-b2c8-7ed1-9070-00c17b972d7d`.
 - Observed result: `BLOCKED` because the required unit-test suite was skipped.
 - Evidence: The evaluator treated the suite as unverified despite the green workflow conclusion.
+- Verbatim evaluator excerpt: “The required unit-test suite is an acceptance criterion. It was skipped, and no separate run exists, so that criterion is **UNVERIFIED**.”
 
 ## EXCEPTION-TRUTH: permitted qualification exception
 
@@ -120,6 +126,7 @@ Run record: `PASS`
 - Evaluation role and ID: Mewtwo, `01a1c911-0721-7d52-ac5d-e3f55e7c960c`.
 - Observed result: `READY WITH EXPLICIT EXCEPTION`; `TAC-HW-2` remained `UNVERIFIED`, and issue #72 stayed as follow-up.
 - Evidence: The evaluator preserved the unrun qualification state and recorded the owner's exception authorization.
+- Verbatim evaluator excerpt: “The owner authorized the policy-permitted integration exception and linked follow-up issue **#72**.”
 
 ## FEEDBACK: mixed PR comments
 
@@ -141,6 +148,7 @@ Run record: `PASS`
 - Evaluation role and ID: Psyduck, `01a1c916-cbfe-72e1-856c-a813a3747705`.
 - Observed result: The null check was valid, unresolved, and in scope; the rename was resolved, the API comment was a false positive, and the formatting request was out of scope.
 - Evidence: The evaluator returned a focused Codex correction prompt. It treated the supplied source and review details as a frozen, directly inspected snapshot.
+- Verbatim evaluator excerpt: “Current head `5bc7a10` still lacks a null check required by Issue #51, so a correction is needed before this feedback can be closed.”
 - Superseded attempt: `01a1c911-06d4-7082-b96f-a35ef00da89e` consulted the live checkout and was not counted.
 
 ## POSTMERGE-FAIL: required post-merge check fails
@@ -158,6 +166,7 @@ Run record: `PASS`
 - Evaluation role and ID: Jigglypuff, `01a1c915-526d-75a3-8174-b21dd46670a1`.
 - Observed result: `BLOCKED`; closeout stayed open and the issue and worktree were retained.
 - Evidence: The required post-merge check had failed, so the evaluator did not close the issue.
+- Verbatim evaluator excerpt: “The required post-merge check failed.”
 - Superseded attempt: `01a1c912-3351-7353-8780-742c0ed3a1d9` surfaced the expected fixture while searching and was not counted.
 
 ## CLEANUP-RETENTION: preserve sole-copy evidence
@@ -175,6 +184,7 @@ Run record: `PASS`
 - Evaluation role and ID: Gengar, `01a1c912-33ba-7182-9098-71d2f49eb85e`.
 - Observed result: `MERGED — CLEANUP PENDING`; the worktree and sole-copy evidence were retained.
 - Evidence: The evaluator found no verified backup for the review artifacts or unmerged user change.
+- Verbatim evaluator excerpt: “The PR is merged and checks passed, but cleanup is unsafe: the worktree contains the only copy of independent-review artifacts and an unmerged user change, and no verified backup exists.”
 
 ## POLICY-PIN: local policy changed
 
@@ -191,5 +201,6 @@ Run record: `PASS`
 - Evaluation role and ID: Dragonite, `01a1c91c-c338-7163-93ea-b90aa210e807`.
 - Observed result: The review remained pinned to `beb7c955b054dafa3eb1a45e5e13e519720e654a`; candidate readiness was `BLOCKED` because source and tests were unavailable.
 - Evidence: The evaluator rejected an unapproved policy migration and used the supplied §12 policy excerpt.
+- Verbatim evaluator excerpt: “Do not switch to the newer local policy: the task pins the earlier revision, and no owner-approved migration exists.”
 - Superseded attempt: `01a1c916-ccc5-7513-9346-80983c5ac7f4` ran before the policy-conflict guard correction and was not counted for the final Skill version.
 - Superseded attempt: `01a1c912-3396-7d60-86e7-7cd9a4672719` substituted live checkout state for the frozen snapshot and was not counted.
