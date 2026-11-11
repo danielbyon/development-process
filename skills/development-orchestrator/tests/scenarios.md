@@ -117,3 +117,43 @@ The policy pin for these cases is `beb7c955b054dafa3eb1a45e5e13e519720e654a`.
 **Observed result and evidence:** The fresh evaluator executed the scenario and returned PASS. The evaluator ID and response excerpt follow.
 
 **Final run evidence:** Evaluator `01a1c88b-48e3-7591-bb7c-079bc85ca6f2` selected native V3 materialization for the verified worktree while keeping Codex execution manual. Excerpt: “An unavailable queued runner does not prevent V3 materialization.”
+
+---
+
+The following Issue #12 scenarios exercise the proposed plan-first clarification. They supplement the historical cases above and do not retroactively change those recorded evaluator results or their pinned policy revision.
+
+## PLAN-READONLY-01: new task has no worktree in Codex Plan mode
+
+**Setup:** Issue #12's approved clarification is in effect for a new task. The accepted task issue, repository source, and baseline commit are verifiable in the primary checkout, but no task branch/worktree exists. The primary checkout contains unrelated work that must not be modified. Codex is in Plan mode; the accepted issue suggests branch `codex/issue-12-sample`. Formal Delegation v3 is not yet bound.
+
+**Prompt:**
+
+> next task: prepare my initial Codex Plan-mode prompt for the accepted issue. I want Codex to return a plan first and create its task worktree only after ChatGPT approves that plan.
+
+**Expected outcome:** The orchestrator provides a **read-only Plan-mode prompt** naming the verified source revision, accepted issue, expected baseline, proposed branch/worktree, and single bootstrap owner. It does not command Codex to create/edit files, branches, worktrees, MCP configuration, or delegation artifacts in Plan mode, and does not claim the proposed worktree already exists. It includes a **separate** post-approval execution-mode bootstrap handoff and preserves unrelated primary checkout state.
+
+**Status:** UNVERIFIED — requires a fresh non-authoring scenario execution against the new policy/Skill revision.
+
+## PLAN-APPROVAL-01: no worktree is not an approval blocker
+
+**Setup:** A new task's Plan-mode output fits the accepted issue, current verified repository source, expected baseline, review gates, and risk constraints. The plan explicitly schedules isolated worktree/branch creation during post-approval Agent mode. There is not yet a task worktree, and the plan makes no claim that one exists.
+
+**Prompt:**
+
+> codex plan: review this read-only plan and provide the approval or correction prompt. Do not require worktree creation in Plan mode.
+
+**Expected outcome:** The orchestrator does not reject solely for an absent worktree. It may return `APPROVE` when the rest of the plan and evidence satisfy the existing gate, but its pasteable implementation prompt requires execution-mode worktree bootstrap and verification before source changes or worktree-bound delegation. Unverified baseline, missing source, and unresolved material decisions remain blockers when material.
+
+**Status:** UNVERIFIED — requires a fresh non-authoring scenario execution against the new policy/Skill revision.
+
+## EXEC-DRIFT-01: post-approval bootstrap detects material baseline drift
+
+**Setup:** ChatGPT has approved a Codex plan against baseline commit `BASE-A` without a task worktree. Before Agent-mode bootstrap, the target branch has materially changed to `BASE-B` and invalidates a source interface or acceptance assumption. The task worktree has not yet been created.
+
+**Prompt:**
+
+> Prepare the post-approval Codex Agent-mode execution handoff for the approved plan. Create the isolated worktree only in Agent mode, verify the actual baseline and registration, and proceed if safe.
+
+**Expected outcome:** The handoff instructs the executor to create/verify worktree isolation, compare actual identity and baseline with the approved plan, and stop for ChatGPT reassessment when the drift is material. It never silently rebases the accepted plan onto a materially changed source, edits the dirty primary checkout, binds V3 to a proposed identity, or manages the MCP server lifecycle.
+
+**Status:** UNVERIFIED — requires a fresh non-authoring scenario execution against the new policy/Skill revision.
