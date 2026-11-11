@@ -4,6 +4,7 @@ import copy
 import io
 import hashlib
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -182,6 +183,34 @@ class SkillDistributionTests(unittest.TestCase):
         manifest_path.write_text(json.dumps(manifest))
         skill_path.write_text(original_skill + "\n[reference](reference.md)\n")
         self.assertIn(SKILL_NAMES[0], validate_distribution(self.source_root))
+
+    def test_immutable_github_links_resolve_from_local_git_objects(self) -> None:
+        """Check shipped Skill links against local commits without network access."""
+        immutable_link = re.compile(
+            r"https://github\.com/danielbyon/development-process/blob/"
+            r"([0-9a-f]{40})/([^\s?#)]+)"
+        )
+        checked_links = 0
+
+        for skill_name in SKILL_NAMES:
+            skill_path = self.source_root / "skills" / skill_name / "SKILL.md"
+            for revision, path in immutable_link.findall(skill_path.read_text()):
+                result = subprocess.run(
+                    ["git", "cat-file", "-e", f"{revision}:{path}"],
+                    cwd=self.source_root,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    f"{skill_path.relative_to(self.source_root)} links to missing "
+                    "local Git object "
+                    f"{revision}:{path}: {result.stderr.strip()}",
+                )
+                checked_links += 1
+
+        self.assertGreater(checked_links, 0, "No immutable repository links were checked")
 
     def test_official_validator_rejection_and_missing_copy_are_reported(self) -> None:
         skill_path = self.source_root / "skills" / SKILL_NAMES[0] / "SKILL.md"
