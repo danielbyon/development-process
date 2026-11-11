@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "policy_revision": "aa8dc7784641dd5416befdebc246ed081bfd7ade",
+  "skills": [
+    {
+      "name": "development-orchestrator",
+      "source_dir": "skills/development-orchestrator",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "development-review",
+      "source_dir": "skills/development-review",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    },
+    {
+      "name": "delegation-executor",
+      "source_dir": "skills/delegation-executor",
+      "files": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ]
+    }
+  ]
+}

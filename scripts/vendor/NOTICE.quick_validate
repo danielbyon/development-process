@@ -1,0 +1,7 @@
+The quick_validate.py file is vendored from OpenAI Codex at commit
+e58bf8f5233b51e7cd1679d947e3028c1ed91b06:
+codex-rs/skills/src/assets/samples/skill-creator/scripts/quick_validate.py
+
+It is distributed under the Apache License, Version 2.0. See
+LICENSE.quick_validate. The implementation-specific distribution checks in
+scripts/skill_distribution.py are maintained by this repository.
