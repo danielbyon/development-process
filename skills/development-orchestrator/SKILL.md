@@ -27,8 +27,11 @@ When asked to find or prepare the next task:
    - beneficiary, current problem, desired outcome, and why the work is timely;
    - source issues and specifications, scope, exclusions, PAC/TAC, and constraints;
    - risk classification, relevant failure modes, validation, and independent review.
-4. Prepare an isolated worktree and dedicated branch handoff. Use the branch name from the accepted issue or approved plan when one is specified; do not invent a replacement. Assign one bootstrap owner. Verify the real path, branch, base commit, clean baseline, and registered identity before binding a delegation.
-5. Prefer Delegation v3 only after verifying worktree-bound registration and a reliable execution path. Manual Codex execution is the default. If formal delegation cannot be established, provide a manual contract tied to the verified worktree and issue. Never bind work to a stale primary checkout or invent lineage.
+4. Prepare an isolated worktree and dedicated branch handoff. Use the branch name from the accepted issue or approved plan when one is specified; do not invent a replacement. Assign one bootstrap owner.
+   - For a new task, verify a clean starting state, dedicated branch, and isolated worktree.
+   - For a resumed task, verify the existing repository, worktree, branch, base, current HEAD, and task identity. Preserve legitimate in-progress changes; keep unrelated changes outside the task and do not discard them. Do not impose a clean-worktree requirement on resumed work.
+   - Before formal delegation, verify the actual repository/worktree identity and registered identity.
+5. Prefer native Delegation v3 task materialization when worktree-bound registration and the required V3 administration are available and verified. Task materialization and execution mode are separate choices: a reliable queued runner is not required, and manual Codex execution remains the default. If formal V3 materialization cannot be established, provide a truthful manual task contract tied to the verified worktree and issue. Never bind work to a stale primary checkout or invent lineage.
 
 For new-project planning, design decisions, or delegation preparation, gather repository evidence first. Ask only about choices that materially affect scope, architecture, security, or acceptance; resolve routine technical choices within the approved design and leave material owner decisions with the owner.
 
