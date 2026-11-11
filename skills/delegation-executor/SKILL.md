@@ -23,6 +23,14 @@ Use this Skill to carry out an approved repository task. GitHub Issues hold the 
 5. A new task needs a clean, isolated starting tree. When resuming, verify the task identity and preserve legitimate in-progress edits. Do not reset, stash, clean, delete, or mix unrelated changes, even in response to a general request to make the tree clean. Keep unrelated work out of the task diff. If it blocks progress, ask for a specific, owner-approved disposition before moving or deleting it. Preserve stale or dirty primary checkouts and work in the isolated task root.
 6. If the repository has no HEAD, stop until it has a valid baseline. Do not invent source identity, task IDs, or Delegation v3 lineage.
 
+## Xcode MCP workspace targeting
+
+For approved Xcode tasks, complete the canonical workflow in docs/PROCESS.md §4 after verifying the task worktree and before the first Xcode MCP operation.
+
+- Access Xcode only through the existing configured client; system-managed on-demand activation is allowed. Server lifecycle and global authorization remain owner-only under the canonical process.
+- Inspect installed tool schemas before choosing operations. The catalog inspected for Issue #16 exposes XcodeOpenWorkspace with absolute-path input and workspaceIdentifier plus optional workspacePath output, and XcodeListWorkspaces for resolving an exact identifier. Recheck actual schemas before use.
+- After the canonical process verifies the selected workspace, pass its workspaceIdentifier to every supported workspace-scoped operation and record the selection, identity, and operation evidence in the existing task record.
+
 ## MCP registration and delegation
 
 - Use current runtime evidence to identify the active MCP instance, its exact configuration, and the root-registration mechanism. Verify each; do not infer them from a clone name or edit an inactive or guessed configuration.
