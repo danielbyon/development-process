@@ -1,0 +1,3 @@
+interface:
+  display_name: "Delegation Executor"
+  short_description: "Set up and execute approved repository tasks"
