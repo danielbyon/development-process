@@ -34,6 +34,16 @@ Changes to product scope, architecture, security trade-offs, substantive excepti
 
 ## Known limitations
 
-This slice creates no application code, test suite, or Skill implementation. Its validation is limited to documentation integrity and the executable PR integration-diff check. There is no code-coverage result. Hardware or unavailable-platform qualification does not apply to this documentation-only change.
+The Issue #1 foundation slice created no application code, test suite, or Skill implementation. Issue #5 later added Skill distribution tooling and executable checks. Its package and staging tests do not exercise the live ChatGPT upload UI or LLM behavior.
+
+## Issue #5: Skill packaging and distribution
+
+14. **Pin distributed Skills to the approved policy revision.** The distribution manifest sets policy revision `aa8dc7784641dd5416befdebc246ed081bfd7ade`. Each Skill links to that immutable policy copy. Package provenance records the actual source commit in a separate field. Existing tasks keep their recorded policy and Skill revisions; staging does not migrate them.
+
+15. **Build one archive per Skill with verified source provenance.** OpenAI's official validator checks Skill frontmatter. The repository adds a small deterministic ZIP builder because the validator does not establish archive reproducibility or Git-backed source provenance, and the approved output consists of three individually installable Skill archives. The ZIP contains one Skill directory with `SKILL.md` and `agents/openai.yaml`. A sidecar outside the ZIP records the policy revision, actual source commit, included source paths, payload hashes, and archive hash. Payload hashes cover the ZIP members only; the sidecar is not included in its own hash set. Verification checks the manifest and each payload against the declared Git commit.
+
+16. **Stage Skills separately from production.** The staging command writes to the explicit staging root's `.agents/skills` directory, outside the source repository. An explicit initialization command marks an empty temporary root before installation. It supports first installation, idempotent repeat, and an explicit same-policy upgrade. It refuses unknown installs, local drift, policy mismatch, and policy migration. It does not select a project or personal production target. Promotion remains a manual owner action after reviewing the staged files.
+
+17. **Keep product checks tied to their evidence.** CI runs the official validator, distribution tests, workflow-contract checks, and a temporary Codex-compatible staging smoke test on the PR integration revision. It builds provenance-verified packages from a separate checkout at the exact PR source revision, even when the merge result includes non-conflicting changes from the base branch. Those tests do not establish LLM behavior or successful ChatGPT UI import. The three standalone archives use the supported Skill upload workflow; eligibility, workspace permissions, scanning, and any review decision remain controlled by ChatGPT.
 
 The detailed Q1–Q50 interview record and the external review reports are not included in Issue #1. Their absence is recorded rather than reconstructed.

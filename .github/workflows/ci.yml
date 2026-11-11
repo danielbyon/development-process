@@ -76,3 +76,44 @@ jobs:
           printf 'Tested base revision: %s\n' "$EXPECTED_BASE_SHA"
 
           git diff --check HEAD^1 HEAD
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Skill validation dependency
+        run: python -m pip install -r requirements-ci.txt
+
+      - name: Run shipped Skill workflow contract checks
+        run: python3 -m unittest discover -s tests -p test_issue5_workflow.py -v
+
+      - name: Run distribution and staging behavior tests
+        run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v
+
+      - name: Run Codex-compatible temporary staging smoke test
+        run: python3 -m unittest discover -s tests -p test_distribution_smoke.py -v
+
+      - name: Check out the exact PR source for package provenance
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: issue5-package-source
+          fetch-depth: 0
+
+      - name: Build and verify packages against the PR source commit
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          source_root="$GITHUB_WORKSPACE/issue5-package-source"
+          package_dir="$(mktemp -d "${RUNNER_TEMP}/issue5-skill-packages.XXXXXX")"
+          python3 scripts/skill_distribution.py package \
+            --root "$source_root" \
+            --output-dir "$package_dir" \
+            --source-revision "$EXPECTED_SOURCE_SHA"
+          python3 scripts/skill_distribution.py verify \
+            --root "$source_root" \
+            --artifact-dir "$package_dir" \
+            --source-revision "$EXPECTED_SOURCE_SHA"

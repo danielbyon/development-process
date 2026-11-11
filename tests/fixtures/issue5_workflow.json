@@ -1,0 +1,42 @@
+{
+  "approved_policy_revision": "aa8dc7784641dd5416befdebc246ed081bfd7ade",
+  "phases": [
+    {
+      "skill": "development-orchestrator",
+      "contract": [
+        "Codex Plan-mode prompt",
+        "Post-approval Agent/execution-mode prompt",
+        "read-only"
+      ]
+    },
+    {
+      "skill": "delegation-executor",
+      "contract": [
+        "clean, isolated starting tree",
+        "manual task contract",
+        "separate, non-authoring execution",
+        "draft PR"
+      ]
+    },
+    {
+      "skill": "development-review",
+      "contract": [
+        "Inspect final source",
+        "tested commit",
+        "owner must explicitly authorize a merge"
+      ]
+    }
+  ],
+  "policy_scenarios": [
+    {
+      "kind": "new-task",
+      "existing_pin": null,
+      "expected": "approved_policy_revision"
+    },
+    {
+      "kind": "in-flight-task",
+      "existing_pin": "93a86127a3721d6044f4a8e993a764731fbda4e5",
+      "expected": "existing_pin"
+    }
+  ]
+}
