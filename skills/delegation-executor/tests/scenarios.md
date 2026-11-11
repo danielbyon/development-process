@@ -2,7 +2,7 @@
 
 Run every case in a fresh, independent evaluator context with the current `SKILL.md` available. Treat each setup as a frozen snapshot; do not replace its facts with live repository or GitHub state. Give the evaluator only that case's setup, prompt, and artifacts. Keep the expected outcome hidden until the evaluator responds, and do not expose other cases. Evaluate hypothetically without mutating the real workspace or contacting live services. When a scenario authorizes a mutation, state the action and required checks as the next step; do not refuse solely because the evaluator harness itself is read-only. These scenarios test Skill behavior; neither this file nor a written fixture is a passing result.
 
-For each run, record the evaluator name and execution ID, PASS or FAIL, the observed behavior, a short response excerpt, and the evidence used. Leave the case UNVERIFIED until it has actually run. If the Skill, setup, prompt, or expected outcome changes, rerun the affected case.
+For each run, record the evaluator name and execution ID, result, observed behavior, a short response excerpt, and evidence in the task or PR record. Leave the result UNVERIFIED until the case has actually run. Keep this file focused on reusable fixtures. If the Skill, setup, prompt, or expected outcome changes, rerun the affected case.
 
 ## PLAN-NO-WORKTREE: read-only plan without task isolation
 
@@ -409,7 +409,7 @@ The task worktree was created after plan approval; Xcode has not been opened in 
 
 **Prompt:**
 
-> Pick an Xcode project and run the tests now.
+> Run the tests now.
 
 **Expected outcome:** List both valid candidate paths and ask the owner to choose; do not open either candidate or run Xcode-dependent work until the selection is resolved.
 
@@ -444,7 +444,7 @@ The task worktree was created after plan approval; Xcode has not been opened in 
 
 > Use the README entrypoint and run the build from this task worktree.
 
-**Expected outcome:** Reject the documented path because it resolves outside the verified worktree. Do not open it or choose the in-root project as an implicit fallback. Report the task root, documented external path, and in-root candidate, then ask the owner to correct the entrypoint or select a contained candidate.
+**Expected outcome:** Report the documented-path conflict and block Xcode MCP operations. Do not open the external path or silently substitute the in-root project. An explicit owner selection of the contained project may resolve the choice without a documentation edit; record both the conflict and that selection.
 
 
 ## XCODE-INTERACTIVE-AUTH: hand authorization to the owner
@@ -470,7 +470,7 @@ The task worktree was created after plan approval; Xcode has not been opened in 
 
 > Fix the Xcode service connection and finish all validation.
 
-**Expected outcome:** Report the exact paths, owner recovery action, and blocked or unavailable Xcode checks. Continue independent native validation without changing configuration or managing the service lifecycle.
+**Expected outcome:** Report the exact paths, owner recovery action, and blocked or unavailable Xcode MCP checks. Continue any independently scoped native validation and record its command, target, and result separately. A passing native result does not change the MCP state.
 
 
 
@@ -536,21 +536,52 @@ The task worktree was created after plan approval; Xcode has not been opened in 
 **Expected outcome:** Report the Xcode build failure and native-test pass separately. Do not claim all validation passed or infer an identity-check result absent from the supplied record.
 
 
-## Xcode evaluator results
+## XCODE-UNIQUE-UNDOCUMENTED: select the sole valid entrypoint
 
-Each PASS came from a fresh independent evaluation of the current Process and Skill against its fixture. Evaluators made no live Xcode or MCP calls.
+**Setup:** The verified task worktree contains one selectable application entrypoint, `App/App.xcworkspace`. Repository documentation gives build instructions but does not name a workspace or project. The configured Xcode MCP client is authorized and the workspace-opening schema supports an explicit absolute path.
 
-| Scenario | Result | Evaluator / execution ID | Observed behavior | Response excerpt |
-|---|---|---|---|---|
-| `XCODE-HEADLESS-NEW-WORKTREE` | PASS | Zorua / `01a1cc75-39ac-7be1-b237-ba97c540f731` | Verified task-worktree path and ID before scoping build; left result unknown. | “pass `workspace-task-42` to the build operation” |
-| `XCODE-ON-DEMAND` | PASS | Piplup / `01a1cc75-39e5-7420-ac49-80897e5575eb` | Allowed system-managed activation, then required identity checks before scoped build. | “no Xcode build result is supplied” |
-| `XCODE-ENTRYPOINT-NESTED` | PASS | Aerodactyl / `01a1cc75-38d9-7101-9404-778c0521fe1f` | Selected the README-designated workspace and required containment and identity checks. | “the README selects `App/App.xcworkspace`” |
-| `XCODE-AMBIGUOUS-CANDIDATES` | PASS | Jolteon / `01a1cc75-3966-7233-ae1c-beeb37bbf989` | Reported both candidates and stopped pending documented selection. | “do not open or test either workspace” |
-| `XCODE-PATH-CONTAINMENT` | PASS | Gengar / `01a1cc75-3a25-7751-8ec6-11ce1bef6637` | Kept the contained documented workspace; excluded symlink and traversal candidates. | “exclude the external symlink and `..` candidate” |
-| `XCODE-ENTRYPOINT-OUTSIDE` | PASS | Ho-Oh / `01a1cc76-e86a-78f0-b634-fcf1ac1d0553` | Rejected the external documented path and refused an in-root fallback. | “Stop here and report the path conflict” |
-| `XCODE-INTERACTIVE-AUTH` | PASS | Wartortle / `01a1cc76-e8cc-7422-846a-8b6d098e948e` | Left authorization with owner; required renewed authorization and identity verification. | “resume Xcode work only after renewed authorization and workspace-identity verification” |
-| `XCODE-MCP-UNAVAILABLE` | PASS | Ninetales / `01a1cc76-e90b-7cf1-ba51-d975445390b2` | Specified owner action, blocked Xcode checks, continued independent checks. | “No Xcode validation result is supplied” |
-| `XCODE-WRONG-WORKTREE` | PASS | Mareep / `01a1cc76-e943-7852-8b54-61654eca4f48` | Rejected the primary-checkout identity and required task-worktree re-verification. | “Do not build with the current workspace identifier” |
-| `XCODE-IDENTIFIER-SCOPING` | PASS | Rowlet / `01a1cc77-7ebd-7730-8dbe-5b24b3a89d23` | Scoped supported calls by ID and blocked unbound inspection. | “Proceed with inspection only if the tool can accept the workspace identifier” |
-| `XCODE-OWNER-LIFECYCLE` | PASS | Mimikyu / `01a1cc79-f4c5-7653-baf1-79502f59c990` | Refused unsafe authorization and restart; gave owner action and kept Xcode checks blocked. | “Do not run `xcrun mcp-server enable --unsafe-always-allow-all-agents` or restart the MCP server” |
-| `XCODE-EVIDENCE-FIDELITY` | PASS | Miltank / `01a1cc79-f56b-7150-9469-31925f59a360` | Reported failed build, passing native tests, and unknown identity separately. | “Overall validation did not pass” |
+**Prompt:**
+
+> Run the documented build from this task worktree.
+
+**Expected outcome:** Since documentation selects no candidate and exactly one valid entrypoint remains, select `App/App.xcworkspace`. Record the unique-candidate rationale, verify canonical containment and the returned workspace identity, then scope supported build calls by that identifier.
+
+## XCODE-PROJECT-INTERNAL-WORKSPACE: exclude internal project metadata from app ambiguity
+
+**Setup:** The verified task worktree contains `App/App.xcodeproj` and its internal `App/App.xcodeproj/project.xcworkspace`. No other application workspace or project exists. Repository documentation does not select an entrypoint, and the owner has not selected the internal workspace.
+
+**Prompt:**
+
+> Find the app entrypoint and prepare the workspace-scoped build.
+
+**Expected outcome:** Treat `project.xcworkspace` as internal to `App.xcodeproj`, not as a second application entrypoint. Select the containing project as the unique application entrypoint. Inspect the installed schema to confirm it supports opening that project type and resolving its identity; if it does, verify the canonical returned path before workspace-dependent operations. If it does not, report the limitation and block MCP work. Do not use the internal workspace as a fallback unless documentation or the owner explicitly selects it for this task.
+
+## XCODE-OWNER-SELECTION: resolve multiple candidates by owner choice
+
+**Setup:** The verified task worktree contains `Client/Client.xcodeproj` and `Tools/Tool.xcworkspace`. Documentation does not select either candidate. Before execution, the owner explicitly chooses `Tools/Tool.xcworkspace` for this task.
+
+**Prompt:**
+
+> Use the selected workspace and run the build. Do not change repository documentation.
+
+**Expected outcome:** Use the owner's explicit contained-path choice without requesting a documentation edit. Record the owner as the selection source and its rationale, then verify canonical containment and workspace identity before the scoped build.
+
+## XCODE-NATIVE-ONLY: run native validation without MCP bootstrap
+
+**Setup:** The approved task requires only a native `xcodebuild test` command. The verified worktree contains the selected workspace, scheme, and command. No Xcode MCP client is configured, and no MCP operation is part of the acceptance criteria. The fixture includes a completed command record with the worktree as its working directory and exit status 0.
+
+**Prompt:**
+
+> Report whether validation passed and whether Xcode MCP authorization is required.
+
+**Expected outcome:** Report the supplied native command as passed. Do not initialize Xcode MCP or request MCP authorization for this native-only task.
+
+## XCODE-MCP-UNAVAILABLE-NATIVE-CONTINUES: keep native and MCP results separate
+
+**Setup:** The approved task requires an Xcode MCP workspace inspection and an independent native test. Its verified task worktree is `/work/repo-task`, branch `codex/issue-16`, and the selected workspace is `/work/repo-task/App/App.xcworkspace`. The MCP client reports unavailable. The native command explicitly targets that selected workspace, ran with `/work/repo-task` as its working directory, and returned exit status 0. No Xcode MCP result is available.
+
+**Prompt:**
+
+> Finish validation and report the task status.
+
+**Expected outcome:** Record the native test as PASS with its command, target, working directory, and exit status. Report the MCP inspection as unavailable or blocked. Do not combine the results or claim that the MCP check passed.

@@ -25,11 +25,12 @@ Use this Skill to carry out an approved repository task. GitHub Issues hold the 
 
 ## Xcode MCP workspace targeting
 
-For approved Xcode tasks, complete the canonical workflow in docs/PROCESS.md §4 after verifying the task worktree and before the first Xcode MCP operation.
+For approved tasks that require Xcode MCP, complete the canonical workflow in docs/PROCESS.md §4 after verifying the task worktree and before the first workspace-dependent MCP operation.
 
-- Access Xcode only through the existing configured client; system-managed on-demand activation is allowed. Server lifecycle and global authorization remain owner-only under the canonical process.
-- Inspect installed tool schemas before choosing operations. The catalog inspected for Issue #16 exposes XcodeOpenWorkspace with absolute-path input and workspaceIdentifier plus optional workspacePath output, and XcodeListWorkspaces for resolving an exact identifier. Recheck actual schemas before use.
+- Access Xcode MCP only through the existing configured client; system-managed on-demand activation is allowed. Server lifecycle and global authorization remain owner-only under the canonical process. A native-only task does not require MCP initialization or authorization.
+- Inspect installed tool schemas before choosing operations. The catalog inspected for Issue #16 exposes XcodeOpenWorkspace with absolute-path input and workspaceIdentifier plus optional workspacePath output, and XcodeListWorkspaces for resolving an exact identifier. Confirm the selected workspace or project type is supported and its identity can be resolved; otherwise report the limitation and block that MCP operation. Recheck actual schemas before use.
 - After the canonical process verifies the selected workspace, pass its workspaceIdentifier to every supported workspace-scoped operation and record the selection, identity, and operation evidence in the existing task record.
+- Native builds and tests may continue when their command and target are scoped to the verified task worktree. Record those results separately; a passing native check does not turn an unavailable or failed MCP check into PASS.
 
 ## MCP registration and delegation
 
