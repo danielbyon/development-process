@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from test_skill_distribution import (
-    HISTORICAL_POLICY_REVISION,
+    HISTORICAL_POLICY_REVISIONS,
     POLICY_REVISION,
     ROOT,
 )
@@ -55,6 +55,13 @@ class Issue5WorkflowSmokeTests(unittest.TestCase):
             for required_contract in phase["contract"]:
                 self.assertIn(required_contract.casefold(), skill)
 
+        in_flight_pins = {
+            scenario["existing_pin"]
+            for scenario in fixture["policy_scenarios"]
+            if scenario["kind"] == "in-flight-task"
+        }
+        self.assertEqual(in_flight_pins, set(HISTORICAL_POLICY_REVISIONS))
+
         for scenario in fixture["policy_scenarios"]:
             if scenario["kind"] == "new-task":
                 self.assertEqual(
@@ -62,10 +69,7 @@ class Issue5WorkflowSmokeTests(unittest.TestCase):
                     "approved_policy_revision",
                 )
             elif scenario["kind"] == "in-flight-task":
-                self.assertEqual(
-                    scenario["existing_pin"],
-                    HISTORICAL_POLICY_REVISION,
-                )
+                self.assertIn(scenario["existing_pin"], HISTORICAL_POLICY_REVISIONS)
                 self.assertEqual(
                     scenario["expected"],
                     "existing_pin",

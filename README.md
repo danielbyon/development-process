@@ -24,9 +24,9 @@ Every change receives a full review from a separate, non-authoring execution. Ch
 
 ## Skill distribution
 
-The distribution manifest pins new tasks and packages to policy revision `aa8dc7784641dd5416befdebc246ed081bfd7ade`. Each Skill links to that exact `docs/PROCESS.md` revision. Package provenance records the actual source commit separately. The source commit identifies the Skill files and manifest used to build an archive. The policy revision remains the value recorded in the manifest.
+The distribution manifest pins new tasks and packages to policy revision `142422527de28b8e20dea1158d2f54d020dcdcd5`. Each Skill links to that exact `docs/PROCESS.md` revision. Package provenance records the exact source commit separately: `policy_revision` identifies the canonical policy, while `source_revision` identifies the committed Skill files and manifest used to build an archive. The source revision is the Issue #18 candidate commit and may differ from the policy revision.
 
-Existing tasks keep their recorded policy and Skill revisions. The resolver uses a task's existing pin when supplied, verifies that the policy commit contains `docs/PROCESS.md`, and fails if the commit is unavailable. Staging refuses an archive whose policy differs from the caller's task pin or the approved manifest. It does not migrate active tasks.
+Existing tasks keep their recorded policy and Skill revisions, including historical pins `aa8dc7784641dd5416befdebc246ed081bfd7ade` and `93a86127a3721d6044f4a8e993a764731fbda4e5`. The resolver uses a task's existing pin when supplied, verifies that the policy commit contains `docs/PROCESS.md`, and fails if the commit is unavailable. Staging refuses an archive whose policy differs from the caller's task pin or the approved manifest. It does not migrate active tasks.
 
 ### Validate and package
 
@@ -63,12 +63,12 @@ python3 scripts/skill_distribution.py init-staging \
 python3 scripts/skill_distribution.py stage \
   --archive "$ARTIFACT_DIR/development-orchestrator.zip" \
   --staging-root "$STAGING_ROOT" \
-  --policy-revision aa8dc7784641dd5416befdebc246ed081bfd7ade
+  --policy-revision 142422527de28b8e20dea1158d2f54d020dcdcd5
 ```
 
 Continue in the same shell so `ARTIFACT_DIR` still points to the verified packages. Inspect the staged directory at `$STAGING_ROOT/.agents/skills/<skill-name>`. Repeating the same installation is a no-op. A different source requires `--upgrade`; the installer checks the existing marker and files first. It refuses an unknown installation, local file drift, a mismatched policy, or an automatic policy migration. It changes only the named Skill and preserves other entries.
 
-Production promotion remains manual. After review, copy the selected Skill directory from the staging root into the intended project's `.agents/skills` directory. Inspect any existing target before replacing it. The command has no implicit production target, and it does not provide auto-sync.
+After the change merges, environment activation remains a manual owner step. Review the staged Skill, then copy the selected directory from the staging root into the intended project's `.agents/skills` directory. Inspect any existing target before replacing it. The command has no implicit production target, and it does not provide auto-sync.
 
 In ChatGPT, open Plugins from the sidebar and select Skills. Choose Create, then Upload from computer. Upload each archive separately. Availability depends on the workspace plan and administrator settings. ChatGPT scans uploaded Skills and may require review or block an upload; review the source before installation. The upload flow is described in [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt). No live ChatGPT upload was performed for this change.
 
