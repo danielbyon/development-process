@@ -11,7 +11,7 @@ The issue defines accepted scope, and the pinned policy governs roles and proces
 
 ## Policy and source access
 
-- Read [`docs/PROCESS.md` at the approved policy revision `aa8dc7784641dd5416befdebc246ed081bfd7ade`](https://github.com/danielbyon/development-process/blob/aa8dc7784641dd5416befdebc246ed081bfd7ade/docs/PROCESS.md) before applying the workflow. Verify that any local policy copy has the same source revision; otherwise read the pinned file through GitHub. Do not silently adopt a newer policy.
+- Read [`docs/PROCESS.md` at the approved policy revision `142422527de28b8e20dea1158d2f54d020dcdcd5`](https://github.com/danielbyon/development-process/blob/142422527de28b8e20dea1158d2f54d020dcdcd5/docs/PROCESS.md) before applying the workflow. Verify that any local policy copy has the same source revision; otherwise read the pinned file through GitHub. Do not silently adopt a newer policy.
 - Verify the repository, issue, task identity, worktree, branch, baseline, HEAD, PR, and candidate paths from current evidence. Read relevant instructions and accepted specifications.
 - Always inspect the candidate source directly through gpt-repo-local or the GitHub connection for the repository owner. Reports and summaries do not establish source-review evidence. If source is unavailable, return `BLOCKED` for readiness.
 - Inspect applicable source-adjacent tests and validation evidence. If applicable tests exist but cannot be inspected, record them as `UNVERIFIED` and return `BLOCKED`. If no tests apply, such as for a documentation-only change, record that determination and its rationale and assess the applicable validation evidence. Do not block solely because no tests apply, and do not report absent or unrun tests as passing.

@@ -9,7 +9,7 @@ Use this Skill to carry out an approved repository task. GitHub Issues hold the 
 
 ## Policy and authority
 
-- Follow [the canonical policy at the approved distribution revision `aa8dc7784641dd5416befdebc246ed081bfd7ade`](https://github.com/danielbyon/development-process/blob/aa8dc7784641dd5416befdebc246ed081bfd7ade/docs/PROCESS.md). Verify the policy revision pinned to the task before relying on a local copy. Keep an in-flight task on its pinned revision unless the owner explicitly approves a migration.
+- Follow [the canonical policy at the approved distribution revision `142422527de28b8e20dea1158d2f54d020dcdcd5`](https://github.com/danielbyon/development-process/blob/142422527de28b8e20dea1158d2f54d020dcdcd5/docs/PROCESS.md). Verify the policy revision pinned to the task before relying on a local copy. Keep an in-flight task on its pinned revision unless the owner explicitly approves a migration.
 - Follow the accepted issue, approved plan, and project instructions. Do not widen scope or silently change the task contract.
 - ChatGPT approves plans, directly inspects final source and tests, adjudicates review, and decides technical readiness. The repository owner decides material product, scope, architecture, and security trade-offs and explicitly authorizes merges.
 - This Skill does not authorize a merge, waive a required gate, or permit an external action outside the approved task.

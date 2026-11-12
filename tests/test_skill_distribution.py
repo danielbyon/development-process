@@ -29,8 +29,13 @@ from scripts.skill_distribution import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-POLICY_REVISION = "aa8dc7784641dd5416befdebc246ed081bfd7ade"
+POLICY_REVISION = "142422527de28b8e20dea1158d2f54d020dcdcd5"
+PREVIOUS_APPROVED_POLICY_REVISION = "aa8dc7784641dd5416befdebc246ed081bfd7ade"
 HISTORICAL_POLICY_REVISION = "93a86127a3721d6044f4a8e993a764731fbda4e5"
+HISTORICAL_POLICY_REVISIONS = (
+    PREVIOUS_APPROVED_POLICY_REVISION,
+    HISTORICAL_POLICY_REVISION,
+)
 SKILL_NAMES = (
     "development-orchestrator",
     "development-review",
@@ -63,6 +68,7 @@ def source_checkout(parent: Path) -> tuple[Path, str]:
     git(checkout, "add", "skills", "scripts/vendor")
     git(checkout, "-c", "user.name=Issue 5 Test", "-c",
         "user.email=issue5-test@example.invalid", "commit", "--quiet",
+        "--allow-empty",
         "-m", "Test fixture source")
     return checkout, git(checkout, "rev-parse", "HEAD")
 
@@ -340,12 +346,12 @@ class SkillDistributionTests(unittest.TestCase):
             resolve_task_policy(self.source_root),
             POLICY_REVISION,
         )
-        self.assertEqual(
-            resolve_task_policy(
-                self.source_root, HISTORICAL_POLICY_REVISION
-            ),
-            HISTORICAL_POLICY_REVISION,
-        )
+        for historical_revision in HISTORICAL_POLICY_REVISIONS:
+            with self.subTest(policy_revision=historical_revision):
+                self.assertEqual(
+                    resolve_task_policy(self.source_root, historical_revision),
+                    historical_revision,
+                )
 
         manifest_path = self.source_root / "skills" / "distribution.json"
         manifest = json.loads(manifest_path.read_text())
@@ -366,19 +372,21 @@ class SkillDistributionTests(unittest.TestCase):
             resolve_task_policy(self.source_root, "")
 
     def test_policy_command_preserves_a_supplied_historical_pin(self) -> None:
-        output = io.StringIO()
-        with redirect_stdout(output):
-            result = main(
-                [
-                    "policy",
-                    "--root",
-                    str(self.source_root),
-                    "--task-policy-revision",
-                    HISTORICAL_POLICY_REVISION,
-                ]
-            )
-        self.assertEqual(result, 0)
-        self.assertEqual(output.getvalue().strip(), HISTORICAL_POLICY_REVISION)
+        for historical_revision in HISTORICAL_POLICY_REVISIONS:
+            with self.subTest(policy_revision=historical_revision):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    result = main(
+                        [
+                            "policy",
+                            "--root",
+                            str(self.source_root),
+                            "--task-policy-revision",
+                            historical_revision,
+                        ]
+                    )
+                self.assertEqual(result, 0)
+                self.assertEqual(output.getvalue().strip(), historical_revision)
 
     def test_cli_reports_distribution_errors_without_traceback(self) -> None:
         manifest_path = self.source_root / "skills" / "distribution.json"
@@ -431,17 +439,19 @@ class SkillDistributionTests(unittest.TestCase):
         archive = build_packages(
             self.source_root, self.artifacts, self.source_revision
         )[0]
-        project_root = self.temp_root / "project"
-        project_root.mkdir()
-        initialize_staging_root(self.source_root, project_root)
-        with self.assertRaises(DistributionError):
-            install_archive(
-                self.source_root,
-                archive,
-                project_root,
-                expected_policy_revision=HISTORICAL_POLICY_REVISION,
-            )
-        self.assertFalse((project_root / ".agents").exists())
+        for historical_revision in HISTORICAL_POLICY_REVISIONS:
+            with self.subTest(policy_revision=historical_revision):
+                project_root = self.temp_root / f"project-{historical_revision[:7]}"
+                project_root.mkdir()
+                initialize_staging_root(self.source_root, project_root)
+                with self.assertRaises(DistributionError):
+                    install_archive(
+                        self.source_root,
+                        archive,
+                        project_root,
+                        expected_policy_revision=historical_revision,
+                    )
+                self.assertFalse((project_root / ".agents").exists())
 
     def test_staging_requires_an_explicitly_initialized_root(self) -> None:
         archive = build_packages(
@@ -707,33 +717,35 @@ class SkillDistributionTests(unittest.TestCase):
         archive = build_packages(
             self.source_root, self.artifacts, self.source_revision
         )[0]
-        project_root = self.temp_root / "project"
-        project_root.mkdir()
-        initialize_staging_root(self.source_root, project_root)
-        install_archive(
-            self.source_root,
-            archive,
-            project_root,
-            expected_policy_revision=POLICY_REVISION,
-        )
-        target = project_root / ".agents" / "skills" / archive.stem
-        marker_path = target / ".skill-distribution.json"
-        marker = json.loads(marker_path.read_text())
-        marker["policy_revision"] = HISTORICAL_POLICY_REVISION
-        marker_path.write_text(json.dumps(marker))
+        for historical_revision in HISTORICAL_POLICY_REVISIONS:
+            with self.subTest(policy_revision=historical_revision):
+                project_root = self.temp_root / f"project-{historical_revision[:7]}"
+                project_root.mkdir()
+                initialize_staging_root(self.source_root, project_root)
+                install_archive(
+                    self.source_root,
+                    archive,
+                    project_root,
+                    expected_policy_revision=POLICY_REVISION,
+                )
+                target = project_root / ".agents" / "skills" / archive.stem
+                marker_path = target / ".skill-distribution.json"
+                marker = json.loads(marker_path.read_text())
+                marker["policy_revision"] = historical_revision
+                marker_path.write_text(json.dumps(marker))
 
-        with self.assertRaises(DistributionError):
-            install_archive(
-                self.source_root,
-                archive,
-                project_root,
-                expected_policy_revision=POLICY_REVISION,
-                upgrade=True,
-            )
-        self.assertEqual(
-            json.loads(marker_path.read_text())["policy_revision"],
-            HISTORICAL_POLICY_REVISION,
-        )
+                with self.assertRaises(DistributionError):
+                    install_archive(
+                        self.source_root,
+                        archive,
+                        project_root,
+                        expected_policy_revision=POLICY_REVISION,
+                        upgrade=True,
+                    )
+                self.assertEqual(
+                    json.loads(marker_path.read_text())["policy_revision"],
+                    historical_revision,
+                )
 
     def test_archive_payload_corruption_and_extra_members_are_refused(self) -> None:
         archive = build_packages(
@@ -824,7 +836,18 @@ class SkillDistributionTests(unittest.TestCase):
         mutations = [
             ("schema", lambda value: value.update(schema_version=2)),
             ("Skill identity", lambda value: value.update(skill_name="other")),
-            ("policy pin", lambda value: value.update(policy_revision=HISTORICAL_POLICY_REVISION)),
+            (
+                "previous approved policy pin",
+                lambda value: value.update(
+                    policy_revision=PREVIOUS_APPROVED_POLICY_REVISION
+                ),
+            ),
+            (
+                "earlier historical policy pin",
+                lambda value: value.update(
+                    policy_revision=HISTORICAL_POLICY_REVISION
+                ),
+            ),
             ("source revision", lambda value: value.update(source_revision="invalid")),
             ("source paths", lambda value: value.update(source_files={})),
             ("payload hash set", lambda value: value.update(payload_sha256={})),
