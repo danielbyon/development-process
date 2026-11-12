@@ -4,7 +4,7 @@ These cases check the decisions the `development-orchestrator` Skill must make. 
 
 Record the evaluator execution ID, its observed result, and the relevant response excerpt for every case. A fixture is only a test input; leave a case `UNVERIFIED` until it has been run.
 
-The first seven historical Issue #2 cases pin `beb7c955b054dafa3eb1a45e5e13e519720e654a`. Their recorded PASS observations were produced against that earlier policy/Skill and do not verify this revised Skill. The three new Issue #12 cases pin `42b0ea58b5fff57deadbe5c360ebf9ea28ea2b08` and remain `UNVERIFIED` until separately executed.
+The historical Issue #2 and Issue #12 cases retain their recorded policy revisions and results. Those observations do not verify this revised Skill. Issue #20 regression cases below remain `UNVERIFIED` until separately executed against the revised Skill.
 
 ## NEXT-01: `next task` with active local work
 
@@ -130,9 +130,12 @@ The following Issue #12 scenarios exercise the plan-first policy at immutable co
 
 > next task: prepare my initial Codex Plan-mode prompt for the accepted issue. I want Codex to return a plan first and create its task worktree only after ChatGPT approves that plan.
 
-**Expected outcome:** The orchestrator provides a **read-only Plan-mode prompt** naming the verified source revision, accepted issue, expected baseline, proposed branch/worktree, and single bootstrap owner. It does not command Codex to create/edit files, branches, worktrees, MCP configuration, or delegation artifacts in Plan mode, and does not claim the proposed worktree already exists. It includes a **separate** post-approval execution-mode bootstrap handoff and preserves unrelated primary checkout state.
+**Expected outcome:** The orchestrator returns exactly one **read-only Plan-mode prompt** naming the verified source revision, accepted issue, expected baseline, proposed branch/worktree, and single bootstrap owner. It does not include a post-approval execution/bootstrap handoff in this response. It does not command Codex to create or edit files, branches, worktrees, MCP configuration, or delegation artifacts in Plan mode, and does not claim the proposed worktree already exists. It preserves unrelated primary checkout state.
 
-**Status:** UNVERIFIED — requires a fresh non-authoring scenario execution against the new policy/Skill revision.
+**Status:** PASS — fresh independent evaluation against the revised policy and Skill.
+
+**Evaluation ID:** `01a1d1c8-b4dc-7d33-b7b3-d9954916d11b`.
+**Observed result:** The evaluator returned one read-only Plan-mode prompt and no bootstrap handoff. Excerpt: “Inspect relevant task and repository evidence, then return a plan within the accepted scope with validation and independent review steps. Do not create or modify files, branches, worktrees, MCP configuration, or delegation artifacts. Treat the proposed branch and worktree as not yet existing. Wait for ChatGPT approval before worktree bootstrap or implementation.”
 
 ## PLAN-APPROVAL-01: no worktree is not an approval blocker
 
@@ -142,9 +145,12 @@ The following Issue #12 scenarios exercise the plan-first policy at immutable co
 
 > codex plan: review this read-only plan and provide the approval or correction prompt. Do not require worktree creation in Plan mode.
 
-**Expected outcome:** The orchestrator does not reject solely for an absent worktree. It may return `APPROVE` when the rest of the plan and evidence satisfy the existing gate, but its pasteable implementation prompt requires execution-mode worktree bootstrap and verification before source changes or worktree-bound delegation. Unverified baseline, missing source, and unresolved material decisions remain blockers when material.
+**Expected outcome:** The orchestrator does not reject solely for an absent worktree. It may return `APPROVE` when the rest of the plan and evidence satisfy the existing gate. `APPROVE` returns exactly one execution/bootstrap handoff that verifies isolation before source changes or worktree-bound delegation; it does not include a plan-correction prompt. Unverified baseline, missing source, and unresolved material decisions remain blockers when material.
 
-**Status:** UNVERIFIED — requires a fresh non-authoring scenario execution against the new policy/Skill revision.
+**Status:** PASS — fresh independent evaluation against the revised policy and Skill.
+
+**Evaluation ID:** `01a1d1c8-b551-7583-bbd0-662ada0b41d4`.
+**Observed result:** The evaluator approved the plan and returned one execution handoff. Excerpt: “APPROVE. Next, the designated bootstrap owner should create the plan’s proposed isolated branch and worktree, verify task identity, baseline, cleanliness, and drift before editing, then implement and validate the approved plan.”
 
 ## EXEC-DRIFT-01: post-approval bootstrap detects material baseline drift
 
@@ -157,3 +163,33 @@ The following Issue #12 scenarios exercise the plan-first policy at immutable co
 **Expected outcome:** The handoff instructs the executor to create/verify worktree isolation, compare actual identity and baseline with the approved plan, and stop for ChatGPT reassessment when the drift is material. It never silently rebases the accepted plan onto a materially changed source, edits the dirty primary checkout, binds V3 to a proposed identity, or manages the MCP server lifecycle.
 
 **Status:** UNVERIFIED — requires a fresh non-authoring scenario execution against the new policy/Skill revision.
+
+## PLAN-REVISION-01: revision does not trigger bootstrap
+
+**Setup:** A proposed plan has a material gap against accepted scope. No task worktree exists, and no execution-mode bootstrap has been authorized. The reviewer has enough source and issue evidence to identify the gap.
+
+**Prompt:**
+
+> codex plan: this plan omits an accepted validation requirement. Give me the decision and next prompt.
+
+**Expected outcome:** Return `REVISE` with only a plan-correction prompt. Do not include an execution/bootstrap handoff, authorize implementation, or claim that a task worktree exists.
+
+**Status:** PASS — fresh independent evaluation against the revised policy and Skill.
+
+**Evaluation ID:** `01a1d1ce-8232-7b30-84dc-071ac884e240`.
+**Observed result:** The evaluator returned `REVISE` and provided only a plan-correction prompt. Excerpt: “On `REVISE`, return only a directly pasteable plan-correction prompt. Do not include an execution/bootstrap handoff.”
+
+## PLAN-NO-PLAN-01: verified straightforward task
+
+**Setup:** The accepted issue, source revision, baseline, branch, and validation are verified. The task is straightforward and does not require a separate Codex plan. No task worktree exists yet. One bootstrap owner is designated.
+
+**Prompt:**
+
+> next task: prepare the handoff for this verified, straightforward issue. No Codex plan is needed.
+
+**Expected outcome:** Return the execution/bootstrap handoff directly after verifying scope and source state. Require an isolated worktree and branch, identity and cleanliness checks before edits, and drift reassessment. Do not fabricate an existing worktree or bind delegation to an unverified identity.
+
+**Status:** PASS — fresh independent evaluation against the revised policy and Skill.
+
+**Evaluation ID:** `01a1d1ce-81c9-7981-852b-06c9e52562a9`.
+**Observed result:** The evaluator returned the execution/bootstrap handoff directly after scope and source verification. Excerpt: “When a task is straightforward and no Codex plan is produced, the no-plan path may return the execution/bootstrap handoff directly after accepted scope and source state are verified.”

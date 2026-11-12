@@ -5,7 +5,7 @@
       "skill": "development-orchestrator",
       "contract": [
         "Codex Plan-mode prompt",
-        "Post-approval Agent/execution-mode prompt",
+        "execution/bootstrap handoff",
         "read-only"
       ]
     },
@@ -25,6 +25,73 @@
         "tested commit",
         "owner must explicitly authorize a merge"
       ]
+    }
+  ],
+  "workflow_contracts": [
+    {
+      "skill": "development-orchestrator",
+      "heading": "`next task`",
+      "end_heading": "`codex plan`",
+      "required": [
+        "one read-only Plan-mode prompt only",
+        "branch and worktree as *proposed*",
+        "exactly one designated bootstrap owner",
+        "no-plan path"
+      ],
+      "forbidden": [
+        "provide two separate prompts",
+        "Post-approval Agent/execution-mode prompt"
+      ]
+    },
+    {
+      "skill": "development-orchestrator",
+      "heading": "`codex plan`",
+      "end_heading": "Authority and MCP boundaries",
+      "required": [
+        "`APPROVE`, return exactly one directly pasteable execution/bootstrap handoff",
+        "`REVISE`, return only a directly pasteable plan-correction prompt"
+      ],
+      "forbidden": []
+    },
+    {
+      "skill": "development-review",
+      "heading": "Close out an authorized change",
+      "end_heading": "Response format",
+      "required": [
+        "original implementor from task or delegation provenance",
+        "commit author or merge actor alone does not establish implementor",
+        "Name the verified repository, worktree root, branch, and PR/merge identity",
+        "affirmative task evidence that implementation happened through GitHub",
+        "genuinely trivial documentation or metadata edit",
+        "no substantive effect on policy, security boundaries, workflow behavior, or executable instructions",
+        "inspect accessible task records for known local artifacts",
+        "Determine cleanup eligibility from verified provenance and available task-specific artifacts",
+        "MERGED — CLEANUP PENDING",
+        "intentionally retained for future work",
+        "report `MERGED — CLEANUP PENDING` with the missing evidence",
+        "MCP RESTART REQUIRED — OWNER ACTION"
+      ],
+      "forbidden": [
+        "policy or Skill edits qualify solely because they are Markdown"
+      ]
+    }
+  ],
+  "policy_contracts": [
+    {
+      "heading": "12. Distribution/pinning",
+      "end_heading": "13. Adoption and vocabulary",
+      "required": [
+        "The implementation PR does not change the immutable distribution pin or deploy revised Skills",
+        "track a separate, reviewed promotion under Issue #20 or an explicitly linked, appropriately authorized follow-up",
+        "Keep Issue #20 open until its remaining distribution obligations are satisfied or formally transferred",
+        "Do not mark all acceptance criteria complete at the implementation-PR merge",
+        "Keep the policy revision separate from the Skill source commit",
+        "preserve existing task pins",
+        "runs the existing validator and isolated staging checks",
+        "Deploy only after the package checks pass and the owner approves promotion",
+        "staging and production activation remain owner-controlled"
+      ],
+      "forbidden": []
     }
   ],
   "policy_scenarios": [
