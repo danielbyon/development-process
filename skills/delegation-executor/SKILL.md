@@ -61,4 +61,8 @@ For approved tasks that require Xcode MCP, complete the canonical workflow in do
 
 ## Safe closeout
 
-After an owner-authorized merge, verify the merge result and applicable checks. Before cleanup, verify the exact task worktree and registration, and preserve every valuable unmerged change and sole-copy artifact. If unmerged changes or sole-copy evidence have no verified backup or owner-approved preservation destination, retain the worktree and report `MERGED — CLEANUP PENDING`. Do not invent a backup destination or copy artifacts to an unapproved location. Remove only the verified task root when preservation is proven safe. Remove an MCP root only under the active-configuration and owner-only lifecycle rules above.
+After an owner-authorized merge, verify the merge result and applicable checks. Once required post-merge checks pass, follow the canonical process in §11 for primary-main synchronization and its verification.
+
+When §11's checks allow a fast-forward, run `git merge --ff-only --no-overwrite-ignore --no-autostash origin/main` from the verified primary root. This safe fast-forward is required without a second owner approval. Do not interpret the prohibition on force-updating `main` as a prohibition on this operation. Preserve the checkout and follow §11's disposition when a required precondition fails. Never use reset, rebase, stash, or branch switching to bypass a safety check.
+
+Before removing the task worktree, verify its identity and registration, and preserve every valuable unmerged change and sole-copy artifact. If unmerged changes or sole-copy evidence have no verified backup or owner-approved preservation destination, retain the worktree and report `MERGED — CLEANUP PENDING`. Do not invent a backup destination or copy artifacts to an unapproved location. Remove only the verified task root when preservation is proven safe. Remove an MCP root only under the active-configuration and owner-only lifecycle rules above.
