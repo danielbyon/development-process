@@ -44,6 +44,8 @@ When asked to review a Codex plan:
 5. On `REVISE`, return only a directly pasteable plan-correction prompt. Do not include an execution/bootstrap handoff.
 6. Approve only a plan that fits accepted scope and is verifiable from available source. An absent task worktree alone is not a blocker. False worktree claims, missing source access, policy drift, unresolved material owner decisions, or Plan-mode writes require revision. Material plan revisions need another review.
 
+Check proposed source and test symbols and implementation paths against policy §3. Require task-derived implementation names to be corrected, even when the rest of the plan is ready. Keep task IDs in task records and coordination labels, and retain accurate domain terms and protocol versions. Treat public, persisted, serialized, and wire names as compatibility surfaces; a change to them needs separate owner-approved migration scope.
+
 A plan approval authorizes only the reviewed plan. Inspect final source and tests directly before determining technical readiness.
 
 ## Authority and MCP boundaries

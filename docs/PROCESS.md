@@ -27,6 +27,18 @@ The final amendments are incorporated in the policy: every task uses an isolated
 - Before implementing a substantial custom subsystem, investigate native capabilities and maintained libraries or frameworks. Assess functionality, license, maintenance, security, integration, and complexity.
 - Avoid adversarial overengineering outside the approved threat model. Escalate meaningful trade-offs to the owner.
 
+### Task-independent implementation naming
+
+- Name implementation symbols and implementation paths for their behavior, domain concept, or stable technology. Do not put an issue number, task name, or other temporary task identity in source, test, or implementation-local names. This applies to files and code inside a task-named worktree as well as to shared repository paths. A plan's approval does not grandfather a task-derived implementation name.
+- Keep task identifiers in records whose purpose is to track the task, including issues, plans, ADRs and governance records, evidence, GitHub records, branch and worktree labels, and Git metadata. Use protocol versions and numeric identifiers when they carry stable domain meaning; do not remove a meaningful version or domain term just because it resembles a task label.
+- Review the actual names changed by the task. Remove a task-only reference from an implementation comment when it no longer explains the code, and retain verified engineering rationale such as a constraint or failure mode. Do not replace a useful explanation with an unexplained name change.
+- Preserve names that form public APIs, persisted keys or fields, serialized data, wire formats, or other compatibility surfaces.
+- **Tier 1:** A behavior-preserving coordinated rename of an internal name is allowed when verified reference and compatibility evidence supports it. Check and update affected callers, tests, generated output, and documentation, then validate the change.
+- **Tier 2:** A compatibility-sensitive rename requires a separate owner-approved migration plan and scope. This policy does not authorize one.
+- When a first-party generator owns a name, change the generator and regenerate its output. Do not hand-edit generated output or vendored dependencies.
+- Fix confirmed naming violations introduced or materially worsened by the candidate, and violations within its accepted slice, before merge. Separately tracked pre-existing violations do not by themselves block an otherwise complete slice; keep the repository-wide cleanup obligation open until its closure criteria are met. Issue #23 establishes this policy and review practice; it does not authorize a repository-wide rename or compatibility migration.
+- Enforce this rule through author self-review and the existing independent-review process. Do not introduce a dedicated semantic naming scanner, naming linter, or additional CI enforcement framework for this rule.
+
 ## 4. Worktrees and Delegation v3
 
 - **Each implementation task uses an isolated Git worktree and a dedicated task branch.** Read-only task planning and approval may use a verified repository checkout before the task worktree exists. Once bootstrapped, verify a clean starting state for a new task. When resuming, preserve verified in-progress task changes and exclude unrelated work.
@@ -52,6 +64,7 @@ The final amendments are incorporated in the policy: every task uses an isolated
 ## 6. Independent review
 
 - Every change requires independent review and direct ChatGPT inspection of the source and tests. Cumulative review must cover the final implementation and correction deltas. Targeted follow-up is acceptable when earlier evidence remains valid. The independent reviewer must not author approved changes.
+- Tell the independent reviewer to inspect task-independent implementation names and paths under §3, including the purpose-based task-record exceptions. Worktree contents are in scope. Require correction of candidate-introduced violations before merge; unrelated tracked debt remains separate from slice readiness.
 - A confirmed P0/P1 defect that is introduced or materially worsened by the candidate, or is included in the accepted task scope, **cannot be waived**. Fix it or factually disprove it before merge. Unrelated pre-existing defects do not automatically block.
 - Material in-scope P2 findings require fixes. Justified unrelated or out-of-scope deferral is allowed. P3 findings are advisory unless evidence warrants elevation. Do not reclassify a true P1 merely to merge.
 - Corrections ordinarily stay on the same worktree and PR. Create a new corrective delegation only when warranted or required by the tool.
@@ -86,6 +99,7 @@ The final amendments are incorporated in the policy: every task uses an isolated
 
 - After an authorized merge, verify the merge commit and applicable validation. If required post-merge checks are pending or failed, keep closeout open and report `MERGED — CLEANUP PENDING` with the blocker. Do not give destructive cleanup instructions until the checks pass. Investigate failures rather than automatically reverting, and do not require a new post-merge pipeline unless an existing requirement calls for one.
 - Close the issue when its accepted scope is complete. Keep a durable record of accepted behavior, rationale, reviewed and tested revision, remaining obligations, and exceptions outside a disposable worktree.
+- Reconcile repository-wide naming cleanup against the exact integrated revision. Close the repository-wide cleanup obligation only after reconciliation confirms that every confirmed violation has been resolved or covered by an explicit owner-approved policy exception. Outstanding compatibility migrations remain part of the open cleanup obligation. Report approved exceptions and inspection limitations explicitly in the completion statement.
 - Determine the original implementor from task or delegation provenance. A commit author or merge actor alone does not establish who implemented the task, and a PR alone does not establish that a local worktree exists. If provenance or artifact state is unclear, report it as unverified and `MERGED — CLEANUP PENDING` with the missing evidence. Retain any known worktree, make no cleanup-complete claim, and give no destructive instructions.
 - Before deleting a worktree, verify its repository, root, branch, and integration, then preserve valuable unmerged or uncommitted changes and sole-copy evidence. Retain the worktree when cleanup safety is uncertain and report `MERGED — CLEANUP PENDING` with the missing proof.
 - When Codex implemented the task and post-merge cleanup is eligible, include a task-specific, pasteable Codex cleanup prompt in the merge response without waiting for another request. Name the verified repository, worktree root, branch, and PR/merge identity. Direct Codex to re-verify them, preserve valuable changes and sole-copy evidence, and remove only verified task-local artifacts and registrations where safe.

@@ -43,6 +43,9 @@ For approved tasks that require Xcode MCP, complete the canonical workflow in do
 
 ## Implement and validate
 
+- Use behavior or domain names for implementation symbols, test identifiers, and implementation paths. Task-named worktree roots do not exempt their contents. Keep task IDs in task records and coordination labels, and retain accurate domain terms and protocol versions. Before completion, inspect changed names and related references for task-derived identifiers.
+- Keep public APIs, persisted keys or fields, serialized data, and wire names stable. Stop for separate owner-approved scope before a compatibility-sensitive rename. For an internal rename, check references and update all affected tests, generated output, and documentation. Change the first-party generator before regenerating its output; do not hand-edit generated output or vendored dependencies. Preserve verified technical rationale when removing a task reference from a comment.
+- Fix confirmed naming violations introduced or materially worsened by this task, and violations within its accepted slice, before completion. Record unrelated pre-existing debt for separate cleanup without letting it block an otherwise complete slice.
 - Use the repository's native build, lint, type-check, static-analysis, and test commands. Record the commands and results. Label each check passed, failed, skipped, or unavailable. An equivalent local check does not turn an unavailable MCP result into a pass.
 - Aim for 90% meaningful coverage of testable first-party code. Treat this as a target, not a numerical merge gate. Do not add brittle tests merely to raise coverage. Report the metric's scope and exclusions. Identify relevant hardware qualification or state `N/A` when it does not apply.
 - Keep changes within the accepted scope. Do not force-push or run broad, destructive cleanup.

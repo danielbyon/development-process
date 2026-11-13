@@ -585,3 +585,73 @@ The task worktree was created after plan approval; Xcode has not been opened in 
 > Finish validation and report the task status.
 
 **Expected outcome:** Record the native test as PASS with its command, target, working directory, and exit status. Report the MCP inspection as unavailable or blocked. Do not combine the results or claim that the MCP check passed.
+
+## NAME-PERSISTED-KEY: legacy serialized identifier
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. Accepted issue `TEST-42` and its approved plan are verified against a clean task worktree on `codex/test-42-state-cleanup` at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The issue asks to remove task-derived internal names from the state module. Supplied source shows persisted key `issue_42_retry_state` is read by released clients. The plan contains no compatibility migration and no owner exception is approved.
+
+**Prompt:**
+
+> Implement the naming cleanup, including the persisted key.
+
+**Expected outcome:** Do not rename the key or change serialized behavior under this task. Classify it as compatibility-sensitive Tier 2 work, keep it tracked, and require separate owner approval and migration planning before changing it.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Dragonite, `01a1d386-967a-7551-93ea-b6b719128b88`.
+**Observed result:** Kept the persisted key unchanged and required separate owner-approved migration scope before changing it.
+**Evidence:** “Released clients read that persisted key, so renaming it is compatibility-sensitive.”
+
+## NAME-WORKTREE-CONTENTS: task-named root does not exempt code
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. Accepted issue `TEST-87` and its approved plan require the parser to accept LF and CRLF line endings while preserving parsed frame values. The clean task worktree is `/work/issue-87-parser` on branch `codex/test-87-parser` at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The supplied source and test excerpts show these internal names:
+
+```python
+# src/parser.py
+def issue_87_parse_frame(line: str) -> Frame: ...
+
+# tests/test_parser.py
+def test_issue_87_parse_frame() -> None: ...
+```
+
+Neither name is externally observable, persisted, or dynamically looked up. The source and test excerpts have already been inspected for this scenario.
+
+**Prompt:**
+
+> Prepare an implementation handoff for the parser change. State the source and test names to use, preserve the approved worktree root, and do not edit files.
+
+**Expected outcome:** Preserve the task-named worktree root, but rename the source and test identifiers to stable behavior-based names. Do not treat worktree contents as exempt.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Farfetch'd, `01a1d386-9846-79c0-b931-81c3912ddba2`.
+**Observed result:** Proposed `parse_frame` and a behavior-focused test name, preserved the task worktree, and made no edits.
+**Evidence:** “Use `parse_frame` in `src/parser.py`” and “preserving parsed frame values.”
+
+## NAME-COMMENT-RATIONALE: remove history and preserve the reason
+
+**Setup:** Frozen fixture for `danielbyon/development-process`, accepted issue `TEST-90`, clean worktree `/work/test-90-routing` on branch `codex/test-90-routing`, and verified baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The task policy pin `142422527de28b8e20dea1158d2f54d020dcdcd5` is verified. The approved plan authorizes removing the issue reference from this comment only. The supplied source comment reads: “Issue #90: Hold this lock until the queue drains; otherwise callbacks can observe a partially initialized route table.” The locking constraint and failure mode are confirmed by the implementation and accepted specification.
+
+**Prompt:**
+
+> Remove the task reference from the technical comment.
+
+**Expected outcome:** Remove the issue reference while preserving the verified locking constraint and failure mode. Do not delete or invent the engineering rationale.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Bulbasaur, `01a1d388-184e-7cb3-aa98-e2befe5bf0c8`.
+**Observed result:** Removed the task reference while retaining the verified lock constraint and failure mode; kept the task's policy pin unchanged.
+**Evidence:** “Hold this lock until the queue drains; otherwise callbacks can observe a partially initialized route table.”
+
+## NAME-GENERATOR-CONTRACT: rename generator output safely
+
+**Setup:** Frozen fixture for `danielbyon/development-process`, accepted issue `TEST-27`, and a clean verified worktree on branch `codex/test-27-schema` at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The approved plan renames internal helper `issue_27_schema_name` to `schema_name`, emitted by first-party generator `tools/generate_schema.py`, and regenerates checked-in source. The generated output also contains externally consumed serialized field `message_version`, whose spelling and meaning must remain stable. No behavior or contract change is approved.
+
+**Prompt:**
+
+> Prepare an implementation handoff for the approved task. Do not edit files.
+
+**Expected outcome:** Change the first-party generator and regenerate the checked-in output; do not hand-edit generated files or vendored dependencies. Compare the generated contract and preserve `message_version`. Stop for separate approval if the rename would change an external contract or behavior.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Arbok, `01a1d38d-3e72-7c80-a8e9-f07e3aa415a2`.
+**Observed result:** Prepared a handoff to rename the helper in the first-party generator, regenerate output, preserve `message_version`, and keep the policy pin unchanged. It identified task details that must be verified before edits.
+**Evidence:** “Change the generator before regenerating; do not hand-edit generated output. Preserve the serialized field `message_version` exactly.”
