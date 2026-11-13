@@ -60,6 +60,10 @@
       "required": [
         "original implementor from task or delegation provenance",
         "commit author or merge actor alone does not establish implementor",
+        "for an eligible Codex-implemented task, automatically include a task-specific, pasteable Codex cleanup prompt in the merge response",
+        "Do not wait for a separate cleanup request",
+        "For a ChatGPT-implemented task, ChatGPT performs applicable cleanup through supported, verified operations",
+        "Do not generate a Codex cleanup prompt solely because the PR merged",
         "Name the verified repository, worktree root, branch, and PR/merge identity",
         "affirmative task evidence that implementation happened through GitHub",
         "genuinely trivial documentation or metadata edit",
