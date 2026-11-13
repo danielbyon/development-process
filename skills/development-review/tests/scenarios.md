@@ -464,11 +464,11 @@ Neither name is persisted nor externally observable. The independent-review hand
 
 **Prompt:**
 
-> implemented: reconcile the candidate and review evidence, report readiness, and explicitly disposition the separate legacy issue.
+> implemented: assess whether the reviewer handoff stated the naming rule, its purpose-based exceptions, and that task-named worktree contents remain in scope. Reconcile the candidate and review evidence, report readiness, and disposition the separate legacy issue.
 
-**Expected outcome:** Confirm that the handoff communicated the naming rule and its purpose-based exceptions. Require correction of the candidate-introduced violation before merge, so the candidate is not ready. State that the separately tracked legacy debt does not block this slice once corrected; keep repository-wide cleanup tracked separately.
+**Expected outcome:** Confirm that the handoff communicated the naming rule and its purpose-based exceptions and kept task-named worktree contents in scope. Require correction of the candidate-introduced violation before merge, so the candidate is not ready. State that the separately tracked legacy debt does not block this slice once corrected; keep repository-wide cleanup tracked separately.
 
 **Status:** PASS — final independent execution.
-**Evaluator:** Scyther, `01a1d38b-667e-76a3-bc68-87d3696ddeb5`.
-**Observed result:** Blocked PR #90 until both task-derived names are corrected, while keeping the separate legacy issue independent.
-**Evidence:** “`issue_90_cache_key` and `test_issue_90_cache_key` put the temporary task ID in implementation-local names.”
+**Evaluator:** Kangaskhan, `01a1d398-86e1-71f1-817a-4e7c0097872a`.
+**Observed result:** Confirmed the handoff named the rule, task-record and coordination exceptions, and worktree-content scope; blocked PR #90 until both task-derived names are corrected. Separate legacy debt does not block the slice.
+**Evidence:** “It states the task-independent naming rule, identifies task records and worktree labels as exceptions, and makes clear that files and code inside a task-named worktree remain in scope.”
