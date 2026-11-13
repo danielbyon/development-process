@@ -399,3 +399,76 @@ Run record: `PASS`
 - Evaluation ID: `01a1d1da-673e-7e40-bdd9-3b35a08ebd0a`.
 - Observed result: The evaluator reported pending closeout, retained the worktree and review artifacts, and left Issue #67 open.
 - Evidence: “PR #67 is merged, but the required post-merge check failed. I’m keeping cleanup pending and Issue #67 open while the failure is investigated.”
+
+## NAME-SLICE-DEBT: unrelated tracked debt does not block a slice
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. Candidate PR #88 for accepted issue `TEST-88` is on branch `codex/test-88-clean-slice`, based on `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`; candidate HEAD is fixture SHA `8888888888888888888888888888888888888888`. The supplied final diff shows `src/retry.py` defines `retry_policy(attempt, max_attempts)` and `tests/test_retry.py` verifies the accepted bounded retry behavior. All violations introduced within the slice were corrected. PAC/TAC, independent review, applicable tests, and current integration CI on the supplied PR head pass. A separate open issue tracks two older naming violations in another package; neither was changed or worsened by this candidate.
+
+**Candidate source and test excerpts:**
+
+```python
+# src/retry.py
+def retry_policy(attempt: int, max_attempts: int) -> bool:
+    return attempt < max_attempts
+
+# tests/test_retry.py
+def test_retry_policy_stops_at_limit() -> None:
+    assert retry_policy(3, 3) is False
+```
+
+These excerpts are from the supplied final candidate. They show the complete changed helper and its boundary test.
+
+**Prompt:**
+
+> implemented: review this slice and report whether the unrelated naming issue blocks readiness.
+
+**Expected outcome:** Do not block the completed slice solely because separately tracked legacy violations remain. Keep the repository-wide cleanup obligation open until its own reconciliation criteria are met.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Togepi, `01a1d38b-65f1-7140-9dfe-12c5416754a1`.
+**Observed result:** Returned READY for the completed slice, confirmed separately tracked legacy debt does not block it, and kept repository-wide cleanup open.
+**Evidence:** “The two older violations in another package were neither changed nor worsened, so they do not block this slice.”
+
+## NAME-REPO-CLEANUP: unresolved compatibility migration keeps cleanup open
+
+**Setup:** Frozen repository-cleanup issue `TEST-89` remains open. Its verified reconciliation at integrated revision `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d` found four confirmed violations: two are resolved; one, `legacy_request_mode`, has an owner-approved exception recorded in the TEST-89 issue; and the fourth is a persisted key with an outstanding compatibility-sensitive migration and no approved exception. The inspection covered tracked files under `src/` and `tests/`; generated and vendored files and external consumer registries were not inspected. The exception has no recorded sunset date.
+
+**Prompt:**
+
+> close the repository-wide naming cleanup issue; the remaining key can be handled later.
+
+**Expected outcome:** Keep the cleanup obligation open because the compatibility migration remains outstanding. Report the approved exception and inspection limitations; do not claim repository-wide completion.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Moltres, `01a1d388-1b32-7db2-8957-296b67fdbca8`.
+**Observed result:** Kept TEST-89 open because the compatibility-sensitive persisted-key migration remains outstanding; reported the exception and inspection limits.
+**Evidence:** “The persisted key still has an outstanding compatibility-sensitive migration and no approved exception.”
+
+## NAME-REVIEW-INTRODUCED: handoff catches a candidate violation
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. Candidate PR #90 for accepted issue `TEST-90` is based on `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d` with fixture HEAD `9090909090909090909090909090909090909090`. The supplied final diff is:
+
+```diff
+--- a/src/cache.py
++++ b/src/cache.py
++def issue_90_cache_key(item_id: str) -> str:
++    return f"item:{item_id}"
+
+--- a/tests/test_cache.py
++++ b/tests/test_cache.py
++def test_issue_90_cache_key() -> None:
++    assert issue_90_cache_key("42") == "item:42"
+```
+
+Neither name is persisted nor externally observable. The independent-review handoff explicitly asks the reviewer to inspect task-independent names and paths, allows legitimate domain terms and task records/worktree roots, and states that worktree contents are not exempt. The reviewer identifies `issue_90_cache_key` as a violation and requests correction. All other required checks pass. A separate issue tracks older naming debt elsewhere in the repository. The candidate has not been corrected.
+
+**Prompt:**
+
+> implemented: assess whether the reviewer handoff stated the naming rule, its purpose-based exceptions, and that task-named worktree contents remain in scope. Reconcile the candidate and review evidence, report readiness, and disposition the separate legacy issue.
+
+**Expected outcome:** Confirm that the handoff communicated the naming rule and its purpose-based exceptions and kept task-named worktree contents in scope. Require correction of the candidate-introduced violation before merge, so the candidate is not ready. State that the separately tracked legacy debt does not block this slice once corrected; keep repository-wide cleanup tracked separately.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Kangaskhan, `01a1d398-86e1-71f1-817a-4e7c0097872a`.
+**Observed result:** Confirmed the handoff named the rule, task-record and coordination exceptions, and worktree-content scope; blocked PR #90 until both task-derived names are corrected. Separate legacy debt does not block the slice.
+**Evidence:** “It states the task-independent naming rule, identifies task records and worktree labels as exceptions, and makes clear that files and code inside a task-named worktree remain in scope.”

@@ -229,3 +229,50 @@ For the Issue #20 regression reruns recorded below, the evaluator input was the 
 > Before editing, verify the repository and worktree identity, branch, baseline and current HEAD, clean starting state, and task identity. Stop for reassessment if material drift is found. Then add one assertion for the existing workflow behavior in `tests/test_issue5_workflow.py` and run:
 >
 > `python3 -m unittest discover -s tests -p test_issue5_workflow.py -v`
+
+## NAME-PLAN-HELPER: task-derived helper in an approved plan
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. The clean main checkout and accepted issue `TEST-81` are verified at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The issue adds duplicate-message filtering without changing public behavior or persistence. The proposed branch is `codex/test-81-message-filter` and proposed worktree is `/work/test-81-message-filter`; no task worktree exists. The owner approved the behavior and plan. The plan proposes internal helper `issue_81_message_filter` and a focused test. The supplied source and test inspection finds no persisted, serialized, external, or dynamic use of the helper name.
+
+**Prompt:**
+
+> codex plan: review this plan and return APPROVE or REVISE with any required correction.
+
+**Expected outcome:** Do not treat approval as grandfathering the internal name. Require a stable name such as `message_filter`, preserve the approved behavior, and keep the task-derived name out of the implementation handoff.
+
+**Pre-change baseline:** FAIL — the old Skill approved the plan and included `issue_81_message_filter` in the execution handoff. Evaluator Vulpix: `01a1d36c-964f-70e2-9147-5bc13e9576d7`.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Mimikyu, `01a1d386-9213-7e00-af7f-d39b46034657`.
+**Observed result:** Revised the plan to replace `issue_81_message_filter` with a behavior-based name and kept the accepted behavior and scope.
+**Evidence:** “Replace the task-derived helper name `issue_81_message_filter` with an internal name based on its behavior, domain concept, or stable technology.”
+
+## NAME-PLAN-RECORDS: task identifiers in active planning records
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. The clean main checkout and accepted issue `TEST-82` are verified at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The issue adds a bounded retry policy with no public API or persistence changes. The active task plan and ADR identify `TEST-82`; the proposed branch is `codex/test-82-retry-policy` and proposed worktree is `/work/test-82-retry-policy`. No task worktree or implementation contents exist yet. The plan proposes stable implementation names such as `retry_policy` and `retry_delay`.
+
+**Prompt:**
+
+> codex plan: review the use of task identifiers in these records and implementation names. Do not edit files.
+
+**Expected outcome:** Preserve task identifiers in the plan, ADR, and issue as purpose-based task records. Label the branch and worktree as proposed; do not rewrite records or claim to have inspected implementation contents before a worktree exists.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Gardevoir, `01a1d388-1956-7fa0-9faf-06fa7565f8c2`.
+**Observed result:** Preserved `TEST-82` in the plan, ADR, and proposed branch/worktree labels; approved only the naming choices and noted that no implementation paths were supplied.
+**Evidence:** “The plan and ADR may identify `TEST-82`; the proposed branch and worktree names may also carry that task identity.”
+
+## NAME-PLAN-DOMAIN: domain name overlaps an issue title
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. The clean main checkout and accepted issue `TEST-83` are verified at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. Its title is “Support V2 message envelopes.” The supplied protocol specification defines version 2 as the stable wire-protocol version, and the source and tests use that protocol version. The proposed branch is `codex/test-83-v2-envelope` and proposed worktree is `/work/test-83-v2-envelope`. The plan names the decoder `V2EnvelopeDecoder`, which remains accurate regardless of task history.
+
+**Prompt:**
+
+> codex plan: review the proposed decoder name and return any required correction.
+
+**Expected outcome:** Keep `V2EnvelopeDecoder`. Do not reject a legitimate protocol version or domain term because it overlaps the issue title.
+
+**Status:** PASS — final independent execution.
+**Evaluator:** Porygon, `01a1d386-95b1-7020-8a08-8f2ca7f62434`.
+**Observed result:** Kept `V2EnvelopeDecoder` because `V2` identifies the stable wire-protocol version.
+**Evidence:** “V2 identifies the stable wire-protocol version in the supplied specification and source/tests.”
