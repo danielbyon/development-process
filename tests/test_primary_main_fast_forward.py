@@ -72,6 +72,52 @@ class PrimaryMainFastForwardTests(unittest.TestCase):
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment.lower(), process)
 
+    def test_review_closeout_waits_for_verified_primary_sync(self) -> None:
+        review = (ROOT / "skills" / "development-review" / "SKILL.md").read_text().lower()
+        closeout_section = review.split("## close out an authorized change", 1)[1].split("\n## ", 1)[0]
+        closeout_step = next(line for line in closeout_section.splitlines() if line.startswith("3."))
+        required_fragments = (
+            "required checks pass",
+            "accepted scope is complete",
+            "completed as a fast-forward and passed verification",
+            "verified as an already-current no-op",
+            "verified remote-only exception",
+            "if required synchronization is blocked or not yet verified, keep the issue open",
+            "deferred obligations",
+            "formally transferred",
+        )
+
+        for fragment in required_fragments:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, closeout_step)
+
+    def test_review_scenario_closeout_states_match_sync_outcomes(self) -> None:
+        scenarios = (ROOT / "skills" / "development-review" / "tests" / "scenarios.md").read_text()
+        expected_outcomes = (
+            ("CLEANUP-PRIMARY-FAST-FORWARD", "Keep Issue #96 open until Codex completes and verifies synchronization"),
+            ("CLEANUP-PRIMARY-CHATGPT", "Keep Issue #99 open until the operation and verification succeed"),
+            ("CLEANUP-PRIMARY-IDENTITY-UNKNOWN", "Keep Issue #100 open"),
+            ("CLEANUP-PRIMARY-BLOCKED", "Keep Issue #102 open"),
+            ("CLEANUP-PRIMARY-REMOTE-ONLY", "Issue #101 may remain closed because the verified remote-only exception makes synchronization inapplicable"),
+        )
+
+        for scenario, expected_outcome_fragment in expected_outcomes:
+            with self.subTest(scenario=scenario):
+                start = scenarios.index(f"## {scenario}:")
+                end = scenarios.find("\n## ", start + 1)
+                scenario_text = scenarios[start:end if end >= 0 else None]
+                expected_outcome = scenario_text.split("Expected outcome:", 1)[1].split("\n\n**Evaluation record:**", 1)[0]
+                self.assertIn(expected_outcome_fragment, expected_outcome)
+
+    def test_scenario_evaluation_anchors_are_standalone_lines(self) -> None:
+        evaluations = (ROOT / "tests" / "primary_main_fast_forward_evaluations.md").read_text()
+        anchor_lines = [line for line in evaluations.splitlines() if "<a id=" in line]
+
+        self.assertTrue(anchor_lines)
+        for line in anchor_lines:
+            with self.subTest(anchor=line):
+                self.assertRegex(line, r'^<a id="[^"]+"></a>$')
+
     def test_skills_defer_safety_details_and_retain_actor_requirements(self) -> None:
         review = (ROOT / "skills" / "development-review" / "SKILL.md").read_text().lower()
         executor = (ROOT / "skills" / "delegation-executor" / "SKILL.md").read_text().lower()
@@ -162,17 +208,26 @@ class PrimaryMainFastForwardTests(unittest.TestCase):
             self.assertEqual(self._git(primary, "branch", "--show-current").stdout.strip(), "main")
             self.assertEqual(self._git(primary, "status", "--porcelain").stdout, "")
 
-    def test_already_current_main_is_a_successful_noop(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="primary-current-") as directory:
+    def test_policy_noop_requires_equal_shas_and_skips_merge(self) -> None:
+        process = (ROOT / "docs" / "PROCESS.md").read_text().lower()
+        equal_sha_rule = next(line for line in process.splitlines() if "if the shas match" in line)
+
+        self.assertIn("verified no-op", equal_sha_rule)
+        self.assertIn("do not run the merge", equal_sha_rule)
+
+    def test_git_allows_fast_forward_merge_when_already_current(self) -> None:
+        """Document Git behavior separately from the policy's no-merge no-op."""
+        with tempfile.TemporaryDirectory(prefix="git-equal-shas-") as directory:
             primary, _ = self._repositories(Path(directory))
             self._fetch_and_check_ancestry(primary)
-            before = self._git(primary, "rev-parse", "HEAD").stdout.strip()
+            local = self._git(primary, "rev-parse", "HEAD").stdout.strip()
+            fetched = self._git(primary, "rev-parse", "origin/main").stdout.strip()
+            self.assertEqual(local, fetched)
 
             result = self._git(primary, *SAFE_MERGE)
 
             self.assertEqual(result.returncode, 0)
-            self.assertEqual(self._git(primary, "rev-parse", "HEAD").stdout.strip(), before)
-            self.assertEqual(self._git(primary, "rev-parse", "origin/main").stdout.strip(), before)
+            self.assertEqual(self._git(primary, "rev-parse", "HEAD").stdout.strip(), local)
             self.assertEqual(self._git(primary, "status", "--porcelain").stdout, "")
 
     def test_conflicting_ignored_file_blocks_merge_and_preserves_local_data(self) -> None:

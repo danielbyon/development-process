@@ -7,8 +7,14 @@ This file preserves the evaluator identities, execution IDs, observed outcomes, 
 
 _Scenario source: `skills/development-review/tests/scenarios.md`._
 
-**Current evaluation status:** PASS — final-Skill evaluation by Bulbasaur, agent `01a1d4a1-6b97-71c2-99f9-5dda5b7c3c28`.
-**Current observation:** Produced a pasteable Codex prompt with verified identities, the exact protected command, no extra approval, and post-merge verification; made no completion claim.
+**Current evaluation status:** PASS — Squirtle, evaluator UUID `6f880076-aa92-40af-8e61-dc7fe95c7539`; task agent `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Current observation:** Codex owns cleanup and synchronization is eligible; keep Issue #96 open until the protected fast-forward is completed and verified.
+**Previous correction evaluation status:** PASS — Pikachu, evaluator UUID `01a1d507-7045-79a3-938e-cb2c90754efe` (subagent `01a1d500-88f2-7db0-b596-9576957a8dcc`).
+**Previous correction observation:** Codex cleanup remains required; keep Issue #96 open until the protected fast-forward is completed and verified.
+**Evaluation mode:** Read-only assessment; no repository files changed and no tests were run. The evaluator reported no separate agent ID; the orchestration receipt identifies `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Previous evaluation status:** PASS — final-Skill evaluation by Bulbasaur, agent `01a1d4a1-6b97-71c2-99f9-5dda5b7c3c28`.
+**Previous observation:** Produced a pasteable Codex prompt with verified identities, the exact protected command, no extra approval, and post-merge verification; made no completion claim.
+**Previous evaluation mode:** Read-only scenario evaluation; no repository files changed and no tests were run.
 
 **Run record:** PASS — Bulbasaur, agent `01a1d470-4a57-76e1-9202-e5805846d58f`.
 
@@ -26,8 +32,14 @@ _Scenario source: `skills/development-review/tests/scenarios.md`._
 
 _Scenario source: `skills/development-review/tests/scenarios.md`._
 
-**Current evaluation status:** PASS — final-Skill evaluation by Raichu, agent `01a1d4d4-53bd-7fd2-a268-e3d68bb048a2`.
-**Current observation:** Reported the required sync as pending because the primary was dirty, preserved the untracked owner file, reported both SHAs, and instructed Codex to use §11 only if all gates pass.
+**Current evaluation status:** PASS — Squirtle, evaluator UUID `6f880076-aa92-40af-8e61-dc7fe95c7539`; task agent `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Current observation:** Codex owns cleanup, but the untracked owner file blocks synchronization; preserve the checkout and keep Issue #102 open as `MERGED — CLEANUP PENDING`.
+**Previous correction evaluation status:** PASS — Pikachu, evaluator UUID `01a1d507-7045-79a3-938e-cb2c90754efe` (subagent `01a1d500-88f2-7db0-b596-9576957a8dcc`).
+**Previous correction observation:** The untracked owner file blocks synchronization; preserve the checkout and keep Issue #102 open.
+**Evaluation mode:** Read-only assessment; no repository files changed and no tests were run. The evaluator reported no separate agent ID; the orchestration receipt identifies `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Previous evaluation status:** PASS — final-Skill evaluation by Raichu, agent `01a1d4d4-53bd-7fd2-a268-e3d68bb048a2`.
+**Previous observation:** Reported the required sync as pending because the primary was dirty, preserved the untracked owner file, reported both SHAs, and instructed Codex to use §11 only if all gates pass.
+**Previous evaluation mode:** Read-only scenario evaluation; no repository files changed and no tests were run.
 
 **Earlier fixture evaluation:** INCOMPLETE — Pikachu, agent `01a1d468-ff15-7f50-ab22-45f3382b632f`.
 
@@ -44,8 +56,14 @@ _Scenario source: `skills/development-review/tests/scenarios.md`._
 
 _Scenario source: `skills/development-review/tests/scenarios.md`._
 
-**Current evaluation status:** PASS — final-Skill evaluation by Dragonite, agent `01a1d4ad-c295-75b1-a3df-0965efac4b74`.
-**Current observation:** Kept cleanup ownership with ChatGPT and supplied the protected command and post-merge checks without claiming the synthetic command ran.
+**Current evaluation status:** PASS — Squirtle, evaluator UUID `6f880076-aa92-40af-8e61-dc7fe95c7539`; task agent `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Current observation:** ChatGPT owns synchronization and verification; no Codex cleanup prompt applies. Keep Issue #99 open until verification succeeds.
+**Previous correction evaluation status:** PASS — Pikachu, evaluator UUID `01a1d507-7045-79a3-938e-cb2c90754efe` (subagent `01a1d500-88f2-7db0-b596-9576957a8dcc`).
+**Previous correction observation:** ChatGPT retains synchronization ownership; no Codex cleanup prompt applies; keep Issue #99 open until verification succeeds.
+**Evaluation mode:** Read-only assessment; no repository files changed and no tests were run. The evaluator reported no separate agent ID; the orchestration receipt identifies `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Previous evaluation status:** PASS — final-Skill evaluation by Dragonite, agent `01a1d4ad-c295-75b1-a3df-0965efac4b74`.
+**Previous observation:** Kept cleanup ownership with ChatGPT and supplied the protected command and post-merge checks without claiming the synthetic command ran.
+**Previous evaluation mode:** Read-only scenario evaluation; no repository files changed and no tests were run.
 
 **Earlier fixture evaluation:** INCOMPLETE — Eevee, agent `01a1d468-fe0e-7d63-b020-961803f279f9`.
 
@@ -68,13 +86,20 @@ _Scenario source: `skills/development-review/tests/scenarios.md`._
 
 **Observed result:** Kept cleanup ownership with ChatGPT, prepared the protected command without claiming execution, and specified the resulting SHA, branch, cleanliness, and ignored-data checks without requesting another approval.
 **Evidence:** “No additional approval is required for this fast-forward.”
+
 <a id="cleanup-primary-remote-only"></a>
 ## CLEANUP-PRIMARY-REMOTE-ONLY: synchronization is inapplicable
 
 _Scenario source: `skills/development-review/tests/scenarios.md`._
 
-**Current evaluation status:** PASS — final-Skill evaluation by Meowth, agent `01a1d4b9-d46b-7482-8bf4-e579e67097a6`.
-**Current observation:** Reported remote-only synchronization as not applicable, named the inspected records, and made no global-absence claim.
+**Current evaluation status:** PASS — Squirtle, evaluator UUID `6f880076-aa92-40af-8e61-dc7fe95c7539`; task agent `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Current observation:** The verified remote-only exception makes local synchronization inapplicable and closure valid. Checked records show no associated checkout, without claiming global absence or generating a Codex prompt.
+**Previous correction evaluation status:** PASS — Pikachu, evaluator UUID `01a1d507-7045-79a3-938e-cb2c90754efe` (subagent `01a1d500-88f2-7db0-b596-9576957a8dcc`).
+**Previous correction observation:** The verified remote-only exception makes local synchronization inapplicable and closure valid; checked records show no associated checkout without claiming global absence.
+**Evaluation mode:** Read-only assessment; no repository files changed and no tests were run. The evaluator reported no separate agent ID; the orchestration receipt identifies `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Previous evaluation status:** PASS — final-Skill evaluation by Meowth, agent `01a1d4b9-d46b-7482-8bf4-e579e67097a6`.
+**Previous observation:** Reported remote-only synchronization as not applicable, named the inspected records, and made no global-absence claim.
+**Previous evaluation mode:** Read-only scenario evaluation; no repository files changed and no tests were run.
 
 Run record: `PASS` — Eevee, agent `01a1d470-4af3-7f50-9a6b-51492ea11900`.
 
@@ -86,13 +111,20 @@ Run record: `PASS` — Eevee, agent `01a1d470-4af3-7f50-9a6b-51492ea11900`.
 
 **Observed result:** Reported synchronization as not applicable for the verified GitHub-only task, named the reviewed records, and made no global-absence or merge-state claim beyond supplied facts.
 **Evidence:** “This does not establish that no other local artifacts exist.”
+
 <a id="cleanup-primary-identity-unknown"></a>
 ## CLEANUP-PRIMARY-IDENTITY-UNKNOWN: a known checkout is blocked
 
 _Scenario source: `skills/development-review/tests/scenarios.md`._
 
-**Current evaluation status:** PASS — final-Skill evaluation by Eevee, agent `01a1d4d4-8192-7340-92a4-7cc40e140c8b`.
-**Current observation:** Reported pending because the candidate repository identity and configured origin could not be verified; rejected inapplicability and destructive workarounds.
+**Current evaluation status:** PASS — Squirtle, evaluator UUID `6f880076-aa92-40af-8e61-dc7fe95c7539`; task agent `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Current observation:** The identity mismatch blocks synchronization; do not fetch or merge, and keep Issue #100 open as `MERGED — CLEANUP PENDING`.
+**Previous correction evaluation status:** PASS — Pikachu, evaluator UUID `01a1d507-7045-79a3-938e-cb2c90754efe` (subagent `01a1d500-88f2-7db0-b596-9576957a8dcc`).
+**Previous correction observation:** Unverified repository identity and mismatched origin block synchronization; do not fetch or merge, and keep Issue #100 open.
+**Evaluation mode:** Read-only assessment; no repository files changed and no tests were run. The evaluator reported no separate agent ID; the orchestration receipt identifies `01a1d50b-dd42-7e13-adfb-18921834074c` (tool nickname Banach).
+**Previous evaluation status:** PASS — final-Skill evaluation by Eevee, agent `01a1d4d4-8192-7340-92a4-7cc40e140c8b`.
+**Previous observation:** Reported pending because the candidate repository identity and configured origin could not be verified; rejected inapplicability and destructive workarounds.
+**Previous evaluation mode:** Read-only scenario evaluation; no repository files changed and no tests were run.
 
 Run record: `PASS` — Snorlax, agent `01a1d470-4cca-7ff0-826c-ec1dc3e085f8`.
 
@@ -126,6 +158,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Required an immediate identity, branch, clean-tree, fetch SHA, ancestry, and ignored-path recheck; gave the protected merge command without another approval; specified final SHA and cleanliness verification; did not claim the synthetic operation ran.
 **Evidence:** “If those checks still pass, run: `git merge --ff-only --no-overwrite-ignore --no-autostash origin/main`.”
+
 <a id="postmerge-primary-already-current"></a>
 ## POSTMERGE-PRIMARY-ALREADY-CURRENT: record a verified no-op
 
@@ -160,6 +193,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Reported a verified no-op for equal local and fetched SHAs, kept the checkout on clean `main`, and did not run a merge.
 **Evidence:** “Equal SHAs establish the ancestry condition, so §11’s result is a verified no-op; no fast-forward is needed.”
+
 <a id="postmerge-primary-dirty"></a>
 ## POSTMERGE-PRIMARY-DIRTY: preserve tracked and untracked changes
 
@@ -187,6 +221,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Reported `MERGED — CLEANUP PENDING` and named the staged change, tracked edit, and untracked owner file as blockers. Preserved the checkout and rejected destructive workarounds.
 **Evidence:** “The dirty checkout fails that gate, so preserve it and report `MERGED — CLEANUP PENDING`.”
+
 <a id="postmerge-primary-diverged"></a>
 ## POSTMERGE-PRIMARY-DIVERGED: reject non-ancestor history
 
@@ -246,6 +281,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Refused to fetch or advance from the reachable but mismatched origin; preserved the checkout and reported `MERGED — CLEANUP PENDING`.
 **Evidence:** “Reachability does not verify repository identity.”
+
 <a id="postmerge-primary-fetch-failure"></a>
 ## POSTMERGE-PRIMARY-FETCH-FAILURE: stop when authenticated fetch fails
 
@@ -264,6 +300,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Rejected the stale `origin/main` after configured-credential fetch failed, preserved the primary, and reported `MERGED — CLEANUP PENDING` with no fresh remote SHA.
 **Evidence:** “The no-second-approval fast-forward applies only after its preconditions pass.”
+
 <a id="postmerge-primary-ignored-conflict"></a>
 ## POSTMERGE-PRIMARY-IGNORED-CONFLICT: preserve a conflicting ignored file
 
@@ -282,6 +319,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Preserved the ignored sole-copy file and `HEAD`, reported the protected merge blocker, and provided no destructive workaround.
 **Evidence:** “The protected fast-forward failed because incoming `origin/main` would overwrite the ignored, sole-copy `owner-data.db`.”
+
 <a id="postmerge-primary-ignored-nonconflict"></a>
 ## POSTMERGE-PRIMARY-IGNORED-NONCONFLICT: retain unrelated ignored data
 
@@ -300,6 +338,7 @@ _Scenario source: `skills/delegation-executor/tests/scenarios.md`._
 
 **Observed result:** Reported the successful fast-forward, final SHA equality, clean status, and preserved unrelated ignored file; did not treat all ignored data as a blocker.
 **Evidence:** “The unrelated ignored file remains unchanged and preserved.”
+
 <a id="postmerge-primary-unavailable"></a>
 ## POSTMERGE-PRIMARY-UNAVAILABLE: distinguish inaccessible from absent
 
