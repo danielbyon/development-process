@@ -14,6 +14,21 @@ from test_skill_distribution import (
 
 
 class Issue5WorkflowSmokeTests(unittest.TestCase):
+    @staticmethod
+    def _markdown_section(markdown: str, title: str, end_title: str) -> str:
+        lines = markdown.splitlines()
+        target_heading = f"## {title}"
+        end_heading = f"## {end_title}"
+        try:
+            target_index = lines.index(target_heading)
+        except ValueError:
+            raise AssertionError(f"Markdown section not found: {title}")
+        try:
+            end_index = lines.index(end_heading, target_index + 1)
+        except ValueError:
+            raise AssertionError(f"Markdown section boundary not found: {end_title}")
+        return "\n".join(lines[target_index + 1:end_index]).casefold()
+
     def test_ci_packages_from_the_exact_pr_source_commit(self) -> None:
         workflow = yaml.safe_load(
             (ROOT / ".github" / "workflows" / "ci.yml").read_text()
@@ -77,6 +92,41 @@ class Issue5WorkflowSmokeTests(unittest.TestCase):
             else:
                 self.fail(f"Unknown policy scenario: {scenario['kind']}")
 
+    def test_skill_sections_satisfy_issue20_workflow_contracts(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "issue5_workflow.json").read_text()
+        )
+        for contract in fixture["workflow_contracts"]:
+            skill = (
+                ROOT / "skills" / contract["skill"] / "SKILL.md"
+            ).read_text()
+            section = self._markdown_section(
+                skill,
+                contract["heading"],
+                contract["end_heading"],
+            )
+            with self.subTest(skill=contract["skill"], heading=contract["heading"]):
+                for required in contract["required"]:
+                    self.assertIn(required.casefold(), section)
+                for forbidden in contract["forbidden"]:
+                    self.assertNotIn(forbidden.casefold(), section)
+
+    def test_policy_sections_preserve_issue20_distribution_obligations(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "issue5_workflow.json").read_text()
+        )
+        policy = (ROOT / "docs" / "PROCESS.md").read_text()
+        for contract in fixture["policy_contracts"]:
+            section = self._markdown_section(
+                policy,
+                contract["heading"],
+                contract["end_heading"],
+            )
+            with self.subTest(heading=contract["heading"]):
+                for required in contract["required"]:
+                    self.assertIn(required.casefold(), section)
+                for forbidden in contract["forbidden"]:
+                    self.assertNotIn(forbidden.casefold(), section)
 
 if __name__ == "__main__":
     unittest.main()
