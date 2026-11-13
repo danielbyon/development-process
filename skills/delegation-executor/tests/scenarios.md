@@ -655,3 +655,32 @@ Neither name is externally observable, persisted, or dynamically looked up. The 
 **Evaluator:** Arbok, `01a1d38d-3e72-7c80-a8e9-f07e3aa415a2`.
 **Observed result:** Prepared a handoff to rename the helper in the first-party generator, regenerate output, preserve `message_version`, and keep the policy pin unchanged. It identified task details that must be verified before edits.
 **Evidence:** “Change the generator before regenerating; do not hand-edit generated output. Preserve the serialized field `message_version` exactly.”
+
+## NAME-DIAGNOSTIC-STRING-COMPAT: task history in logs, stable config key
+
+**Setup:** Frozen fixture for `danielbyon/development-process`. Accepted issue `TEST-91` authorizes changing the structured warning event emitted when the retry limit is reached. The task's existing policy pin `142422527de28b8e20dea1158d2f54d020dcdcd5` is verified and must remain unchanged. The clean task worktree is `/work/test-91-retry-diagnostic` on branch `codex/test-91-retry-diagnostic` at baseline `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`. The supplied source excerpt is:
+
+```python
+# src/retry.py
+policy = settings.get("retry.policy", "bounded")
+if attempt >= max_attempts:
+    logger.warning("issue_91_retry_limit", extra={"attempt": attempt})
+```
+
+The structured event string is used only for diagnostics; no dashboard, log processor, dynamic lookup, or external consumer depends on its exact spelling. The `retry.policy` setting is part of the supported configuration read dynamically by released clients. The approved task changes the warning label only; retry behavior, warning level and fields, and configuration remain unchanged. No compatibility migration is approved.
+
+**Prompt:**
+
+> Prepare an implementation handoff for the approved warning-label change. State which string may change and which must remain stable. Preserve behavior and do not edit files.
+
+**Expected outcome:** Replace `issue_91_retry_limit` with a stable behavior-based diagnostic event such as `retry_limit_reached`, keeping its warning level and fields unchanged. Preserve `retry.policy` exactly because it is a supported dynamic configuration key, and retain the verified task policy pin. Do not change retry behavior or treat this task as authorization for a compatibility migration.
+
+**Pre-change baseline:** PASS — the current Skill proposed a behavior-based log event and preserved the dynamically read configuration key. Evaluator Charmander: `01a1d3b1-5098-7d82-a84f-4ced1e20667a`.
+
+**Earlier independent evaluation:** PASS — Squirtle, `01a1d3b3-a690-7ce3-88cf-e39474090c39`, recommended renaming `issue_91_retry_limit` to `retry_limit_reached`, preserving `retry.policy`, retry behavior, warning level, and the `attempt` field, and retaining the policy pin.
+
+**Final-Skill re-evaluation:** PASS — Planck, `01a1d3bf-bd15-7bc3-b99a-74a9694b1a86`, reviewed the final executor Skill and policy §3. It recommended renaming the warning event while preserving `retry.policy`, its `bounded` default, retry condition, warning level, `attempt` field, and policy pin.
+
+**Latest final-Skill evaluation:** PASS — independent evaluator `01a1d3ca-07f6-7721-a2d2-173a511bada5` recommends changing only `issue_91_retry_limit`, to a stable behavior-based label. It explicitly preserves the exact task policy pin, `retry.policy`, the `bounded` fallback, warning severity, the `attempt` field and value, and the retry condition and behavior. No files were edited.
+
+**Status:** PASS — all independent handoffs respected the task-history naming rule and compatibility boundary.
