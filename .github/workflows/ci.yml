@@ -94,6 +94,9 @@ jobs:
       - name: Run Codex-compatible temporary staging smoke test
         run: python3 -m unittest discover -s tests -p test_distribution_smoke.py -v
 
+      - name: Run primary-main fast-forward safety tests
+        run: python3 -m unittest discover -s tests -p test_primary_main_fast_forward.py -v
+
       - name: Check out the exact PR source for package provenance
         uses: actions/checkout@v4
         with:

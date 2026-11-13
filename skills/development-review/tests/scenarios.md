@@ -472,3 +472,59 @@ Neither name is persisted nor externally observable. The independent-review hand
 **Evaluator:** Kangaskhan, `01a1d398-86e1-71f1-817a-4e7c0097872a`.
 **Observed result:** Confirmed the handoff named the rule, task-record and coordination exceptions, and worktree-content scope; blocked PR #90 until both task-derived names are corrected. Separate legacy debt does not block the slice.
 **Evidence:** “It states the task-independent naming rule, identifies task records and worktree labels as exceptions, and makes clear that files and code inside a task-named worktree remain in scope.”
+
+## CLEANUP-PRIMARY-FAST-FORWARD: eligible Codex cleanup includes synchronization
+
+Setup: Issue #25's accepted behavior is in force for this frozen snapshot. Synthetic Issue #96 remains open until primary synchronization is verified. Its Codex-implemented PR #96 merged at `3333333333333333333333333333333333333333`; required post-merge checks passed. The verified task worktree is `/work/task-96` on `codex/task-96`. The verified primary root is `/repo`; it is the correct `danielbyon/development-process` repository on `main`, its index and tracked/untracked working tree are clean, and configured `origin` points to `git@github.com:danielbyon/development-process.git`. Authenticated fetch succeeded. Local `HEAD` is `1111111111111111111111111111111111111111`, fetched `origin/main` is its descendant `2222222222222222222222222222222222222222`, and `git merge-base --is-ancestor HEAD origin/main` succeeded. A comparison against paths changed by fetched `origin/main` verifies that ignored cache file `cache/index.db` does not overlap the update.
+
+Prompt:
+
+> The owner-authorized merge is complete and required checks passed. Write the pasteable Codex cleanup prompt for the merge response. Do not execute that prompt in this evaluation.
+
+Expected outcome: Provide a pasteable Codex prompt that re-verifies the primary root and repository, branch, cleanliness, configured remote identity, fetch result, ancestry, and ignored-file overwrite safety. Require `git merge --ff-only --no-overwrite-ignore --no-autostash origin/main` without a second approval, then verify final `HEAD` equals fetched `origin/main`, the branch and checkout remain clean, and ignored data remains intact. Require reporting the root, branch, old/fetched/final SHAs, action, and any blocker. Keep Issue #96 open until Codex completes and verifies synchronization. Do not suggest reset, force movement, rebase, stash, or branch switching.
+
+**Evaluation record:** [Recorded runs](../../../tests/primary_main_fast_forward_evaluations.md#cleanup-primary-fast-forward).
+## CLEANUP-PRIMARY-BLOCKED: required synchronization remains pending
+
+Setup: Issue #25's accepted behavior is integrated and active for synthetic Issue #102. Codex implemented the task; PR #102 merged at `4444444444444444444444444444444444444444`, Issue #102 remains open, and required checks passed. The verified task worktree is `/work/task-102` on `codex/task-102`. The verified primary root is `/repo`, the correct `danielbyon/development-process` repository; it is on `main` and configured `origin` is canonical. The checkout has an untracked owner file, so its tracked/untracked working tree is not clean. Local `HEAD` is `1111111111111111111111111111111111111111`, fetched `origin/main` is `2222222222222222222222222222222222222222`, and no fast-forward has been attempted.
+
+Prompt:
+
+> close this out: the merged Codex task has a primary checkout with an untracked file. Prepare the cleanup disposition.
+
+Expected outcome: Preserve the checkout, do not run the merge command, and report `MERGED — CLEANUP PENDING` with the untracked-file blocker and available SHAs. Keep Issue #102 open. Do not describe synchronization as inapplicable or cleanup as complete, and do not use a destructive workaround.
+
+**Evaluation record:** [Recorded runs](../../../tests/primary_main_fast_forward_evaluations.md#cleanup-primary-blocked).
+## CLEANUP-PRIMARY-CHATGPT: ChatGPT retains cleanup ownership
+
+Setup: Issue #25's accepted behavior is integrated and active for synthetic Issue #99. ChatGPT implemented the task; PR #99 merged at `3333333333333333333333333333333333333333`; required checks passed. Issue #99 remains open until ChatGPT verifies primary synchronization. The verified task worktree is `/work/task-99` on `chatgpt/task-99`. The verified primary root is `/repo`, the correct `danielbyon/development-process` repository on clean `main`; configured `origin` is canonical, authenticated fetch succeeded, and local `HEAD` `1111111111111111111111111111111111111111` is an ancestor of fetched `origin/main` `2222222222222222222222222222222222222222`. The ancestry check passed, and a comparison against changed paths verifies that no ignored file conflicts with the update.
+
+Prompt:
+
+> The owner-authorized merge and checks are complete. Prepare ChatGPT's cleanup action for the verified primary checkout. Do not execute it in this evaluation.
+
+Expected outcome: Keep cleanup with ChatGPT and direct it to perform the verified protected fast-forward required by §11, including `git merge --ff-only --no-overwrite-ignore --no-autostash origin/main` and post-merge verification. Keep Issue #99 open until the operation and verification succeed. Do not generate a Codex cleanup prompt solely because the PR merged.
+
+**Evaluation record:** [Recorded runs](../../../tests/primary_main_fast_forward_evaluations.md#cleanup-primary-chatgpt).
+## CLEANUP-PRIMARY-REMOTE-ONLY: synchronization is inapplicable
+
+Setup: Issue #25's accepted behavior is integrated and active. Synthetic Issue #101 was closed after the verified remote-only exception and required checks passed. Its verified remote-only documentation change was implemented through GitHub under §4's narrow exception; PR #101 merged at `6666666666666666666666666666666666666666`, and required checks passed. The task record, issue, PR diff and checks, and remote branch state were inspected. They identify no local task worktree or primary checkout associated with this task. No evidence establishes global absence of other local artifacts.
+
+Prompt:
+
+> close this out: finish the verified remote-only documentation change and report its cleanup disposition.
+
+Expected outcome: Report that local primary-checkout synchronization is `not applicable` because the verified task is remote-only and has no primary checkout. Issue #101 may remain closed because the verified remote-only exception makes synchronization inapplicable. State which records were checked. Do not invent a checkout or claim global absence of local artifacts, and do not generate a Codex cleanup prompt.
+
+**Evaluation record:** [Recorded runs](../../../tests/primary_main_fast_forward_evaluations.md#cleanup-primary-remote-only).
+## CLEANUP-PRIMARY-IDENTITY-UNKNOWN: a known checkout is blocked
+
+Setup: Issue #25's accepted behavior is integrated and active for synthetic Issue #100. Codex implemented the task; PR #100 merged at `5555555555555555555555555555555555555555`; required checks passed. Issue #100 remains open because primary synchronization is required but blocked. The verified task worktree is `/work/task-100` on `codex/task-100`. The intended primary repository is `danielbyon/development-process`. Candidate primary path `/candidate` is on `main` with clean tracked/untracked status and local `HEAD` `1111111111111111111111111111111111111111`, but its repository identity cannot be verified and configured `origin` points to `git@github.com:someone-else/development-process.git`. The task itself was not remote-only; no fetch was performed.
+
+Prompt:
+
+> close this out: assess cleanup for the merged task with the supplied primary path and remote evidence.
+
+Expected outcome: Preserve the candidate checkout and report `MERGED — CLEANUP PENDING` with the identity mismatch. Keep Issue #100 open. Do not fetch from the mismatched remote, run the merge command, or call synchronization `not applicable`.
+
+**Evaluation record:** [Recorded runs](../../../tests/primary_main_fast_forward_evaluations.md#cleanup-primary-identity-unknown).
