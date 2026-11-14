@@ -1,5 +1,5 @@
 {
-  "approved_policy_revision": "142422527de28b8e20dea1158d2f54d020dcdcd5",
+  "approved_policy_revision": "e2afa055d1126763c69f0e0392d25b86bab98014",
   "phases": [
     {
       "skill": "development-orchestrator",
@@ -112,6 +112,21 @@
     {
       "kind": "in-flight-task",
       "existing_pin": "93a86127a3721d6044f4a8e993a764731fbda4e5",
+      "expected": "existing_pin"
+    },
+    {
+      "kind": "in-flight-task",
+      "existing_pin": "142422527de28b8e20dea1158d2f54d020dcdcd5",
+      "expected": "existing_pin"
+    },
+    {
+      "kind": "in-flight-task",
+      "existing_pin": "9da7c0b9113da4c0aab172860bdc5d5c77cccf0d",
+      "expected": "existing_pin"
+    },
+    {
+      "kind": "in-flight-task",
+      "existing_pin": "6fea1f50e0745c189685849f560f10a946e04091",
       "expected": "existing_pin"
     }
   ]
