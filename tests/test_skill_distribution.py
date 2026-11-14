@@ -29,12 +29,14 @@ from scripts.skill_distribution import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-POLICY_REVISION = "142422527de28b8e20dea1158d2f54d020dcdcd5"
-PREVIOUS_APPROVED_POLICY_REVISION = "aa8dc7784641dd5416befdebc246ed081bfd7ade"
+POLICY_REVISION = "e2afa055d1126763c69f0e0392d25b86bab98014"
 HISTORICAL_POLICY_REVISION = "93a86127a3721d6044f4a8e993a764731fbda4e5"
 HISTORICAL_POLICY_REVISIONS = (
-    PREVIOUS_APPROVED_POLICY_REVISION,
+    "aa8dc7784641dd5416befdebc246ed081bfd7ade",
     HISTORICAL_POLICY_REVISION,
+    "142422527de28b8e20dea1158d2f54d020dcdcd5",
+    "9da7c0b9113da4c0aab172860bdc5d5c77cccf0d",
+    "6fea1f50e0745c189685849f560f10a946e04091",
 )
 SKILL_NAMES = (
     "development-orchestrator",
@@ -836,18 +838,15 @@ class SkillDistributionTests(unittest.TestCase):
         mutations = [
             ("schema", lambda value: value.update(schema_version=2)),
             ("Skill identity", lambda value: value.update(skill_name="other")),
-            (
-                "previous approved policy pin",
-                lambda value: value.update(
-                    policy_revision=PREVIOUS_APPROVED_POLICY_REVISION
-                ),
-            ),
-            (
-                "earlier historical policy pin",
-                lambda value: value.update(
-                    policy_revision=HISTORICAL_POLICY_REVISION
-                ),
-            ),
+            *[
+                (
+                    f"historical policy pin {revision}",
+                    lambda value, revision=revision: value.update(
+                        policy_revision=revision
+                    ),
+                )
+                for revision in HISTORICAL_POLICY_REVISIONS
+            ],
             ("source revision", lambda value: value.update(source_revision="invalid")),
             ("source paths", lambda value: value.update(source_files={})),
             ("payload hash set", lambda value: value.update(payload_sha256={})),

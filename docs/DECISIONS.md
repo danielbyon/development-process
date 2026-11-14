@@ -86,3 +86,13 @@ The detailed Q1–Q50 interview record and the external review reports are not i
      6. Give active tasks supplementary guidance at their next plan-review or implementation-correction handoff. Preserve their existing policy pins and historical evidence.
      7. Keep production activation and global configuration changes under separate owner authorization.
    - Exclusions: Issue #23 defines policy and review practice. It does not authorize a repository-wide cleanup, a compatibility migration, a dedicated semantic naming scanner, a naming linter, or an additional CI enforcement framework. This PR records rollout obligations only; it does not promote Skills, edit global instructions, or activate configuration.
+
+## Issue #22: combined Skill distribution and qualification
+
+This is the separate, owner-authorized distribution release tracked by Issue #22 to satisfy the Issue #23 rollout obligation. It preserves Issue #23's accepted scope and does not migrate existing task pins. [Owner authorization](https://github.com/danielbyon/development-process/issues/22#issuecomment-6868219718).
+
+23. **Distribute the three Skills against the approved combined policy revision.** The manifest and all three immutable policy links use `e2afa055d1126763c69f0e0392d25b86bab98014`.
+    - Rationale: Issues #20, #23, and #25 are combined in the approved immutable policy commit. One reviewed distribution keeps the three Skills aligned while the package source commit remains separately identifiable.
+    - Rejected alternatives: Keeping the superseded distribution pin for new tasks, treating the package source commit as policy approval, silently advancing active task pins, adding a new packaging or migration system, or treating temporary staging as production activation.
+    - Failure modes: Skills link to different policy revisions; package provenance conflates policy and source commits; historical tasks lose their pin; staging overwrites unrelated data or accepts a cross-policy migration; or temporary qualification is reported as production activation.
+    - Invariants: Keep `policy_revision` separate from the exact committed `source_revision`; retain task-pin resolution for `aa8dc7784641dd5416befdebc246ed081bfd7ade`, `93a86127a3721d6044f4a8e993a764731fbda4e5`, `142422527de28b8e20dea1158d2f54d020dcdcd5`, `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`, and `6fea1f50e0745c189685849f560f10a946e04091`; refuse cross-policy migration; verify package contents and hashes; preserve unrelated staged Skills; and keep production activation, global instruction edits, and active-task migration separately owner-authorized. Do not rewrite `docs/PROCESS.md` or change approved workflow behavior.

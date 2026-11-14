@@ -24,9 +24,9 @@ Every change receives a full review from a separate, non-authoring execution. Ch
 
 ## Skill distribution
 
-The distribution manifest pins new tasks and packages to policy revision `142422527de28b8e20dea1158d2f54d020dcdcd5`. Each Skill links to that exact `docs/PROCESS.md` revision. Package provenance records the exact source commit separately: `policy_revision` identifies the canonical policy, while `source_revision` identifies the committed Skill files and manifest used to build an archive. The source revision is the Issue #18 candidate commit and may differ from the policy revision.
+The distribution manifest pins new tasks and packages to policy revision `e2afa055d1126763c69f0e0392d25b86bab98014`. Each Skill links to that exact `docs/PROCESS.md` revision. Package provenance records the exact source commit separately: `policy_revision` identifies the canonical policy, while `source_revision` identifies the committed Skill files and manifest used to build an archive. The source revision may differ from the policy revision.
 
-Existing tasks keep their recorded policy and Skill revisions, including historical pins `aa8dc7784641dd5416befdebc246ed081bfd7ade` and `93a86127a3721d6044f4a8e993a764731fbda4e5`. The resolver uses a task's existing pin when supplied, verifies that the policy commit contains `docs/PROCESS.md`, and fails if the commit is unavailable. Staging refuses an archive whose policy differs from the caller's task pin or the approved manifest. It does not migrate active tasks.
+Existing tasks keep their recorded policy and Skill revisions. Applicable historical pins include `aa8dc7784641dd5416befdebc246ed081bfd7ade`, `93a86127a3721d6044f4a8e993a764731fbda4e5`, `142422527de28b8e20dea1158d2f54d020dcdcd5`, `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`, and `6fea1f50e0745c189685849f560f10a946e04091`. The resolver uses a task's existing pin when supplied, verifies that the policy commit contains `docs/PROCESS.md`, and fails if the commit is unavailable. Staging refuses an archive whose policy differs from the caller's task pin or the approved manifest. It does not migrate active tasks.
 
 ### Validate and package
 
@@ -63,7 +63,7 @@ python3 scripts/skill_distribution.py init-staging \
 python3 scripts/skill_distribution.py stage \
   --archive "$ARTIFACT_DIR/development-orchestrator.zip" \
   --staging-root "$STAGING_ROOT" \
-  --policy-revision 142422527de28b8e20dea1158d2f54d020dcdcd5
+  --policy-revision e2afa055d1126763c69f0e0392d25b86bab98014
 ```
 
 Continue in the same shell so `ARTIFACT_DIR` still points to the verified packages. Inspect the staged directory at `$STAGING_ROOT/.agents/skills/<skill-name>`. Repeating the same installation is a no-op. A different source requires `--upgrade`; the installer checks the existing marker and files first. It refuses an unknown installation, local file drift, a mismatched policy, or an automatic policy migration. It changes only the named Skill and preserves other entries.
@@ -80,9 +80,10 @@ Run the checks from the repository root:
 python3 -m unittest discover -s tests -p test_issue5_workflow.py -v
 python3 -m unittest discover -s tests -p test_skill_distribution.py -v
 python3 -m unittest discover -s tests -p test_distribution_smoke.py -v
+python3 -m unittest discover -s tests -p test_primary_main_fast_forward.py -v
 ```
 
-The workflow contract tests structurally inspect the shipped Skill files and CI source-revision binding; they do not execute a Skill through an LLM. The distribution suite exercises validation, deterministic archives, source provenance, pin refusal, and temporary staging behavior. The CLI smoke test builds all three archives and stages a shipped Skill into a disposable project containing an unrelated Skill. No live ChatGPT upload, MCP registration, or MCP server check was performed.
+The workflow contract tests structurally inspect the shipped Skill files and CI source-revision binding; they do not execute a Skill through an LLM. The distribution suite exercises validation, deterministic archives, source provenance, historical pin resolution, migration refusal, and temporary staging behavior. The CLI smoke test builds and stages all three archives in a disposable project containing an unrelated Skill. The primary-main suite checks safe fast-forward cleanup. These checks do not perform a live ChatGPT upload, MCP registration, or MCP server check.
 
 CI checks the GitHub synthetic merge commit's parents and diff, then runs these checks and verifies packages against the PR head commit. A green skipped suite is not evidence that the suite ran.
 
