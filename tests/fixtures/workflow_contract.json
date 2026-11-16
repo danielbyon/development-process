@@ -1,5 +1,4 @@
 {
-  "approved_policy_revision": "e2afa055d1126763c69f0e0392d25b86bab98014",
   "phases": [
     {
       "skill": "development-orchestrator",
@@ -70,10 +69,10 @@
         "no substantive effect on policy, security boundaries, workflow behavior, or executable instructions",
         "inspect accessible task records for known local artifacts",
         "Determine cleanup eligibility from verified provenance and available task-specific artifacts",
-        "MERGED — CLEANUP PENDING",
+        "MERGED \u2014 CLEANUP PENDING",
         "intentionally retained for future work",
-        "report `MERGED — CLEANUP PENDING` with the missing evidence",
-        "MCP RESTART REQUIRED — OWNER ACTION"
+        "report `MERGED \u2014 CLEANUP PENDING` with the missing evidence",
+        "MCP RESTART REQUIRED \u2014 OWNER ACTION"
       ],
       "forbidden": [
         "policy or Skill edits qualify solely because they are Markdown"
@@ -85,15 +84,14 @@
       "heading": "12. Distribution/pinning",
       "end_heading": "13. Adoption and vocabulary",
       "required": [
-        "The implementation PR does not change the immutable distribution pin or deploy revised Skills",
-        "track a separate, reviewed promotion under Issue #20 or an explicitly linked, appropriately authorized follow-up",
-        "Keep Issue #20 open until its remaining distribution obligations are satisfied or formally transferred",
-        "Do not mark all acceptance criteria complete at the implementation-PR merge",
-        "Keep the policy revision separate from the Skill source commit",
-        "preserve existing task pins",
-        "runs the existing validator and isolated staging checks",
-        "Deploy only after the package checks pass and the owner approves promotion",
-        "staging and production activation remain owner-controlled"
+        "newest verified immutable published CalVer",
+        "Existing tasks retain their recorded SHA or CalVer",
+        "source and builder integrations",
+        "independent full-diff/correction review",
+        "ChatGPT source/test inspection",
+        "owner merge authorization",
+        "Temporary staging preserves unrelated Skills",
+        "Publication and activation are separate"
       ],
       "forbidden": []
     }
@@ -102,7 +100,7 @@
     {
       "kind": "new-task",
       "existing_pin": null,
-      "expected": "approved_policy_revision"
+      "expected": "verified_release_version"
     },
     {
       "kind": "in-flight-task",
@@ -129,5 +127,11 @@
       "existing_pin": "6fea1f50e0745c189685849f560f10a946e04091",
       "expected": "existing_pin"
     }
-  ]
+  ],
+  "new_task_resolution": {
+    "selector": "newest_verified_immutable_release",
+    "recorded_pin": "release_version",
+    "failure": "fail_closed",
+    "continuation": "preserve_existing_pin"
+  }
 }

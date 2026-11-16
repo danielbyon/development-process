@@ -1,0 +1,115 @@
+{
+  "synthetic": true,
+  "evidence": {
+    "schema_version": 1,
+    "owner_id": 123,
+    "baseline_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "integrations": [
+      {
+        "reviewed_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "tested_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "integrated_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "author_execution_id": "author-execution",
+        "records": {
+          "independent_review": {
+            "ref": "/repos/danielbyon/development-process/issues/comments/1",
+            "sha256": "0b955f166d3acc50802a601ed4cedbf6d77728d0e5f477f89cfba205ee82df73",
+            "author_id": 123,
+            "run_attempt": 1,
+            "execution": {
+              "ref": "/repos/danielbyon/development-process/issues/comments/11",
+              "sha256": "b5a1fb8aff29d1b3b8d9a933b24fb487c3e817490991f8e74899ba2522f957e0"
+            }
+          },
+          "chatgpt_inspection": {
+            "ref": "/repos/danielbyon/development-process/issues/comments/2",
+            "sha256": "386a910b39c45128beaf6d2d1835c7aea177423f6bf1dd6166723ed883d4ce1a",
+            "author_id": 123,
+            "run_attempt": 1,
+            "execution": {
+              "ref": "/repos/danielbyon/development-process/issues/comments/12",
+              "sha256": "9777e52d9a698383b6061f120b5549cc1799fe29b3eaef58a08933451e61623e"
+            }
+          },
+          "owner_authorization": {
+            "ref": "/repos/danielbyon/development-process/issues/comments/3",
+            "sha256": "84c9ce60c59bae49338194f5f62806ab4f354c04b7d5d6e03e4b3aa0052994d9",
+            "author_id": 123,
+            "run_attempt": 1,
+            "execution": {
+              "ref": "/repos/danielbyon/development-process/issues/comments/13",
+              "sha256": "a5e50a950bbbe8f694617f751e6fa33b4cdf3e01e1684b55381995dbe95bd6b0"
+            }
+          },
+          "ci": {
+            "ref": "/repos/danielbyon/development-process/actions/runs/4",
+            "sha256": "f015223b9e741a0f4ec97ae1b18c7334859cdd44dfabf0992c4cb68d5459bceb",
+            "author_id": 123,
+            "run_attempt": 1
+          }
+        },
+        "author_execution": {
+          "ref": "/repos/danielbyon/development-process/issues/comments/10",
+          "sha256": "ec445e755cd1af8c252024b2660e8d4876945781eac65fd1ef110837b7c1a902"
+        },
+        "base_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ]
+  },
+  "records": {
+    "/repos/danielbyon/development-process/issues/comments/1": {
+      "user": {
+        "id": 123
+      },
+      "body": "<!-- release-evidence\n{\"revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"gate\": \"independent_review\", \"execution_id\": \"review-execution\", \"report\": \"Synthetic inspectable report for negative and positive tests.\", \"verdict\": \"pass\", \"coverage\": \"full-diff\", \"findings\": []}\n-->"
+    },
+    "/repos/danielbyon/development-process/issues/comments/2": {
+      "user": {
+        "id": 123
+      },
+      "body": "<!-- release-evidence\n{\"revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"gate\": \"chatgpt_inspection\", \"execution_id\": \"chatgpt_inspection-execution\", \"report\": \"Synthetic inspectable report for negative and positive tests.\", \"verdict\": \"pass\", \"source_files\": [\"scripts/controller.py\"], \"test_files\": [\"tests/test_controller.py\"]}\n-->"
+    },
+    "/repos/danielbyon/development-process/issues/comments/3": {
+      "user": {
+        "id": 123
+      },
+      "body": "<!-- release-evidence\n{\"revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"gate\": \"owner_authorization\", \"execution_id\": \"owner_authorization-execution\", \"report\": \"Synthetic inspectable report for negative and positive tests.\", \"verdict\": \"pass\", \"action\": \"merge\"}\n-->"
+    },
+    "/repos/danielbyon/development-process/actions/runs/4": {
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "run_attempt": 1
+    },
+    "/repos/danielbyon/development-process": {
+      "full_name": "danielbyon/development-process",
+      "owner": {
+        "id": 123
+      }
+    },
+    "/repos/danielbyon/development-process/issues/comments/10": {
+      "user": {
+        "id": 123
+      },
+      "body": "{\"execution_id\": \"author-execution\", \"repository\": \"danielbyon/development-process\", \"reviewed_range\": {\"base_revision\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"head_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"role\": \"author\", \"schema_version\": 1, \"transcript\": \"Original author-execution at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+    },
+    "/repos/danielbyon/development-process/issues/comments/11": {
+      "user": {
+        "id": 123
+      },
+      "body": "{\"execution_id\": \"review-execution\", \"repository\": \"danielbyon/development-process\", \"reviewed_range\": {\"base_revision\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"head_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"role\": \"independent_review\", \"schema_version\": 1, \"transcript\": \"review-execution at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nSynthetic inspectable report for negative and positive tests.\"}"
+    },
+    "/repos/danielbyon/development-process/issues/comments/12": {
+      "user": {
+        "id": 123
+      },
+      "body": "{\"execution_id\": \"chatgpt_inspection-execution\", \"repository\": \"danielbyon/development-process\", \"reviewed_range\": {\"base_revision\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"head_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"role\": \"chatgpt_inspection\", \"schema_version\": 1, \"transcript\": \"chatgpt_inspection-execution at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nSynthetic inspectable report for negative and positive tests.\"}"
+    },
+    "/repos/danielbyon/development-process/issues/comments/13": {
+      "user": {
+        "id": 123
+      },
+      "body": "{\"execution_id\": \"owner_authorization-execution\", \"repository\": \"danielbyon/development-process\", \"reviewed_range\": {\"base_revision\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"head_revision\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}, \"role\": \"owner_authorization\", \"schema_version\": 1, \"transcript\": \"owner_authorization-execution at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nSynthetic inspectable report for negative and positive tests.\"}"
+    }
+  }
+}

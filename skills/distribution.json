@@ -1,6 +1,5 @@
 {
-  "schema_version": 1,
-  "policy_revision": "e2afa055d1126763c69f0e0392d25b86bab98014",
+  "schema_version": 2,
   "skills": [
     {
       "name": "development-orchestrator",
@@ -26,5 +25,7 @@
         "agents/openai.yaml"
       ]
     }
-  ]
+  ],
+  "policy_reference": "{{release_tag}}",
+  "transform_version": 1
 }

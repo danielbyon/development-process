@@ -61,15 +61,16 @@ def source_checkout(parent: Path) -> tuple[Path, str]:
     git(ROOT, "clone", "--quiet", "--shared", str(ROOT), str(checkout))
     git(checkout, "checkout", "--quiet", "--detach", POLICY_REVISION)
 
-    shutil.copytree(ROOT / "skills", checkout / "skills", dirs_exist_ok=True)
+    # Keep legacy sources independent of the current release templates.
+    git(checkout, "checkout", "e47c8882e590c3ec41d2d46f461d18ed73132534", "--", "skills")
     shutil.copytree(
         ROOT / "scripts" / "vendor",
         checkout / "scripts" / "vendor",
         dirs_exist_ok=True,
     )
     git(checkout, "add", "skills", "scripts/vendor")
-    git(checkout, "-c", "user.name=Issue 5 Test", "-c",
-        "user.email=issue5-test@example.invalid", "commit", "--quiet",
+    git(checkout, "-c", "user.name=Skill Distribution Test", "-c",
+        "user.email=skill-distribution-test@example.invalid", "commit", "--quiet",
         "--allow-empty",
         "-m", "Test fixture source")
     return checkout, git(checkout, "rev-parse", "HEAD")
@@ -77,7 +78,7 @@ def source_checkout(parent: Path) -> tuple[Path, str]:
 
 class SkillDistributionTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(prefix="issue5-distribution-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="skill-distribution-")
         self.addCleanup(self.temporary.cleanup)
         self.temp_root = Path(self.temporary.name)
         self.source_root, self.source_revision = source_checkout(self.temp_root)
@@ -590,8 +591,8 @@ class SkillDistributionTests(unittest.TestCase):
         with skill_path.open("a") as skill:
             skill.write("\nUpgrade fixture marker.\n")
         git(self.source_root, "add", str(skill_path.relative_to(self.source_root)))
-        git(self.source_root, "-c", "user.name=Issue 5 Test", "-c",
-            "user.email=issue5-test@example.invalid", "commit", "--quiet",
+        git(self.source_root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "--quiet",
             "-m", "Test fixture upgrade")
         source_revision_v2 = git(self.source_root, "rev-parse", "HEAD")
         archive_v2 = build_packages(
@@ -654,8 +655,8 @@ class SkillDistributionTests(unittest.TestCase):
         with skill_path.open("a") as skill:
             skill.write("\nSecond committed source version.\n")
         git(self.source_root, "add", str(skill_path.relative_to(self.source_root)))
-        git(self.source_root, "-c", "user.name=Issue 5 Test", "-c",
-            "user.email=issue5-test@example.invalid", "commit", "--quiet",
+        git(self.source_root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "--quiet",
             "-m", "Test rollback source")
         archive_v2 = build_packages(
             self.source_root,
@@ -988,6 +989,227 @@ class SkillDistributionTests(unittest.TestCase):
 
         self.assertFalse((self.artifacts / "package.zip").exists())
         self.assertEqual(list(self.artifacts.glob("*.tmp")), [])
+
+
+class ReleasePackageTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="release-packages-")
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.root, revision = source_checkout(self.base)
+        manifest_path = self.root / "skills/distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest.update(schema_version=2, policy_reference="{{release_tag}}", transform_version=1)
+        manifest.pop("policy_revision")
+        manifest_path.write_text(json.dumps(manifest))
+        for name in SKILL_NAMES:
+            path = self.root / "skills" / name / "SKILL.md"
+            text = path.read_text()
+            text = text.replace(f"/blob/{POLICY_REVISION}/docs/PROCESS.md", "/blob/{{release_tag}}/docs/PROCESS.md")
+            path.write_text(text)
+        git(self.root, "add", "skills")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Release template")
+        self.context = dict(release_version="2026.11.16", source_revision=git(self.root, "rev-parse", "HEAD"),
+                            policy_revision=POLICY_REVISION, builder_revision=revision, transform_version=1)
+
+    def test_reconstructs_eight_identical_artifacts_without_working_sources(self):
+        first, second = self.base / "first", self.base / "second"
+        paths = distribution_module.build_release_packages(self.root, first, self.context)
+        shutil.rmtree(self.root / "skills")
+        distribution_module.build_release_packages(self.root, second, self.context)
+        self.assertEqual(len(paths), 8)
+        self.assertEqual({p.name:p.read_bytes() for p in first.iterdir()},
+                         {p.name:p.read_bytes() for p in second.iterdir()})
+        self.assertEqual(len(distribution_module.verify_release_packages(self.root, first, self.context)), 8)
+        with zipfile.ZipFile(first / "development-review.zip") as archive:
+            payload = archive.read("development-review/SKILL.md")
+            self.assertIn(b"/blob/2026.11.16/docs/PROCESS.md", payload)
+            self.assertNotIn(b"{{release_tag}}", payload)
+
+    def test_rejects_tampering_and_conflicting_output(self):
+        output = self.base / "packages"
+        distribution_module.build_release_packages(self.root, output, self.context)
+        (output / "development-review.zip").write_bytes(b"tampered")
+        with self.assertRaises(DistributionError):
+            distribution_module.verify_release_packages(self.root, output, self.context)
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(self.root, output, self.context)
+
+    def test_rejects_unknown_transform_and_invalid_version(self):
+        for changes in ({"transform_version": 2}, {"release_version": "2026.02.30"}, {"release_version": "2026.11.16.1"}):
+            with self.subTest(changes=changes), self.assertRaises(DistributionError):
+                distribution_module.build_release_packages(self.root, self.base / "out", self.context | changes)
+
+    def test_candidate_staging_is_idempotent_and_rejects_drift(self):
+        output, staging = self.base / "packages", self.base / "staging"
+        distribution_module.build_release_packages(self.root, output, self.context)
+        staging.mkdir()
+        initialize_staging_root(self.root, staging)
+        results = distribution_module.stage_release_packages(self.root, output, staging, self.context)
+        self.assertEqual([r["status"] for r in results], ["installed"] * 3)
+        results = distribution_module.stage_release_packages(self.root, output, staging, self.context)
+        self.assertEqual([r["status"] for r in results], ["unchanged"] * 3)
+        (staging / ".agents/skills/development-review/SKILL.md").write_text("drift")
+        with self.assertRaises(DistributionError):
+            distribution_module.stage_release_packages(self.root, output, staging, self.context)
+
+    def test_cli_candidate_package_and_verify_without_tag(self):
+        context_path = self.base / "context.json"
+        context_path.write_text(json.dumps(self.context))
+        output = self.base / "cli-packages"
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["release-package", "--root", str(self.root), "--context", str(context_path), "--output-dir", str(output)]), 0)
+            self.assertEqual(main(["release-verify", "--root", str(self.root), "--context", str(context_path), "--artifact-dir", str(output)]), 0)
+
+    def test_rejects_historical_symlink_and_missing_template(self):
+        path = self.root / "skills/development-review/SKILL.md"
+        path.unlink()
+        path.symlink_to("../development-orchestrator/SKILL.md")
+        git(self.root, "add", "skills")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c", "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Invalid source")
+        context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(self.root, self.base / "bad", context)
+
+    def test_verification_binds_full_context(self):
+        output = self.base / "packages"
+        distribution_module.build_release_packages(self.root, output, self.context)
+        with self.assertRaises(DistributionError):
+            distribution_module.verify_release_packages(self.root, output, self.context | {"evidence": "changed"})
+
+    def test_legacy_source_release_adapter(self):
+        legacy_base = self.base / "legacy"
+        legacy_base.mkdir()
+        root, revision = source_checkout(legacy_base)
+        context = self.context | {"source_revision": revision}
+        self.assertEqual(len(distribution_module.build_release_packages(root, self.base / "legacy-release", context)), 8)
+
+    def test_rejects_self_consistent_forged_sidecar_and_archive(self):
+        output = self.base / "packages"
+        distribution_module.build_release_packages(self.root, output, self.context)
+        archive_path = output / "development-review.zip"
+        with zipfile.ZipFile(archive_path) as archive:
+            payloads = {name: archive.read(name) for name in archive.namelist()}
+        payloads["development-review/SKILL.md"] += b"forged policy instructions\n"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            for name, payload in payloads.items():
+                archive.writestr(name, payload)
+        sidecar_path = output / "development-review.provenance.json"
+        sidecar = json.loads(sidecar_path.read_text())
+        sidecar["archive_sha256"] = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+        sidecar["payload_sha256"] = {k: hashlib.sha256(v).hexdigest() for k,v in payloads.items()}
+        sidecar_path.write_text(json.dumps(sidecar))
+        with self.assertRaises(DistributionError):
+            distribution_module.verify_release_packages(self.root, output, self.context)
+
+    def test_candidate_staging_rejects_source_overlap(self):
+        output = self.base / "packages"
+        distribution_module.build_release_packages(self.root, output, self.context)
+        with self.assertRaises(DistributionError):
+            distribution_module.stage_release_packages(self.root, output, self.root, self.context)
+
+    def test_rejects_missing_template(self):
+        path = self.root / "skills/development-review/SKILL.md"
+        path.write_text(path.read_text().replace("{{release_tag}}", "unbound"))
+        git(self.root, "add", "skills")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c", "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Invalid binding")
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(self.root, self.base / "bad", self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")})
+
+    def test_rejects_release_token_outside_canonical_policy_url(self):
+        path = self.root / "skills/development-review/SKILL.md"
+        path.write_bytes(path.read_bytes() + b"\nHistorical example identifier: `{{release_tag}}`.\n")
+        git(self.root, "add", "skills")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c", "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Unrelated template token")
+        context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(self.root, self.base / "bad", context)
+
+    def test_transformation_preserves_all_bytes_outside_policy_url(self):
+        output = self.base / "packages"
+        distribution_module.build_release_packages(self.root, output, self.context)
+        for name in SKILL_NAMES:
+            original = (self.root / "skills" / name / "SKILL.md").read_bytes()
+            with zipfile.ZipFile(output / f"{name}.zip") as archive:
+                actual = archive.read(f"{name}/SKILL.md")
+            url = b"https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md"
+            self.assertEqual(actual, original.replace(url, url.replace(b"{{release_tag}}", self.context["release_version"].encode())))
+
+    def test_rejects_release_token_in_nonpolicy_payload(self):
+        path = self.root / "skills/development-review/agents/openai.yaml"
+        path.write_bytes(path.read_bytes() + b"\n# {{release_tag}}\n")
+        git(self.root, "add", "skills")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c", "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Unexpected metadata token")
+        context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(self.root, self.base / "bad", context)
+
+    def test_official_validator_receives_exact_transformed_archive_bytes(self):
+        checked = {}
+        real_run = subprocess.run
+        validator = str(self.root.resolve() / distribution_module.VALIDATOR_PATH)
+
+        def observe(arguments, **kwargs):
+            if len(arguments) > 2 and str(arguments[1]) == validator:
+                directory = Path(arguments[2])
+                payload = (directory / "SKILL.md").read_bytes()
+                if b"/blob/2026.11.16/docs/PROCESS.md" in payload:
+                    checked[directory.name] = payload
+            return real_run(arguments, **kwargs)
+
+        output = self.base / "packages"
+        with patch.object(distribution_module.subprocess, "run", side_effect=observe):
+            distribution_module.build_release_packages(self.root, output, self.context)
+        self.assertEqual(set(checked), set(SKILL_NAMES))
+        for name in SKILL_NAMES:
+            with zipfile.ZipFile(output / f"{name}.zip") as archive:
+                self.assertEqual(checked[name], archive.read(f"{name}/SKILL.md"))
+                self.assertEqual(set(archive.namelist()), {f"{name}/SKILL.md", f"{name}/agents/openai.yaml"})
+
+    def test_transformed_payload_validator_failure_blocks_bundle(self):
+        real_run = subprocess.run
+        validator = str(self.root.resolve() / distribution_module.VALIDATOR_PATH)
+
+        def reject_transformed(arguments, **kwargs):
+            result = real_run(arguments, **kwargs)
+            if len(arguments) > 2 and str(arguments[1]) == validator:
+                if b"/blob/2026.11.16/docs/PROCESS.md" in (Path(arguments[2]) / "SKILL.md").read_bytes():
+                    return subprocess.CompletedProcess(arguments, 1, "rejected transformed payload", "")
+            return result
+
+        output = self.base / "packages"
+        with patch.object(distribution_module.subprocess, "run", side_effect=reject_transformed):
+            with self.assertRaisesRegex(DistributionError, "rejected transformed payload"):
+                distribution_module.build_release_packages(self.root, output, self.context)
+        self.assertFalse(output.exists())
+
+    def test_actual_templates_validate_and_package_from_committed_inputs(self):
+        self.assertEqual(set(validate_distribution(ROOT)), set(SKILL_NAMES))
+        manifest_path = Path("skills/distribution.json")
+        (self.root / manifest_path).write_bytes((ROOT / manifest_path).read_bytes())
+        for name in SKILL_NAMES:
+            for relative in ("SKILL.md", "agents/openai.yaml"):
+                path = Path("skills") / name / relative
+                (self.root / path).write_bytes((ROOT / path).read_bytes())
+        (self.root / "docs/PROCESS.md").write_bytes((ROOT / "docs/PROCESS.md").read_bytes())
+        git(self.root, "add", "skills", "docs/PROCESS.md")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Actual release inputs")
+        revision = git(self.root, "rev-parse", "HEAD")
+        context = self.context | {"source_revision": revision, "policy_revision": revision}
+        output = self.base / "actual-template-packages"
+        self.assertEqual(len(distribution_module.build_release_packages(self.root, output, context)), 8)
+        self.assertEqual(len(distribution_module.verify_release_packages(self.root, output, context)), 8)
+        for name in SKILL_NAMES:
+            original = (ROOT / "skills" / name / "SKILL.md").read_bytes()
+            with zipfile.ZipFile(output / f"{name}.zip") as archive:
+                self.assertEqual(set(archive.namelist()), {f"{name}/SKILL.md", f"{name}/agents/openai.yaml"})
+                url = b"https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md"
+                self.assertEqual(archive.read(f"{name}/SKILL.md"),
+                    original.replace(url, url.replace(b"{{release_tag}}", context["release_version"].encode())))
+                self.assertEqual(archive.read(f"{name}/agents/openai.yaml"),
+                    (ROOT / "skills" / name / "agents/openai.yaml").read_bytes())
 
 
 if __name__ == "__main__":

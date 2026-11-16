@@ -1,0 +1,16 @@
+{
+  "name": "CalVer tag hardening (optional)",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/tags/[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]",
+        "refs/tags/[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9]*"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [{"type": "update"}, {"type": "deletion"}]
+}

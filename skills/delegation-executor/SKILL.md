@@ -9,7 +9,13 @@ Use this Skill to carry out an approved repository task. GitHub Issues hold the 
 
 ## Policy and authority
 
-- Follow [the canonical policy at the approved distribution revision `e2afa055d1126763c69f0e0392d25b86bab98014`](https://github.com/danielbyon/development-process/blob/e2afa055d1126763c69f0e0392d25b86bab98014/docs/PROCESS.md). Verify the policy revision pinned to the task before relying on a local copy. Keep an in-flight task on its pinned revision unless the owner explicitly approves a migration.
+For a new task, resolve the newest verified immutable published CalVer release and record its release tag once. Read [the canonical policy for this release](https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md) before applying the workflow. The packager must replace the token in the policy link; an unresolved template is not an approved distribution.
+
+Verify release identity, tag target, native attestation, all eight assets, checksums and reconstructed provenance. Ignore GitHub's `latest` designation. If the newest eligible release cannot be verified, block rather than fall back silently. Record source, policy and builder revisions as separate internal evidence. If no immutable release exists, return `NO_IMMUTABLE_RELEASE`; do not select a static SHA default.
+
+Check that the installed Skill exactly matches the selected release payload, or inspect explicit compatibility evidence identifying the installed payload/source, selected policy/source, behavioral differences and applicable validation. Unknown compatibility blocks until a compatible manual installation or explicit verified historical selection. A matching policy SHA or frontmatter alone is insufficient.
+
+Continue an existing task using its recorded SHA or CalVer and Skill source identity. Resolve and inspect its exact policy without reselecting the newest release. Verify local policy bytes and provenance before relying on them. Preserve historical pins unless the owner explicitly approves migration. Publication never installs Skills, changes global instructions or migrates active tasks.
 - Follow the accepted issue, approved plan, and project instructions. Do not widen scope or silently change the task contract.
 - ChatGPT approves plans, directly inspects final source and tests, adjudicates review, and decides technical readiness. The repository owner decides material product, scope, architecture, and security trade-offs and explicitly authorizes merges.
 - This Skill does not authorize a merge, waive a required gate, or permit an external action outside the approved task.

@@ -11,7 +11,13 @@ The issue defines accepted scope, and the pinned policy governs roles and proces
 
 ## Policy and source access
 
-- Read [`docs/PROCESS.md` at the approved policy revision `e2afa055d1126763c69f0e0392d25b86bab98014`](https://github.com/danielbyon/development-process/blob/e2afa055d1126763c69f0e0392d25b86bab98014/docs/PROCESS.md) before applying the workflow. Verify that any local policy copy has the same source revision; otherwise read the pinned file through GitHub. Do not silently adopt a newer policy.
+For a new task, resolve the newest verified immutable published CalVer release and record its release tag once. Read [the canonical policy for this release](https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md) before applying the workflow. The packager must replace the token in the policy link; an unresolved template is not an approved distribution.
+
+Verify release identity, tag target, native attestation, all eight assets, checksums and reconstructed provenance. Ignore GitHub's `latest` designation. If the newest eligible release cannot be verified, block rather than fall back silently. Record source, policy and builder revisions as separate internal evidence. If no immutable release exists, return `NO_IMMUTABLE_RELEASE`; do not select a static SHA default.
+
+Check that the installed Skill exactly matches the selected release payload, or inspect explicit compatibility evidence identifying the installed payload/source, selected policy/source, behavioral differences and applicable validation. Unknown compatibility blocks until a compatible manual installation or explicit verified historical selection. A matching policy SHA or frontmatter alone is insufficient.
+
+Continue an existing task using its recorded SHA or CalVer and Skill source identity. Resolve and inspect its exact policy without reselecting the newest release. Verify local policy bytes and provenance before relying on them. Preserve historical pins unless the owner explicitly approves migration. Publication never installs Skills, changes global instructions or migrates active tasks.
 - Verify the repository, issue, task identity, worktree, branch, baseline, HEAD, PR, and candidate paths from current evidence. Read relevant instructions and accepted specifications.
 - Always inspect the candidate source directly through gpt-repo-local or the GitHub connection for the repository owner. Reports and summaries do not establish source-review evidence. If source is unavailable, return `BLOCKED` for readiness.
 - Inspect applicable source-adjacent tests and validation evidence. If applicable tests exist but cannot be inspected, record them as `UNVERIFIED` and return `BLOCKED`. If no tests apply, such as for a documentation-only change, record that determination and its rationale and assess the applicable validation evidence. Do not block solely because no tests apply, and do not report absent or unrun tests as passing.
@@ -74,3 +80,9 @@ When the owner says `merge`, `close this out`, or gives another explicit merge i
 ## Response format
 
 Keep the report tied to the exact candidate revision. State the verdict, evidence, findings and dispositions, check statuses, owner authorization, residual risk, and next action. For `review feedback`, include the targeted Codex prompt when corrections are needed. For closeout, report the merge commit, issue state, applicable checks, and cleanup disposition.
+
+## Release readiness evidence
+
+For release qualification, provide an index into actual issue, task/delegation, independent-review, inspection, CI and owner-authorization records. Include repository/PR identity, reviewed head/base and integration result, review ranges and correction coverage, source/test inspection identity, CI run/attempt and tested revision, and explicit owner merge authorization. Link inspectable original records and identify their provenance. Booleans or a readiness summary cannot establish another execution's review or authorization.
+
+Verify every uncovered integration from an applicable admitted baseline through the selected source, and separately through the builder. Cover complete changes. For squash/rebase integration, verify tree, range and parent relationships instead of requiring identical commit IDs. Import genuine historical evidence without inventing structured records retrospectively. Missing, contradictory or stale mandatory evidence blocks publication. A candidate baseline is not admitted until its evidence passes; it cannot confer trust backwards onto older source. Reuse existing authoritative records without requiring cosmetic edits to old PRs.

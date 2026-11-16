@@ -163,10 +163,16 @@ def _validate_links(skill_md: Path, included_files: set[str]) -> None:
 
 def _skill_entries(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     manifest = load_manifest(root)
-    if manifest.get("schema_version") != 1:
+    schema = manifest.get("schema_version")
+    if schema not in (1, 2):
         raise DistributionError("Unsupported distribution manifest schema_version.")
     revision = manifest.get("policy_revision")
-    _policy_file_exists(root, revision)
+    if schema == 1:
+        _policy_file_exists(root, revision)
+    else:
+        if manifest.get("policy_reference") != "{{release_tag}}" or manifest.get("transform_version") != 1:
+            raise DistributionError("Unsupported release template contract.")
+        revision = "{{release_tag}}"
     raw_skills = manifest.get("skills")
     if not isinstance(raw_skills, list):
         raise DistributionError("The distribution manifest must list its Skills.")
@@ -214,6 +220,12 @@ def _skill_entries(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             raise DistributionError(
                 f"{name}/SKILL.md policy reference differs from the manifest pin."
             )
+        if schema == 2:
+            if skill_text.count(policy_url) != 1 or skill_text.count(revision) != 1:
+                raise DistributionError(f"{name} has an unexpected release token outside its canonical policy URL.")
+            for relative in files:
+                if relative.as_posix() != "SKILL.md" and b"{{release_tag}}" in (directory / relative).read_bytes():
+                    raise DistributionError(f"{name} has an unexpected release token in {relative}.")
         metadata_path = directory / "agents" / "openai.yaml"
         try:
             metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
@@ -272,6 +284,8 @@ def resolve_task_policy(root: Path, task_policy_revision: str | None = None) -> 
         if task_policy_revision is None
         else task_policy_revision
     )
+    if task_policy_revision is None and manifest.get("schema_version") == 2:
+        raise DistributionError("Use resolve-task to select a verified immutable release.")
     _policy_file_exists(root, selected)
     return selected
 
@@ -321,6 +335,8 @@ def build_packages(root: Path, output_dir: Path, source_revision: str) -> list[P
     _require_revision(root, source_revision)
     names = validate_distribution(root)
     manifest, entries = _skill_entries(root)
+    if manifest.get("schema_version") != 1:
+        raise DistributionError("Use release-package with a frozen context for schema-2 sources.")
     try:
         committed_manifest = _committed_file(
             root, source_revision, MANIFEST_PATH.as_posix()
@@ -616,6 +632,11 @@ def install_archive(
     if provenance["policy_revision"] != expected_policy_revision:
         raise DistributionError("Package policy pin does not match the requested task policy.")
 
+    return _install_verified(root, archive_path, staging_root, expected_policy_revision, provenance, upgrade)
+
+
+def _install_verified(root, archive_path, staging_root, expected_policy_revision, provenance, upgrade=False):
+    """Stage independently verified payloads with the shared drift and rollback guards."""
     staging_root = _require_external_staging_root(root, Path(staging_root))
     skills_dir = _staging_skills_dir(staging_root)
     target = skills_dir / provenance["skill_name"]
@@ -746,13 +767,205 @@ def _parser() -> argparse.ArgumentParser:
     policy = commands.add_parser("policy", help="resolve a new or in-flight task policy pin")
     policy.add_argument("--root", type=Path, default=Path.cwd())
     policy.add_argument("--task-policy-revision")
+    for command in ("release-package", "release-verify", "release-stage"):
+        release = commands.add_parser(command, help="operate on a source-bound release candidate")
+        release.add_argument("--root", type=Path, default=Path.cwd())
+        release.add_argument("--context", type=Path, required=True)
+        if command == "release-package":
+            release.add_argument("--output-dir", type=Path, required=True)
+        else:
+            release.add_argument("--artifact-dir", type=Path, required=True)
+        if command == "release-stage":
+            release.add_argument("--staging-root", type=Path, required=True)
+            release.add_argument("--upgrade", action="store_true")
     return parser
 
+
+
+def _json_bytes(value: Any) -> bytes:
+    return (json.dumps(value, sort_keys=True, indent=2, allow_nan=False) + "\n").encode("utf-8")
+
+
+def _regular_blob(root: Path, revision: str, path: str) -> bytes:
+    """Read a regular Git blob; historical symlinks are never followed."""
+    listing = _git(root, "ls-tree", revision, "--", path).decode().strip()
+    if not listing or listing.split()[0] not in {"100644", "100755"}:
+        raise DistributionError(f"Expected regular committed file: {revision}:{path}")
+    return _committed_file(root, revision, path)
+
+
+def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
+    """Reconstruct the complete release using trusted code and committed data only.
+
+    Required context fields are release_version, source_revision, policy_revision,
+    and builder_revision. Extra JSON fields are frozen into the manifest. This
+    operation neither resolves release authority nor requires a remote tag.
+    """
+    import datetime
+    import io
+
+    if not isinstance(context, dict):
+        raise DistributionError("Release context must be an object.")
+    version = context.get("release_version")
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9]{4}\.[0-9]{2}\.[0-9]{2}(?:\.[2-9]|\.[1-9][0-9]+)?", version):
+        raise DistributionError("Invalid release CalVer.")
+    try:
+        datetime.datetime.strptime(version[:10], "%Y.%m.%d")
+        _json_bytes(context)
+    except (ValueError, TypeError) as error:
+        raise DistributionError("Invalid release date or context.") from error
+    if context.get("transform_version", 1) != 1:
+        raise DistributionError("Unsupported transformation version.")
+    for key in ("source_revision", "policy_revision", "builder_revision"):
+        _require_revision(root, context.get(key))
+    source = context["source_revision"]
+    policy = _regular_blob(root, context["policy_revision"], "docs/PROCESS.md")
+    if policy != _regular_blob(root, source, "docs/PROCESS.md"):
+        raise DistributionError("Source and policy content differ.")
+    try:
+        manifest = json.loads(_regular_blob(root, source, MANIFEST_PATH.as_posix()))
+    except (ValueError, UnicodeDecodeError) as error:
+        raise DistributionError("Invalid committed manifest.") from error
+    if not isinstance(manifest, dict) or manifest.get("schema_version") not in (1, 2):
+        raise DistributionError("Unsupported committed manifest.")
+    bundle = {}
+    # Materialize data for existing validators; never execute historical code.
+    with tempfile.TemporaryDirectory(prefix="release-source-") as temporary:
+        snapshot = Path(temporary)
+        (snapshot / "skills").mkdir()
+        (snapshot / MANIFEST_PATH).write_bytes(_json_bytes(manifest))
+        raw_entries = manifest.get("skills")
+        if not isinstance(raw_entries, list):
+            raise DistributionError("Committed manifest must list Skills.")
+        for entry in raw_entries:
+            if not isinstance(entry, dict) or entry.get("name") not in SKILL_NAMES:
+                raise DistributionError("Invalid committed Skill entry.")
+            name = entry["name"]
+            if entry.get("source_dir") != f"skills/{name}" or entry.get("files") != ["SKILL.md", "agents/openai.yaml"]:
+                raise DistributionError("Release requires the exact standalone payload allowlist.")
+            for relative in entry["files"]:
+                path = f"skills/{name}/{relative}"
+                destination = snapshot / path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(_regular_blob(root, source, path))
+        # Legacy validation needs Git access for its recorded policy revision.
+        (snapshot / ".git").write_text(f"gitdir: {_git(root, 'rev-parse', '--absolute-git-dir').decode().strip()}\n")
+        _, entries = _skill_entries(snapshot)
+        for entry in entries:
+            result = subprocess.run([sys.executable, str(Path(root).resolve() / VALIDATOR_PATH),
+                str(snapshot / entry["source_dir"])], capture_output=True, text=True)
+            if result.returncode:
+                raise DistributionError(f"Official validator rejected {entry['name']}: {result.stdout}{result.stderr}")
+            mapping = _source_files(entry)
+            originals = {member: (snapshot / path).read_bytes() for member, path in mapping.items()}
+            payloads = dict(originals)
+            member = f"{entry['name']}/SKILL.md"
+            original = payloads[member]
+            if manifest["schema_version"] == 2:
+                token = b"{{release_tag}}"
+                canonical = b"https://github.com/danielbyon/development-process/blob/" + token + b"/docs/PROCESS.md"
+                if original.count(canonical) != 1 or original.count(token) != 1:
+                    raise DistributionError("Missing or ambiguous policy template reference.")
+                payloads[member] = original.replace(canonical, canonical.replace(token, version.encode()))
+            else:
+                pin = manifest["policy_revision"].encode()
+                url = b"https://github.com/danielbyon/development-process/blob/" + pin + b"/docs/PROCESS.md"
+                label = b"`" + pin + b"`"
+                if original.count(url) != 1 or original.count(label) != 1:
+                    raise DistributionError("Unsupported historical policy binding.")
+                payloads[member] = original.replace(url, url.replace(pin, version.encode())).replace(label, b"`" + version.encode() + b"`")
+            # Validate the exact transformed bytes that will become archive members.
+            # The executable remains the trusted checkout's validator, never source data.
+            for payload_member, payload in payloads.items():
+                (snapshot / mapping[payload_member]).write_bytes(payload)
+            result = subprocess.run([sys.executable, str(Path(root).resolve() / VALIDATOR_PATH),
+                str(snapshot / entry["source_dir"])], capture_output=True, text=True)
+            if result.returncode:
+                raise DistributionError(
+                    f"Official validator rejected transformed {entry['name']}: {result.stdout}{result.stderr}"
+                )
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+                for path, payload in sorted(payloads.items()):
+                    info = zipfile.ZipInfo(path, (1980, 1, 1, 0, 0, 0))
+                    info.create_system = 3
+                    info.external_attr = (stat.S_IFREG | 0o644) << 16
+                    archive.writestr(info, payload, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+            archive_name = f"{entry['name']}.zip"
+            bundle[archive_name] = buffer.getvalue()
+            provenance = dict(schema_version=2, skill_name=entry["name"], release_version=version,
+                              source_revision=source, policy_revision=context["policy_revision"],
+                              builder_revision=context["builder_revision"], transform_version=1,
+                              source_files=mapping, original_sha256={k:hashlib.sha256(v).hexdigest() for k,v in originals.items()},
+                              payload_sha256={k:hashlib.sha256(v).hexdigest() for k,v in payloads.items()},
+                              archive_sha256=hashlib.sha256(bundle[archive_name]).hexdigest())
+            bundle[f"{entry['name']}.provenance.json"] = _json_bytes(provenance)
+    names = sorted([*bundle, "release-manifest.json", "SHA256SUMS"])
+    bundle["release-manifest.json"] = _json_bytes(dict(schema_version=2, context=context, assets=names,
+        asset_sha256={k:hashlib.sha256(v).hexdigest() for k,v in sorted(bundle.items())}))
+    bundle["SHA256SUMS"] = "".join(f"{hashlib.sha256(v).hexdigest()}  {k}\n" for k,v in sorted(bundle.items())).encode()
+    return bundle
+
+
+def build_release_packages(root: Path, output_dir: Path, context: dict) -> list[Path]:
+    """Build eight artifacts atomically; existing output must match exactly."""
+    root, output_dir = Path(root), Path(output_dir)
+    bundle = _release_bundle(root, context)
+    if output_dir.exists():
+        return verify_release_packages(root, output_dir, context)
+    output_dir.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=".release-bundle-", dir=output_dir.parent))
+    try:
+        for name, payload in bundle.items():
+            (temporary / name).write_bytes(payload)
+        os.rename(temporary, output_dir)
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+    return [output_dir / name for name in sorted(bundle)]
+
+
+def verify_release_packages(root: Path, artifact_dir: Path, context: dict) -> list[Path]:
+    """Verify bytes against independent committed-source reconstruction."""
+    bundle = _release_bundle(Path(root), context)
+    artifact_dir = Path(artifact_dir)
+    try:
+        if artifact_dir.is_symlink() or {p.name for p in artifact_dir.iterdir()} != set(bundle):
+            raise DistributionError("Release asset set differs from expected eight assets.")
+        for name, expected in bundle.items():
+            path = artifact_dir / name
+            if path.is_symlink() or not path.is_file() or path.read_bytes() != expected:
+                raise DistributionError(f"Release asset differs from reconstructed source: {name}")
+    except OSError as error:
+        raise DistributionError(f"Could not read release assets: {error}") from error
+    return [artifact_dir / name for name in sorted(bundle)]
+
+
+def stage_release_packages(root: Path, artifact_dir: Path, staging_root: Path, context: dict, upgrade: bool = False) -> list[dict]:
+    """Stage a reconstructed candidate using existing isolation and drift guards."""
+    verify_release_packages(root, artifact_dir, context)
+    results = []
+    bundle = _release_bundle(Path(root), context)
+    for name in sorted(SKILL_NAMES):
+        provenance = json.loads(bundle[f"{name}.provenance.json"])
+        results.append(_install_verified(Path(root).resolve(), Path(artifact_dir) / f"{name}.zip",
+            staging_root, context["policy_revision"], provenance, upgrade))
+    return results
 
 def main(arguments: list[str] | None = None) -> int:
     args = _parser().parse_args(arguments)
     try:
-        if args.command == "validate":
+        if args.command.startswith("release-"):
+            context = _read_json(args.context, "release context")
+            if args.command == "release-package":
+                results = build_release_packages(args.root, args.output_dir, context)
+            elif args.command == "release-verify":
+                results = verify_release_packages(args.root, args.artifact_dir, context)
+            else:
+                results = stage_release_packages(args.root, args.artifact_dir, args.staging_root, context, args.upgrade)
+            for result in results:
+                print(f"PASS {args.command} {result}")
+        elif args.command == "validate":
             for name in validate_distribution(args.root):
                 print(f"PASS validate {name}")
         elif args.command == "package":
