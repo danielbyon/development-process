@@ -6,7 +6,7 @@
 
 This policy is the complete v1.0 process. Project instructions and future Skills adapt it; they do not replace or override it.
 
-The final amendments are incorporated in the policy: every task uses an isolated worktree and dedicated branch (§4); one non-waivable predicate covers confirmed in-scope or candidate-introduced/materially-worsened P0/P1 defects (§6); and tasks and Skills pin the current owner-approved immutable policy revision (§12).
+The final amendments are incorporated in the policy: every task uses an isolated worktree and dedicated branch (§4); one non-waivable predicate covers confirmed in-scope or candidate-introduced/materially-worsened P0/P1 defects (§6); and new tasks pin a verified immutable release and continuing tasks retain their recorded pins (§12).
 
 ## 1. Roles and authority
 
@@ -118,17 +118,21 @@ The final amendments are incorporated in the policy: every task uses an isolated
 
 ## 12. Distribution/pinning
 
-- The single canonical private repository, [danielbyon/development-process](https://github.com/danielbyon/development-process), holds policy, decision records, focused Skill source, templates, and installation and update guidance.
+- The single canonical public repository, [danielbyon/development-process](https://github.com/danielbyon/development-process), holds policy, decision records, focused Skill source, templates, and installation and update guidance.
 - The three focused Skills are:
   - **development-orchestrator:** ChatGPT planning, delegation, and plan review.
   - **development-review:** ChatGPT source review, review adjudication, readiness, and merge guidance.
   - **delegation-executor:** Codex worktree and delegation setup, implementation, validation, and PR preparation.
 - Skills operationally adapt the canonical policy; they do not duplicate its full governance text. Keep project-specific AGENTS.md instructions minimal and preserve native commands and constraints. Auxiliary Skills cannot override authority or gates; resolve conflicts explicitly.
-- New tasks pin the current owner-approved immutable policy commit revision. A task and its Skills use that same pinned revision until an owner-approved migration. Do not silently apply newly installed Skills to ongoing tasks.
-- Keep distribution as a second stage. The implementation PR does not change the immutable distribution pin or deploy revised Skills. After it merges and the actual policy commit is approved, track a separate, reviewed promotion under Issue #20 or an explicitly linked, appropriately authorized follow-up.
-- Keep Issue #20 open until its remaining distribution obligations are satisfied or formally transferred to that authorized follow-up. Do not mark all acceptance criteria complete at the implementation-PR merge.
-- The promotion packages the Skills against the approved policy revision, updates distribution metadata, policy links, historical-pin expectations, and package provenance, then runs the existing validator and isolated staging checks. Keep the policy revision separate from the Skill source commit and preserve existing task pins. Deploy only after the package checks pass and the owner approves promotion; staging and production activation remain owner-controlled.
-- Authoritative records are: the issue for accepted scope; the task or delegation for execution and result identity; the review for findings and disposition; and the PR for integration and readiness summary. Link these records and do not create competing task state.
+- For new tasks, resolve the newest verified immutable published CalVer release and record that tag once. Verify its policy, tag, assets, native attestation and reconstructed provenance. Ignore GitHub's `latest` designation. An unverifiable newest eligible release blocks resolution; before the first release, return `NO_IMMUTABLE_RELEASE` rather than selecting a static SHA default.
+- Existing tasks retain their recorded SHA or CalVer and Skill identity. Require exact installed-payload identity or explicit inspected compatibility evidence before applying a release. Unknown compatibility blocks. Do not silently apply newly installed Skills or repin ongoing tasks; migration requires explicit owner approval.
+- Keep source, policy and trusted builder revisions separate in internal evidence. Policy-content equality alone does not establish approval. Release-specific Skill links are deterministic transformations of committed source, independently reconstructed during verification.
+- One owner-triggered workflow qualifies, builds and publishes a complete draft as an immutable release. Qualification must establish independent full-diff/correction review, ChatGPT source/test inspection, required CI and owner merge authorization across all uncovered source and builder integrations. Structured readiness records locate actual evidence; unsupported assertions do not pass gates. A bounded candidate baseline requires admission evidence and cannot confer trust backwards.
+- Freeze original-run Pacific CalVer, source/policy/builder identities and qualification evidence. Verify all eight assets before publication. Preserve unknown drafts/tags and conflicting assets; recover only matching owned state. Correct published releases through a new CalVer, never by rewriting history.
+- Administration-read verification access is a proposed owner-provisioned prerequisite, pending configuration and verification. Qualification is read-only. Ordinary publication uses Contents write; conditional Workflows write requires technical necessity and separate owner authorization. Never escalate automatically. CalVer tag protection is optional hardening.
+- Implementation merge does not publish a release. The first release requires verified baseline admission, owner-configured prerequisites and separate owner dispatch; no additional per-release promotion PR is required. Preserve outstanding Issues #20/#22 distribution and live-qualification obligations until satisfied or formally transferred. Do not mark deployment complete from simulated evidence.
+- Publication and activation are separate. Temporary staging preserves unrelated Skills and refuses drift or cross-policy migration. Production installation, global instruction changes, active-task migration and MCP configuration remain separately owner-controlled; the release workflow performs none of them.
+- Authoritative records are: the issue for accepted scope; the task or delegation for execution and result identity; the review for findings and disposition; and the PR for integration and readiness summary. Link these records and do not create competing task state. See [Skill release operations](skill-releases.md) for evidence, recovery and bootstrap requirements.
 
 ## 13. Adoption and vocabulary
 

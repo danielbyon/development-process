@@ -1,6 +1,6 @@
 # Development Process
 
-This private repository holds the owner-approved development policy and its focused Skills. [docs/PROCESS.md](docs/PROCESS.md) is the canonical policy. This README explains the repository records, Skill distribution, and adoption.
+This public repository holds the owner-approved development policy and its focused Skills. [docs/PROCESS.md](docs/PROCESS.md) is the canonical policy. This README explains the repository records, Skill distribution, and adoption.
 
 ## Source of truth
 
@@ -10,7 +10,7 @@ This private repository holds the owner-approved development policy and its focu
 - [PR #6](https://github.com/danielbyon/development-process/pull/6) records the initial bootstrap and review evidence.
 - [AGENTS.md](AGENTS.md) points repository work to the canonical policy.
 - [The CI workflow](.github/workflows/ci.yml) verifies the synthetic pull-request commit and runs the Skill checks on that integration revision.
-- [skills/distribution.json](skills/distribution.json) is the package policy pin and file allowlist for the three Skills.
+- [skills/distribution.json](skills/distribution.json) defines release packaging and the file allowlist for the three Skills.
 
 Issues define accepted scope. Task or delegation records identify execution and results, review records capture findings, and pull requests record integration and readiness. Link these records instead of creating competing task state.
 
@@ -24,13 +24,17 @@ Every change receives a full review from a separate, non-authoring execution. Ch
 
 ## Skill distribution
 
-The distribution manifest pins new tasks and packages to policy revision `e2afa055d1126763c69f0e0392d25b86bab98014`. Each Skill links to that exact `docs/PROCESS.md` revision. Package provenance records the exact source commit separately: `policy_revision` identifies the canonical policy, while `source_revision` identifies the committed Skill files and manifest used to build an archive. The source revision may differ from the policy revision.
+New tasks resolve the newest verified immutable CalVer release and record its tag once. Source, policy and builder revisions remain distinct internal evidence. Verify the release and installed Skill compatibility before use. An unverifiable newest eligible release blocks; before the first release, resolution returns `NO_IMMUTABLE_RELEASE`.
 
-Existing tasks keep their recorded policy and Skill revisions. Applicable historical pins include `aa8dc7784641dd5416befdebc246ed081bfd7ade`, `93a86127a3721d6044f4a8e993a764731fbda4e5`, `142422527de28b8e20dea1158d2f54d020dcdcd5`, `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`, and `6fea1f50e0745c189685849f560f10a946e04091`. The resolver uses a task's existing pin when supplied, verifies that the policy commit contains `docs/PROCESS.md`, and fails if the commit is unavailable. Staging refuses an archive whose policy differs from the caller's task pin or the approved manifest. It does not migrate active tasks.
+Existing tasks retain their recorded SHA or CalVer. Historical pins include `aa8dc7784641dd5416befdebc246ed081bfd7ade`, `93a86127a3721d6044f4a8e993a764731fbda4e5`, `142422527de28b8e20dea1158d2f54d020dcdcd5`, `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`, `6fea1f50e0745c189685849f560f10a946e04091`, and `e2afa055d1126763c69f0e0392d25b86bab98014`. None is an implicit new-task default.
+
+The owner-triggered workflow uses trusted main tooling to qualify explicitly selected source, prepare a complete draft, and publish eight verified assets immutably. Implementation merge does not publish or activate anything. See [Skill release operations](docs/skill-releases.md) for credentials, evidence, first-release blockers and recovery. Legacy SHA packaging and staging remain available for historical sources using schema 1; the commands below describe that legacy interface and do not publish a release.
 
 ### Validate and package
 
-Install the CI dependency, then validate and package from a committed source tree:
+The following legacy commands apply only inside a verified schema-1 source checkout. They do not apply to the schema-2 source templates in current main. For current release candidates, use the qualified context and controller procedure in the operator guide.
+
+Install the CI dependency, then validate and package that historical committed source tree:
 
 ```bash
 python3 -m pip install -r requirements-ci.txt
@@ -77,10 +81,12 @@ In ChatGPT, open Plugins from the sidebar and select Skills. Choose Create, then
 Run the checks from the repository root:
 
 ```bash
-python3 -m unittest discover -s tests -p test_issue5_workflow.py -v
+python3 -m unittest discover -s tests -p test_workflow_contract.py -v
 python3 -m unittest discover -s tests -p test_skill_distribution.py -v
 python3 -m unittest discover -s tests -p test_distribution_smoke.py -v
 python3 -m unittest discover -s tests -p test_primary_main_fast_forward.py -v
+python3 -m unittest discover -s tests -p test_skill_releases.py -v
+python3 -m unittest discover -s tests -p test_github_releases.py -v
 ```
 
 The workflow contract tests structurally inspect the shipped Skill files and CI source-revision binding; they do not execute a Skill through an LLM. The distribution suite exercises validation, deterministic archives, source provenance, historical pin resolution, migration refusal, and temporary staging behavior. The CLI smoke test builds and stages all three archives in a disposable project containing an unrelated Skill. The primary-main suite checks safe fast-forward cleanup. These checks do not perform a live ChatGPT upload, MCP registration, or MCP server check.
@@ -89,7 +95,7 @@ CI checks the GitHub synthetic merge commit's parents and diff, then runs these 
 
 ## Adoption
 
-Apply policy prospectively. Existing repositories adopt it on their next task and add CI for relevant local suites when needed. New tasks use the current owner-approved policy revision. Do not rewrite historical task records.
+Apply policy prospectively. Existing repositories adopt it on their next task and add CI for relevant local suites when needed. New tasks resolve a verified immutable release; existing tasks retain their recorded pins. Do not rewrite historical task records.
 
 ## Follow-up slices
 

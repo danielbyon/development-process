@@ -9,11 +9,17 @@ This Skill helps ChatGPT sessions select approved work, prepare task handoffs, a
 
 ## Policy and evidence
 
-For new tasks, read the policy pin in `skills/distribution.json` from the distributed source revision. Read [`docs/PROCESS.md` at the approved revision `e2afa055d1126763c69f0e0392d25b86bab98014`](https://github.com/danielbyon/development-process/blob/e2afa055d1126763c69f0e0392d25b86bab98014/docs/PROCESS.md) before applying the workflow. Keep already-started tasks on their recorded policy and Skill revisions unless the owner approves migration.
+For a new task, resolve the newest verified immutable published CalVer release and record its release tag once. Read [the canonical policy for this release](https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md) before applying the workflow. The packager must replace the token in the policy link; an unresolved template is not an approved distribution.
+
+Verify release identity, tag target, native attestation, all eight assets, checksums and reconstructed provenance. Ignore GitHub's `latest` designation. If the newest eligible release cannot be verified, block rather than fall back silently. Record source, policy and builder revisions as separate internal evidence. If no immutable release exists, return `NO_IMMUTABLE_RELEASE`; do not select a static SHA default.
+
+Check that the installed Skill exactly matches the selected release payload, or inspect explicit compatibility evidence identifying the installed payload/source, selected policy/source, behavioral differences and applicable validation. Unknown compatibility blocks until a compatible manual installation or explicit verified historical selection. A matching policy SHA or frontmatter alone is insufficient.
+
+Continue an existing task using its recorded SHA or CalVer and Skill source identity. Resolve and inspect its exact policy without reselecting the newest release. Verify local policy bytes and provenance before relying on them. Preserve historical pins unless the owner explicitly approves migration. Publication never installs Skills, changes global instructions or migrates active tasks.
 
 - Use `gpt-repo-local` first for connected repository source. Use the GitHub connection that matches the repository owner for issues and pull requests.
 - Verify the repository root, read-only checkout revision, and active task identity from current evidence. If a task worktree exists, verify its path, branch, HEAD, and task identity; if none exists during planning, label any worktree/branch as proposed rather than verified. Inspect project instructions, accepted issues and specifications, decision records, source, tests, and active work as relevant.
-- Read the policy at its pinned commit. Before relying on a local `docs/PROCESS.md`, verify that its source revision matches the pin; otherwise retrieve the exact commit through an available source or report that it is unavailable. Cite the immutable policy revision in the decision; never cite an unverified local copy as the pinned policy.
+- Read the policy at the recorded task pin and verify its resolved immutable commit. Before relying on a local `docs/PROCESS.md`, verify that its source revision matches the pin; otherwise retrieve the exact commit through an available source or report that it is unavailable. Cite the immutable policy revision in the decision; never cite an unverified local copy as the pinned policy.
 - Separate verified facts from inferences. If the issue, source, policy pin, or task identity cannot be inspected, report the gap and stop at the affected decision.
 - Do not silently change the pinned policy. If the task cites another revision or the approved source has moved, identify the revisions and request owner adjudication.
 

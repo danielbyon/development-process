@@ -27,7 +27,7 @@ def python_environment() -> dict[str, str]:
 
 class DistributionSmokeTests(unittest.TestCase):
     def test_cli_packages_verifies_and_stages_all_skills_in_temp_codex_root(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="issue5-workflow-") as directory:
+        with tempfile.TemporaryDirectory(prefix="skill-distribution-smoke-") as directory:
             temp_root = Path(directory)
             source_root, source_revision = source_checkout(temp_root)
             package_dir = temp_root / "packages"

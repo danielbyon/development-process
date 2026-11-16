@@ -1,0 +1,182 @@
+name: Skill release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_revision:
+        description: Full reviewed source commit on main
+        required: true
+        type: string
+      evidence_reference:
+        description: Repository-scoped API endpoint for an authenticated historical evidence export
+        required: false
+        type: string
+      supersedes:
+        description: Earlier CalVer corrected by this release
+        required: false
+        type: string
+      correction_reason:
+        description: Explanation when superseding a release
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skill-release-publication
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: >-
+      github.repository == 'danielbyon/development-process' &&
+      github.actor == 'danielbyon' && github.triggering_actor == 'danielbyon' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-verification
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r requirements-ci.txt
+      - name: Freeze and verify release context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
+          RELEASE_WORKFLOW_WRITE_AUTHORIZED: ${{ vars.RELEASE_WORKFLOW_WRITE_AUTHORIZED }}
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          RELEASE_EVIDENCE_REFERENCE: ${{ inputs.evidence_reference }}
+          BUILDER_REVISION: ${{ github.sha }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+          RELEASE_SUPERSEDES: ${{ inputs.supersedes }}
+          RELEASE_CORRECTION_REASON: ${{ inputs.correction_reason }}
+        run: >-
+          python3 scripts/skill_release.py preflight
+          --root "$GITHUB_WORKSPACE"
+          --source-revision "$SOURCE_REVISION"
+          --builder-revision "$BUILDER_REVISION"
+          --run-id "$RELEASE_RUN_ID"
+          --run-attempt "$RELEASE_RUN_ATTEMPT"
+          --supersedes "$RELEASE_SUPERSEDES"
+          --correction-reason "$RELEASE_CORRECTION_REASON"
+          --context "$RUNNER_TEMP/release-context.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-context-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-context.json
+          if-no-files-found: error
+
+  qualification:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r requirements-ci.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-context-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-input
+      - name: Qualify and independently rebuild
+        run: >-
+          python3 scripts/skill_release.py qualify
+          --root "$GITHUB_WORKSPACE"
+          --context "$RUNNER_TEMP/release-input/release-context.json"
+          --output-dir "$RUNNER_TEMP/release-bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle/
+          if-no-files-found: error
+
+  attestation:
+    needs: [preflight, qualification]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r requirements-ci.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Verify the complete bundle before signing
+        run: >-
+          python3 scripts/skill_release.py verify-bundle --for-attestation
+          --root "$GITHUB_WORKSPACE"
+          --context "$RUNNER_TEMP/release-bundle/release-context.json"
+          --artifact-dir "$RUNNER_TEMP/release-bundle"
+      - name: Attest only the verified manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/release-bundle/release-manifest.json
+
+  publication:
+    needs: [preflight, qualification, attestation]
+    runs-on: ubuntu-latest
+    environment: release-publication
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install -r requirements-ci.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-bundle
+      - name: Rebuild and compare before exposing publication credentials
+        run: >-
+          python3 scripts/skill_release.py verify-bundle
+          --root "$GITHUB_WORKSPACE"
+          --context "$RUNNER_TEMP/release-bundle/release-context.json"
+          --artifact-dir "$RUNNER_TEMP/release-bundle"
+      - name: Revalidate and publish the verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
+          RELEASE_WORKFLOW_WRITE_AUTHORIZED: ${{ vars.RELEASE_WORKFLOW_WRITE_AUTHORIZED }}
+          RELEASE_WORKFLOW_WRITE_TOKEN: ${{ secrets.RELEASE_WORKFLOW_WRITE_TOKEN }}
+          RELEASE_RUN_ID: ${{ github.run_id }}
+          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: >-
+          python3 scripts/skill_release.py publish
+          --root "$GITHUB_WORKSPACE"
+          --context "$RUNNER_TEMP/release-bundle/release-context.json"
+          --artifact-dir "$RUNNER_TEMP/release-bundle"
+          --run-id "$RELEASE_RUN_ID"
+          --run-attempt "$RELEASE_RUN_ATTEMPT"
