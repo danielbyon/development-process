@@ -458,8 +458,9 @@ class DurableResolutionTests(unittest.TestCase):
             entry['sha256']=release.digest(release.canonical(f['records'][entry['ref']]))
         f['records'][release.BASE+'/pulls/27']={'merged':True,'base':{'ref':'main'},'head':{'sha':revision},'merge_commit_sha':revision}
         api=Mock();api.record.side_effect=f['records'].__getitem__
-        api.ci_jobs.return_value=[{'id':5,'name':'Validate committed PR integration diff','conclusion':'success','steps':[{'conclusion':'success'}]}]
-        api.job_log.return_value='\n'.join(['PR HEAD: '+revision,'Tested integration revision: '+revision,'Tested base revision: '+revision,*release.SUITES[:4],*['Ran 1 test']*4])
+        _,steps,logs=SuiteExecutionTests.fixture(revision)
+        api.ci_jobs.return_value=[{'id':5,'name':'Validate committed PR integration diff','conclusion':'success','steps':steps}]
+        api.job_log.return_value='\n'.join(['PR HEAD: '+revision,'Tested integration revision: '+revision,'Tested base revision: '+revision,logs])
         api.pages.side_effect=lambda path: ([{'sha':revision}] if path.endswith('/commits') else [{'number':27,'merged_at':'date','base':{'ref':'main'},'merge_commit_sha':revision}])
         authority=release.EvidenceAuthority(api)
         snapshots=release.verify_evidence(f['evidence'],authority.record)
@@ -502,15 +503,6 @@ class IntegrationMembershipTests(unittest.TestCase):
             return [{'number':number,'merged_at':'date','base':{'ref':'main'},'merge_commit_sha':('b' if number==1 else 'c')*40}]
         api.pages.side_effect=pages
         with self.assertRaises(release.ReleaseError):release.verify_membership(api,integration)
-    def test_schema_two_requires_all_six_ci_suites(self):
-        logs='\n'.join([*release.SUITES[:4],*['Ran 1 test']*4])
-        with self.assertRaises(release.ReleaseError):release.verify_ci_suites(logs,2)
-        logs+='\n'+'\n'.join([*release.SUITES[4:],*['Ran 1 test']*2])
-        release.verify_ci_suites(logs,2)
-    def test_legacy_ci_has_explicit_four_suite_applicability(self):
-        logs='\n'.join(['test_issue5_workflow.py',*release.SUITES[1:4],*['Ran 1 test']*4])
-        release.verify_ci_suites(logs,1)
-        with self.assertRaises(release.ReleaseError):release.verify_ci_suites(logs,3)
 
 class RebaseDiscoveryTests(unittest.TestCase):
     def test_normal_dispatch_groups_all_rebased_commits(self):
@@ -574,3 +566,121 @@ class SigningContextTests(unittest.TestCase):
             context['validation_attempt']=1
             with patch.dict(release.os.environ,{'GITHUB_RUN_ATTEMPT':'1'}):
                 with self.assertRaises(release.ReleaseError):release.verify_signing_context(Path('.'),context)
+
+class SuiteExecutionTests(unittest.TestCase):
+    @staticmethod
+    def fixture(revision='HEAD'):
+        import yaml
+        root=Path(__file__).resolve().parents[1]
+        workflow=release.git(root,'show',revision+':.github/workflows/ci.yml').decode()
+        data=yaml.safe_load(workflow)
+        job=next(j for j in data['jobs'].values() if j.get('name')=='Validate committed PR integration diff')
+        steps=[s for s in job['steps'] if 'unittest discover' in s.get('run','')]
+        records=[{'name':s['name'],'conclusion':'success'} for s in steps]
+        logs=''.join('##[group]Run '+s['run'].strip()+'\n##[endgroup]\ntest_example (tests.Contract) ... ok\ntest_other (tests.Contract) ... ok\nRan 2 tests in 0.01s\n\nOK\n' for s in steps)
+        return workflow,records,logs
+    def test_committed_contract_accepts_six_and_historical_four(self):
+        for revision,schema in [('HEAD',2),(release.BOOTSTRAP_BASELINE,1)]:
+            workflow,steps,logs=self.fixture(revision)
+            release.verify_ci_suites(logs,schema,steps,workflow)
+    def test_unbound_or_unsuccessful_suite_execution_blocks(self):
+        import copy
+        workflow,steps,logs=self.fixture()
+        groups=logs.split('##[group]')[1:]
+        variants=[('repeated suite','##[group]'+groups[0]*6,steps),
+                  ('filename mentions','\n'.join(release.SUITES)+'\n'+('Ran 2 tests\nOK\n'*6),steps),
+                  ('missing step',logs,steps[:-1]),
+                  ('aggregate only',logs.replace('Ran 2 tests in 0.01s','no execution')+'Ran 12 tests\nOK',steps),
+                  ('skipped',logs.replace('OK','OK (skipped=1)',1),steps),
+                  ('unrelated count',logs.replace('Ran 2 tests','Ran 20 tests',1),steps),
+                  ('zero',logs.replace('Ran 2 tests','Ran 0 tests',1),steps),
+                  ('failed',logs.replace('OK','FAILED (failures=1)',1),steps)]
+        failed=copy.deepcopy(steps);failed[0]['conclusion']='failure'
+        variants.append(('step failed',logs,failed))
+        for label,text,records in variants:
+            with self.subTest(label=label),self.assertRaises(release.ReleaseError):
+                release.verify_ci_suites(text,2,records,workflow)
+    def test_warning_interleaving_and_skip_words_are_successful_results(self):
+        workflow,steps,logs=self.fixture()
+        logs=logs.replace('test_example (tests.Contract) ... ok',
+            "test_skipped_qualification_blocks (tests.Contract) ... /python/zipfile.py: UserWarning: Duplicate name: 'Skill.md'\n  return self._open_to_write(zinfo)\nok")
+        release.verify_ci_suites(logs,2,steps,workflow)
+    def test_diagnostic_does_not_hide_skipped_or_failed_status(self):
+        workflow,steps,logs=self.fixture()
+        for status in ["skipped 'unavailable'",'FAIL','ERROR','expected failure','unexpected success']:
+            changed=logs.replace('test_example (tests.Contract) ... ok',
+                'test_example (tests.Contract) ... warning: diagnostic\n'+status,1)
+            with self.subTest(status=status),self.assertRaises(release.ReleaseError):
+                release.verify_ci_suites(changed,2,steps,workflow)
+    def test_workflow_command_drift_blocks(self):
+        workflow,steps,logs=self.fixture()
+        for changed in [workflow.replace('-p test_skill_distribution.py','-p unrelated.py'),
+                        workflow.replace('run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v',
+                                         'if: false\n        run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v')]:
+            with self.assertRaises(release.ReleaseError):release.verify_ci_suites(logs,2,steps,changed)
+
+class InstalledSkillTests(unittest.TestCase):
+    def test_inspected_skill_bytes_and_compatibility(self):
+        import tempfile,json
+        from unittest.mock import Mock,patch
+        names=['development-orchestrator','development-review']
+        hashes={'SKILL.md':release.digest(b'current'),'agents/openai.yaml':release.digest(b'agent')}
+        context={'verified_payload_identities':{names[0]:hashes,names[1]:{'SKILL.md':release.digest(b'other')}},
+                 'source_revision':'a'*40,'policy_revision':'b'*40,'owner_id':123}
+        api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
+        with tempfile.TemporaryDirectory() as temporary,patch.object(release,'verify_release',return_value=context):
+            path=Path(temporary);(path/'agents').mkdir();(path/'SKILL.md').write_bytes(b'current');(path/'agents/openai.yaml').write_bytes(b'agent')
+            self.assertEqual(release.resolve_task(api,root=path,skill=names[0],installed_path=path)['task_pin'],'2026.11.16')
+            with patch.object(release,'GitHubAPI',return_value=api),patch('sys.stdout'):
+                self.assertEqual(release.main(['resolve-task','--root',str(path),'--skill',names[0],'--installed-path',str(path)]),0)
+            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[1],installed_path=path)
+            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,installed_payload=release.digest(release.canonical(hashes)))
+            (path/'SKILL.md').unlink()
+            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[0],installed_path=path)
+            (path/'SKILL.md').write_bytes(b'older')
+            inspected={**hashes,'SKILL.md':release.digest(b'older')}
+            report={'gate':'compatibility','skill':names[0],'revision':'a'*40,'policy_revision':'b'*40,
+                    'installed_payload':release.digest(release.canonical(inspected)),'installed_source':'c'*40,
+                    'differences':'inspected older instructions','validation':'applicable checks passed','execution_id':'inspection','verdict':'pass'}
+            record={'user':{'id':123},'body':'<!-- release-evidence\n'+json.dumps(report)+'\n-->'}
+            api.record.return_value=record
+            compatibility={'ref':'record','sha256':release.digest(release.canonical(record))}
+            self.assertEqual(release.resolve_task(api,root=path,skill=names[0],installed_path=path,compatibility=compatibility)['task_pin'],'2026.11.16')
+            report['skill']=names[1];record['body']='<!-- release-evidence\n'+json.dumps(report)+'\n-->'
+            compatibility['sha256']=release.digest(release.canonical(record))
+            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[0],installed_path=path,compatibility=compatibility)
+
+class ManagedInstallationTests(unittest.TestCase):
+    def test_real_installer_metadata_binds_payload_and_skill(self):
+        import tempfile,json,copy
+        from unittest.mock import Mock,patch
+        import skill_distribution as package
+        root=Path(__file__).resolve().parents[1]
+        revision=release.git(root,'rev-parse','HEAD').decode().strip()
+        policy=release.git(root,'log','--first-parent','-1','--format=%H',revision,'--','docs/PROCESS.md').decode().strip()
+        context={'release_version':'2026.11.16','source_revision':revision,'policy_revision':policy,'builder_revision':revision}
+        api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
+        with tempfile.TemporaryDirectory() as temporary:
+            base=Path(temporary);bundle=base/'bundle';stage=base/'stage';stage.mkdir()
+            package.build_release_packages(root,bundle,context)
+            package.initialize_staging_root(root,stage)
+            package.stage_release_packages(root,bundle,stage,context)
+            name='development-orchestrator';installed=stage/'.agents/skills'/name
+            marker=installed/'.skill-distribution.json';original=marker.read_text();metadata=json.loads(original)
+            verified={**context,'verified_payload_identities':{name:metadata['payload_sha256']}}
+            with patch.object(release,'verify_release',return_value=verified):
+                self.assertEqual(release.resolve_task(api,root=root,skill=name,installed_path=installed)['task_pin'],'2026.11.16')
+                for key,value in [('skill_name','development-review'),('schema_version',2),('source_revision','invalid'),('policy_revision','invalid'),('archive_sha256','invalid'),('payload_sha256',{'../outside':'a'*64})]:
+                    changed=copy.deepcopy(metadata);changed[key]=value;marker.write_text(json.dumps(changed))
+                    with self.subTest(key=key),self.assertRaises(release.ReleaseError):
+                        release.resolve_task(api,root=root,skill=name,installed_path=installed)
+                marker.write_text('not JSON')
+                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
+                marker.write_text(original)
+                payload=installed/'SKILL.md';original_payload=payload.read_bytes();payload.write_bytes(b'drift')
+                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
+                payload.write_bytes(original_payload)
+                marker.write_text(original);(installed/'unrelated').write_text('extra')
+                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
+                (installed/'unrelated').unlink();marker.unlink();marker.symlink_to(bundle/'release-manifest.json')
+                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)

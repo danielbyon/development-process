@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
+import yaml
 import subprocess
 import sys
 import tempfile
@@ -290,17 +292,48 @@ def verify_membership(api,integration):
         require(len(matches)==1 and matches[0].get('number')==number and
                 matches[0].get('merge_commit_sha')==result,'Unverified or unrelated integrated commit')
 
-def verify_ci_suites(logs,schema):
-    """Legacy source requires four suites; schema two requires all six."""
+def verify_ci_suites(logs,schema,steps,workflow):
+    """Bind each suite result to its committed command and successful CI step."""
     require(schema in (1,2),'Unsupported CI source schema')
-    historical=('test_issue5_workflow.py',)+SUITES[1:4]
-    suites=SUITES if schema==2 else SUITES[:4]
-    require(all(name in logs for name in suites) or
-            (schema==1 and all(name in logs for name in historical)),
-            'Mandatory suites absent from CI logs')
-    require(len(re.findall(r'Ran [1-9][0-9]* tests?',logs))>=len(suites),
-            'CI execution counts missing')
-    require(not re.search(r'OK \(skipped=|FAILED|Ran 0 tests',logs),'CI qualification skipped or failed')
+    contract=yaml.safe_load(workflow)
+    jobs=[j for j in contract.get('jobs',{}).values()
+          if j.get('name')=='Validate committed PR integration diff']
+    require(len(jobs)==1 and not any(k in jobs[0] for k in ('if','continue-on-error','strategy')),
+            'Conditional or ambiguous mandatory CI job')
+    expected=list(SUITES if schema==2 else SUITES[:4])
+    workflow_steps=jobs[0].get('steps',[])
+    if schema==1 and any('test_issue5_workflow.py' in x.get('run','') for x in workflow_steps):
+        expected[0]='test_issue5_workflow.py'
+    text=re.sub(r'^\d{4}-\d\d-\d\dT\S+ ', '', logs, flags=re.M)
+    groups=list(re.finditer(r'^##\[group\]Run (.+)\n',text,re.M))
+    for suite in expected:
+        command='python3 -m unittest discover -s tests -p '+suite+' -v'
+        matches=[x for x in workflow_steps if x.get('run','').strip()==command]
+        require(len(matches)==1,'Missing or altered mandatory suite command: '+suite)
+        step=matches[0]
+        require(not any(k in step for k in ('if','continue-on-error','working-directory','env')),
+                'Conditional or altered suite execution: '+suite)
+        actual=[x for x in steps if x.get('name')==step.get('name')]
+        require(len(actual)==1 and actual[0].get('conclusion')=='success',
+                'Mandatory suite step not successful: '+suite)
+        executed=[(i,g) for i,g in enumerate(groups) if shlex.split(g.group(1))==shlex.split(command)]
+        require(len(executed)==1,'Missing or repeated suite command execution: '+suite)
+        i,group=executed[0]
+        section=text[group.end():groups[i+1].start() if i+1<len(groups) else len(text)]
+        require('##[endgroup]\n' in section,'Suite command boundary absent')
+        output=section.split('##[endgroup]\n',1)[1]
+        summaries=re.findall(r'^Ran ([0-9]+) tests? in [^\n]+$',output,re.M)
+        result_output=re.split(r'^-{5,}$|^Ran [0-9]+ tests?',output,maxsplit=1,flags=re.M)[0]
+        labels=list(re.finditer(r'^test\S+ \(.+\)',result_output,re.M))
+        statuses=[]
+        for index,label in enumerate(labels):
+            result=result_output[label.end():labels[index+1].start() if index+1<len(labels) else len(result_output)]
+            statuses.append(bool(re.search(r'(?:^|\n|\.\.\. )ok\s*$',result)))
+        require(len(summaries)==1 and int(summaries[0])>0 and
+                len(labels)==int(summaries[0]) and all(statuses) and
+                len(re.findall(r'^OK$',output,re.M))==1 and
+                not re.search(r'^FAILED(?: |$)|^OK \(',output,re.M),
+                'Mandatory suite execution failed, skipped or absent: '+suite)
 
 def verify_live_integrations(api,evidence,root=None):
     """Check merged PR identity and actual required CI job execution."""
@@ -327,7 +360,8 @@ def verify_live_integrations(api,evidence,root=None):
             require(label+': '+value in logs,'CI synthetic merge identity not established')
         require(root is not None,'Committed CI applicability source required')
         manifest=json.loads(git(root,'show',integration['integrated_revision']+':skills/distribution.json'))
-        verify_ci_suites(logs,manifest.get('schema_version'))
+        workflow=git(root,'show',integration['integrated_revision']+':.github/workflows/ci.yml').decode()
+        verify_ci_suites(logs,manifest.get('schema_version'),steps,workflow)
         verify_membership(api,integration)
 
 def discover_evidence(root,api,source,builder):
@@ -604,12 +638,15 @@ def _verify_release(root,api,tag):
         require({s.get('suite') for s in suites}==set(SUITES) and all(s.get('tests',0)>0 for s in suites),
                 'Release mandatory qualification absent')
         verify_remote(api,release,context,directory,True)
-        payloads=[]
+        payloads={}
         for sidecar in directory.glob('*.provenance.json'):
-            payloads.append(digest(canonical(json.loads(sidecar.read_text())['payload_sha256'])))
+            provenance=json.loads(sidecar.read_text())
+            name=provenance['skill_name']
+            payloads[name]={str(Path(member).relative_to(name)):value
+                            for member,value in provenance['payload_sha256'].items()}
         return {**context,'verified_payload_identities':payloads}
 
-def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatibility=None):
+def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatibility=None,*,skill=None,installed_path=None):
     if existing_pin is not None:
         require(bool(SHA.fullmatch(existing_pin)) or bool(version_key(existing_pin)),'Invalid recorded task pin')
         return {'task_pin':existing_pin}
@@ -620,7 +657,42 @@ def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatib
         if release.get('draft') is False and release.get('prerelease') is False: candidates.append((key,release['tag_name']))
     require(candidates,'NO_IMMUTABLE_RELEASE')
     tag=max(candidates)[1]; context=verify_release(Path(root),api,tag)
-    if installed_payload not in context.get('verified_payload_identities',[]):
+    require(installed_payload is None,'Caller-supplied payload claims are not installation evidence')
+    expected=context.get('verified_payload_identities',{}).get(skill)
+    require(isinstance(expected,dict) and expected and installed_path is not None,
+            'Requested Skill and installed path required')
+    directory=Path(installed_path)
+    require(directory.is_dir() and not directory.is_symlink(),'Installed Skill directory unavailable')
+    inspected={}
+    for member in expected:
+        relative=Path(member)
+        require(not relative.is_absolute() and '..' not in relative.parts,'Unsafe installed member')
+        path=directory/relative
+        require(all(not (directory/Path(*relative.parts[:i])).is_symlink() for i in range(1,len(relative.parts)+1)),
+                'Installed Skill symlink forbidden')
+        require(path.is_file(),'Installed Skill file missing: '+member)
+        inspected[member]=digest(path.read_bytes())
+    files={path.relative_to(directory).as_posix() for path in directory.rglob('*') if path.is_file() or path.is_symlink()}
+    marker_name='.skill-distribution.json'
+    if marker_name in files:
+        marker_path=directory/marker_name
+        require(marker_path.is_file() and not marker_path.is_symlink(),'Unsafe installed metadata')
+        try: marker=json.loads(marker_path.read_text())
+        except (ValueError,OSError) as error: raise ReleaseError('Malformed installed metadata') from error
+        require(isinstance(marker,dict) and set(marker)=={'schema_version','skill_name','policy_revision',
+                'source_revision','archive_sha256','payload_sha256'},'Invalid installed metadata fields')
+        require(type(marker['schema_version']) is int and marker['schema_version']==1 and
+                marker['skill_name']==skill,'Installed metadata Skill/schema mismatch')
+        require(all(isinstance(marker[key],str) and SHA.fullmatch(marker[key])
+                    for key in ('source_revision','policy_revision')) and
+                isinstance(marker['archive_sha256'],str) and
+                re.fullmatch(r'[0-9a-f]{64}',marker['archive_sha256']),
+                'Invalid installed metadata provenance')
+        require(marker['payload_sha256']==inspected,'Installed metadata does not match inspected bytes')
+        files.remove(marker_name)
+    require(files==set(expected),'Unexpected installed Skill files')
+    installed_payload=digest(canonical(inspected))
+    if inspected!=expected:
         require(isinstance(compatibility,dict),'Installed Skill compatibility unverified')
         record=api.record(compatibility.get('ref'))
         require(digest(canonical(record))==compatibility.get('sha256'),'Compatibility record drift')
@@ -628,7 +700,7 @@ def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatib
         marker='<!-- release-evidence\n'; body=record.get('body','')
         require(marker in body,'Inspectable compatibility report required')
         report=json.loads(body.split(marker,1)[1].split('\n-->',1)[0])
-        require(report.get('gate')=='compatibility' and report.get('revision')==context['source_revision'] and report.get('policy_revision')==context['policy_revision'],'Compatibility target mismatch')
+        require(report.get('gate')=='compatibility' and report.get('skill')==skill and report.get('revision')==context['source_revision'] and report.get('policy_revision')==context['policy_revision'],'Compatibility target mismatch')
         require(report.get('installed_payload')==installed_payload and SHA.fullmatch(report.get('installed_source','')) and report.get('differences') and report.get('validation') and report.get('execution_id') and report.get('verdict')=='pass','Incomplete compatibility inspection')
     return {'task_pin':tag,'provenance':context}
 
@@ -654,7 +726,7 @@ def main(argv=None):
         if command in ('verify-bundle','publish'): p.add_argument('--artifact-dir',type=Path,required=True)
         if command=='verify-release': p.add_argument('--tag',required=True)
         if command=='resolve-task':
-            p.add_argument('--existing-pin'); p.add_argument('--installed-payload'); p.add_argument('--compatibility',type=Path)
+            p.add_argument('--existing-pin'); p.add_argument('--skill'); p.add_argument('--installed-path',type=Path); p.add_argument('--compatibility',type=Path)
     args=parser.parse_args(argv); api=GitHubAPI()
     try:
         if args.command=='preflight':
@@ -683,7 +755,7 @@ def main(argv=None):
                 require(int(args.run_id)==context['run_id'] and int(args.run_attempt)==context.get('validation_attempt',context['run_attempt']),'Run recovery identity mismatch')
                 result=publish(args.root,api,context,args.artifact_dir)
         elif args.command=='verify-release': result=verify_release(args.root,api,args.tag)
-        else: result=resolve_task(api,args.existing_pin,args.installed_payload,args.root,json.loads(args.compatibility.read_text()) if args.compatibility else None)
+        else: result=resolve_task(api,existing_pin=args.existing_pin,root=args.root,compatibility=json.loads(args.compatibility.read_text()) if args.compatibility else None,skill=args.skill,installed_path=args.installed_path)
         print(json.dumps(result,sort_keys=True)); return 0
     except (ReleaseError,APIError,OSError,ValueError,KeyError,TypeError) as error:
         print(f'ERROR: {error}',file=sys.stderr); return 1

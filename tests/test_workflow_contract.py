@@ -234,7 +234,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertLess(verify, sign)
         self.assertIn("--for-attestation", steps[verify]["run"])
         self.assertEqual(steps[sign]["uses"], "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6")
-        self.assertEqual(steps[sign]["with"], {"subject-path": "${{ runner.temp }}/release-bundle/release-manifest.json"})
+        self.assertEqual(steps[sign]["with"], {"subject-path": "${{ runner.temp }}/release-bundle/release-manifest.json", "push-to-registry": False, "create-storage-record": False})
         self.assertNotIn("continue-on-error", json.dumps(job))
 
     def test_workflow_write_requires_explicit_owner_variable(self) -> None:
