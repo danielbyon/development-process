@@ -135,6 +135,36 @@ def admit_anchor(root,api,evidence,*,source=None,builder=None,dispatch_run_id=No
             'Unverified baseline admission')
 
 
+def _verify_evidence_origin(root,api,evidence,source,builder,dispatch_run_id):
+    """Resolve ordinary receipts or the independently admitted baseline proof."""
+    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
+        snapshots=evidence_baseline.verify_baseline_admission(
+            root,api,evidence,source,builder,dispatch_run_id)
+        return snapshots,snapshots
+    return evidence_qualification.verify_evidence(evidence,api.record,root),None
+
+
+def _qualify_candidate_evidence(root,api,evidence,source,builder,*,
+                                dispatch_run_id):
+    """Apply origin-specific trust checks and cover both release revisions."""
+    snapshots,baseline_proof=_verify_evidence_origin(
+        root,api,evidence,source,builder,dispatch_run_id)
+    if baseline_proof is None:
+        admit_anchor(root,api,evidence)
+        evidence_integrations.verify_live_integrations(api,evidence,root)
+    coverage_proof=[]
+    for target in (source,builder):
+        if baseline_proof is None:
+            proof=evidence_qualification.verify_coverage(
+                root,evidence,target,admitted=True)
+        else:
+            proof=evidence_qualification.verify_coverage(
+                root,evidence,target,baseline_admission=baseline_proof)
+        require(isinstance(proof,dict),'Git coverage verification did not return a proof')
+        coverage_proof.append(proof)
+    return snapshots,baseline_proof,coverage_proof
+
+
 class EvidenceAuthority:
     """Freeze authenticated API reads for later signed, offline verification."""
     def __init__(self,api=None,data=None):
@@ -165,17 +195,8 @@ def preflight(root,api,source,evidence,run_id,run_attempt):
     # Preflight cannot provision credentials or infer owner authorization.
     if workflows_differ:
         require(os.environ.get('RELEASE_WORKFLOW_WRITE_AUTHORIZED')=='true','Separate owner authorization for Workflows write required')
-    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
-        snapshots=admit_anchor(root,authority,evidence,source=source,builder=builder,
-                               dispatch_run_id=run_id)
-        evidence_qualification.verify_coverage(root,evidence,source,baseline_admission=snapshots)
-        evidence_qualification.verify_coverage(root,evidence,builder,baseline_admission=snapshots)
-    else:
-        snapshots=evidence_qualification.verify_evidence(evidence,authority.record,root)
-        admit_anchor(root,authority,evidence)
-        evidence_integrations.verify_live_integrations(authority,evidence,root)
-        evidence_qualification.verify_coverage(root,evidence,source,admitted=True)
-        evidence_qualification.verify_coverage(root,evidence,builder,admitted=True)
+    snapshots,_,_=_qualify_candidate_evidence(
+        root,authority,evidence,source,builder,dispatch_run_id=run_id)
     policy=git(root,'log','--first-parent','-1','--format=%H',source,'--','docs/PROCESS.md').decode().strip()
     require(git(root,'show',policy+':docs/PROCESS.md')==git(root,'show',source+':docs/PROCESS.md'),'Policy derivation mismatch')
     original=api.original_context(run_id)
@@ -284,20 +305,10 @@ def publish(root,api,context,directory):
     import skill_distribution as package
     check_settings(api,context)
     evidence=context['evidence']
-    baseline_proof=None
-    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
-        snapshots=evidence_baseline.verify_baseline_admission(root,api,evidence,context['source_revision'],
-                                            context['builder_revision'],context['run_id'])
-        baseline_proof=snapshots
-    else:
-        snapshots=evidence_qualification.verify_evidence(evidence,api.record,root)
-        admit_anchor(root,api,evidence)
-        evidence_integrations.verify_live_integrations(api,evidence,root)
+    snapshots,baseline_proof,coverage_proof=_qualify_candidate_evidence(
+        root,api,evidence,context['source_revision'],context['builder_revision'],
+        dispatch_run_id=context.get('run_id'))
     require(snapshots==context['evidence_snapshots'],'Evidence drift')
-    evidence_qualification.verify_coverage(root,evidence,context['source_revision'],admitted=True,
-                    baseline_admission=baseline_proof)
-    evidence_qualification.verify_coverage(root,evidence,context['builder_revision'],admitted=True,
-                    baseline_admission=baseline_proof)
     qualification=context.get('qualification',{})
     require(qualification.get('run_attempt')==context['run_attempt'],'Fresh qualification required')
     require({x['suite'] for x in qualification.get('suites',[])}==set(SUITES) and all(x['tests']>0 for x in qualification['suites']),'Mandatory suites missing')
@@ -329,11 +340,13 @@ def publish(root,api,context,directory):
     if not tags: api.create_tag(context['release_version'],context['source_revision'])
     release=api.release(release['id']); verify_remote(api,release,context,directory,False)
     check_settings(api,context)
-    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
-        evidence_baseline.verify_baseline_admission(root,api,evidence,context['source_revision'],
-                                  context['builder_revision'],context['run_id'])
-    else:
-        evidence_qualification.verify_evidence(evidence,api.record,root)
+    final_snapshots,final_baseline_proof,final_coverage_proof=_qualify_candidate_evidence(
+        root,api,evidence,context['source_revision'],context['builder_revision'],
+        dispatch_run_id=context.get('run_id'))
+    require(final_snapshots==snapshots and final_baseline_proof==baseline_proof,
+            'Evidence drift before publication')
+    require(final_coverage_proof==coverage_proof,
+            'Coverage changed before publication')
     api.publish(release['id'])
     return verify_remote(api,api.release(release['id']),context,directory,True)
 
@@ -383,23 +396,12 @@ def _verify_release(root,api,tag):
             evidence_integrations.verify_live_integrations(frozen,evidence,root)
             evidence_qualification.verify_coverage(root,evidence,context['source_revision'],admitted=True)
             evidence_qualification.verify_coverage(root,evidence,context['builder_revision'],admitted=True)
-        elif evidence.get('origin',{}).get('kind')=='prospective_baseline':
-            snapshots=evidence_baseline.verify_baseline_admission(root,frozen,evidence,context['source_revision'],
-                                                context['builder_revision'],context['run_id'])
-            require(snapshots==context['evidence_snapshots'],
-                    'Frozen prospective baseline authority unverified')
-            evidence_qualification.verify_coverage(root,evidence,context['source_revision'],
-                            baseline_admission=snapshots)
-            evidence_qualification.verify_coverage(root,evidence,context['builder_revision'],
-                            baseline_admission=snapshots)
         else:
-            snapshots=evidence_qualification.verify_evidence(evidence,frozen.record,root)
+            snapshots,_,_=_qualify_candidate_evidence(
+                root,frozen,evidence,context['source_revision'],context['builder_revision'],
+                dispatch_run_id=context.get('run_id'))
             require(snapshots==context['evidence_snapshots'],
                     'Frozen qualification authority unverified')
-            admit_anchor(root,frozen,evidence)
-            evidence_integrations.verify_live_integrations(frozen,evidence,root)
-            evidence_qualification.verify_coverage(root,evidence,context['source_revision'],admitted=True)
-            evidence_qualification.verify_coverage(root,evidence,context['builder_revision'],admitted=True)
         suites=context.get('qualification',{}).get('suites',[])
         require({s.get('suite') for s in suites}==set(SUITES) and all(s.get('tests',0)>0 for s in suites),
                 'Release mandatory qualification absent')

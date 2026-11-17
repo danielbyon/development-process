@@ -5,16 +5,16 @@ from __future__ import annotations
 import json
 
 from .common import (
-    BASE, JSON, REPOSITORY, SHA, ReleaseError, _EvidenceAPI, canonical, digest,
-    git, require, revision,
+    BASE, JSON, MissingEvidenceError, REPOSITORY, SHA, ReleaseError,
+    _EvidenceAPI, canonical, digest, git, require, require_present, revision,
 )
 from .records import (
     _evidence_timestamp, load_readiness_index, readiness_index_binding,
     verify_ci_pull_request, verify_ci_suites, verify_event_chronology,
 )
 from .qualification import (
-    BaselineQualification, VerifiedBaselineAdmission, _receipt_event,
-    _verify_execution_after, verify_execution_receipt, verify_inspection_files,
+    BaselineQualification, VerifiedBaselineAdmission, load_receipt_event,
+    verify_execution_after, verify_execution_receipt, verify_inspection_files,
     verify_receipt_time, verify_review_dispositions,
 )
 
@@ -52,9 +52,11 @@ def verify_baseline_admission(
     require(origin.get('policy_revision')==policy and
             origin.get('policy_sha256')==digest(policy_bytes),
             'Prospective policy identity differs from the baseline policy')
-    admission=evidence.get('baseline_admission',{})
+    admission=require_present(evidence.get('baseline_admission'),
+                              'Baseline qualification and owner admission are missing')
     require(isinstance(admission,dict),'Baseline qualification and owner admission required')
-    pr_number=admission.get('correction_pull_request')
+    pr_number=require_present(admission.get('correction_pull_request'),
+                              'Corrected merge pull request is missing')
     require(type(pr_number) is int and pr_number>0,'Corrected merge pull request required')
     pr=api.record(BASE+f'/pulls/{pr_number}')
     require(pr.get('number')==pr_number and
@@ -65,17 +67,16 @@ def verify_baseline_admission(
             pr.get('head',{}).get('sha')==admission.get('reviewed_revision'),
             'Prospective baseline is not the exact corrected main integration')
     merged_at=pr.get('merged_at')
-    require(merged_at,'Corrected merge provider timestamp required')
+    require_present(merged_at,'Corrected merge provider timestamp is missing')
     merge_time=_evidence_timestamp(merged_at)
     parents=git(root,'show','-s','--format=%P',baseline).decode().split()
     require(parents,'Corrected baseline parent revision required')
-    review_entry=admission.get('full_review',{})
-    review_record=api.record(review_entry.get('ref'))
-    review_event=_receipt_event(review_record,review_entry,owner_id,
-                                'baseline_review',pr_number)
+    review_entry=admission.get('full_review')
+    review_record,review_event=load_receipt_event(
+        api.record,review_entry,owner_id,'baseline_review',pr_number)
     review_range={'baseline_revision':baseline,'tree_sha':tree}
     review_event=verify_execution_receipt(review_event,'baseline_review',review_range)
-    _verify_execution_after(review_event,merge_time,'Full-baseline review')
+    verify_execution_after(review_event,merge_time,'Full-baseline review')
     verify_receipt_time(review_record,review_event)
     review_report=review_event['report']
     require(review_event['execution'].get('system') in ('local_cubic','separate_codex'),
@@ -89,12 +90,11 @@ def verify_baseline_admission(
     verify_review_dispositions(review_report)
     require(_evidence_timestamp(review_record.get('created_at'))>
             _evidence_timestamp(merged_at),'Full-baseline review must inspect the corrected merge')
-    chat_entry=admission.get('chatgpt_inspection',{})
-    chat_record=api.record(chat_entry.get('ref'))
-    chat_event=_receipt_event(chat_record,chat_entry,owner_id,
-                              'chatgpt_inspection',pr_number)
+    chat_entry=admission.get('chatgpt_inspection')
+    chat_record,chat_event=load_receipt_event(
+        api.record,chat_entry,owner_id,'chatgpt_inspection',pr_number)
     chat_event=verify_execution_receipt(chat_event,'chatgpt_inspection',review_range)
-    _verify_execution_after(chat_event,merge_time,'ChatGPT inspection')
+    verify_execution_after(chat_event,merge_time,'ChatGPT inspection')
     verify_receipt_time(chat_record,chat_event)
     require(review_event['execution'].get('execution_id')!=
             chat_event['execution'].get('execution_id'),
@@ -115,7 +115,10 @@ def verify_baseline_admission(
             'ChatGPT baseline transcript omits inspected source or test files')
     require(_evidence_timestamp(chat_record.get('created_at'))>
             _evidence_timestamp(merged_at),'ChatGPT must inspect the corrected merge')
-    ci_entry=admission.get('ci',{})
+    ci_entry=require_present(admission.get('ci'),'Baseline CI provider receipt is missing')
+    require(isinstance(ci_entry,dict),'Baseline CI provider receipt is malformed')
+    require_present(ci_entry.get('ref'),'Baseline CI provider reference is missing')
+    require_present(ci_entry.get('sha256'),'Baseline CI provider digest is missing')
     ci_record=api.record(ci_entry.get('ref'))
     require(digest(canonical(ci_record))==ci_entry.get('sha256'),
             'Baseline CI provider record changed')
@@ -134,9 +137,18 @@ def verify_baseline_admission(
     verify_ci_pull_request(ci_record,pr_number,pr.get('head',{}).get('sha'),parents[0])
     jobs=api.ci_jobs(ci_record['id'],ci_entry['run_attempt'])
     required=[job for job in jobs if job.get('name')=='Validate committed PR integration diff']
-    require(len(required)==1 and required[0].get('conclusion')=='success' and
-            required[0].get('status')=='completed' and required[0].get('completed_at'),
-            'Required completed baseline CI job unavailable')
+    if not required:
+        raise MissingEvidenceError('Required completed baseline CI job is unavailable')
+    require(len(required)==1,'Baseline CI job identity is ambiguous')
+    require(required[0].get('conclusion')=='success',
+            'Baseline CI job did not succeed')
+    job_status=require_present(required[0].get('status'),
+                               'Baseline CI job completion status is missing')
+    if job_status in ('queued','in_progress'):
+        raise MissingEvidenceError('Required completed baseline CI job is unavailable')
+    require(job_status=='completed','Baseline CI job did not complete')
+    require_present(required[0].get('completed_at'),
+                    'Required completed baseline CI job completion time is missing')
     steps=required[0].get('steps',[])
     require(steps and all(step.get('conclusion')=='success' for step in steps),
             'Baseline CI contains failed or skipped steps')
@@ -148,10 +160,9 @@ def verify_baseline_admission(
     manifest_file=json.loads(git(root,'show',baseline+':skills/distribution.json'))
     workflow=git(root,'show',baseline+':.github/workflows/ci.yml').decode()
     verify_ci_suites(logs,manifest_file.get('schema_version'),steps,workflow)
-    owner_entry=admission.get('owner_admission',{})
-    owner_record=api.record(owner_entry.get('ref'))
-    owner_event=_receipt_event(owner_record,owner_entry,owner_id,
-                               'baseline_admission',pr_number)
+    owner_entry=admission.get('owner_admission')
+    owner_record,owner_event=load_receipt_event(
+        api.record,owner_entry,owner_id,'baseline_admission',pr_number)
     owner_report=owner_event.get('report',{})
     require(owner_event.get('revision')==baseline and
             owner_report.get('action')=='admit-baseline' and
@@ -159,9 +170,11 @@ def verify_baseline_admission(
             'Explicit owner baseline admission required')
     qualification_records=[review_record,chat_record,ci_record,required[0]]
     verify_event_chronology(qualification_records,owner_record.get('created_at'))
-    binding=evidence.get('readiness_index')
+    binding=require_present(evidence.get('readiness_index'),
+                            'Prospective baseline readiness index binding is missing')
     require(isinstance(binding,dict),'Prospective baseline readiness index binding required')
     index_ref=binding.get('normalization_ref') or binding.get('index_ref')
+    require_present(index_ref,'Prospective baseline readiness index reference is missing')
     loaded=load_readiness_index(index_ref,api.record,pr_number)
     require(loaded['normalization_record'] is None and
             readiness_index_binding(loaded)==binding,

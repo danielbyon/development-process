@@ -8,13 +8,20 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .common import (
-    BASE, BOOTSTRAP_BASELINE, JSON, REPOSITORY, SHA, ReleaseError, canonical, digest, git,
-    require, revision,
+    BASE, BOOTSTRAP_BASELINE, JSON, MissingEvidenceError, REPOSITORY, SHA,
+    ReleaseError, canonical, digest, git, require, require_present, revision,
 )
 from .records import (
     _evidence_timestamp, _require_pull_request_comment, load_readiness_index,
     verify_ci_pull_request, verify_event_chronology,
 )
+
+__all__ = [
+    'BaselineQualification', 'VerifiedBaselineAdmission',
+    'verify_execution_after', 'verify_execution_receipt',
+    'verify_coverage', 'verify_inspection_files', 'load_receipt_event',
+    'verify_receipt_event', 'verify_receipt_time', 'verify_review_dispositions',
+]
 
 _BASELINE_ADMISSION_SEAL=object()
 
@@ -153,15 +160,25 @@ def verify_review_dispositions(report):
             'Baseline review contains an unresolved finding')
     return True
 
-def _receipt_event(record,entry,owner_id,gate,pull_request):
-    require(isinstance(entry,dict) and entry.get('ref') and entry.get('sha256'),
-            f'Missing {gate} provider receipt')
-    require(isinstance(record,dict) and digest(canonical(record))==entry['sha256'],
+def _receipt_entry_binding(entry,gate):
+    entry=require_present(entry,f'Missing {gate} provider receipt')
+    require(isinstance(entry,dict),f'{gate} provider receipt entry is malformed')
+    reference=require_present(entry.get('ref'),f'{gate} provider receipt reference is missing')
+    expected_sha256=require_present(entry.get('sha256'),
+                                    f'{gate} provider receipt digest is missing')
+    require(isinstance(reference,str) and reference,
+            f'{gate} provider receipt reference is malformed')
+    require(isinstance(expected_sha256,str) and expected_sha256,
+            f'{gate} provider receipt digest is malformed')
+    return reference,expected_sha256
+
+def _verify_receipt_record(record,reference,expected_sha256,owner_id,gate,pull_request):
+    require(isinstance(record,dict) and digest(canonical(record))==expected_sha256,
             f'Stale {gate} provider receipt')
     require(record.get('user',{}).get('id')==owner_id,
             f'{gate} receipt must be owner-authenticated')
     _require_pull_request_comment(record,pull_request,gate)
-    match=re.fullmatch(re.escape(BASE)+r'/issues/comments/([1-9][0-9]*)',entry['ref'])
+    match=re.fullmatch(re.escape(BASE)+r'/issues/comments/([1-9][0-9]*)',reference)
     require(match is not None and record.get('id')==int(match[1]),
             f'{gate} provider record identity mismatch')
     body=record.get('body',''); marker='<!-- release-evidence-v2\n'
@@ -177,12 +194,25 @@ def _receipt_event(record,entry,owner_id,gate,pull_request):
             f'{gate} report content digest mismatch')
     return event
 
+def verify_receipt_event(record,entry,owner_id,gate,pull_request):
+    """Authenticate a provider receipt and bind it to its PR and evidence entry."""
+    reference,expected_sha256=_receipt_entry_binding(entry,gate)
+    return _verify_receipt_record(record,reference,expected_sha256,owner_id,gate,pull_request)
+
+def load_receipt_event(fetch,entry,owner_id,gate,pull_request):
+    """Fetch and authenticate one provider receipt from its indexed reference."""
+    reference,expected_sha256=_receipt_entry_binding(entry,gate)
+    record=fetch(reference)
+    event=_verify_receipt_record(record,reference,expected_sha256,owner_id,gate,pull_request)
+    return record,event
+
 def verify_receipt_time(record,event):
     require(_evidence_timestamp(record.get('created_at'))>=
             _evidence_timestamp(event.get('execution',{}).get('finished_at')),
             'Provider receipt predates its originating execution')
 
-def _verify_execution_after(event,cutoff,description):
+def verify_execution_after(event,cutoff,description):
+    """Require an execution to start and finish after a trusted timestamp."""
     execution=event.get('execution',{})
     started=_evidence_timestamp(execution.get('started_at'))
     finished=_evidence_timestamp(execution.get('finished_at'))
@@ -244,11 +274,14 @@ def verify_evidence(evidence: JSON,
         target=integration.get('reviewed_revision'); base=integration.get('base_revision')
         require(isinstance(target,str) and SHA.fullmatch(target) and
                 isinstance(base,str) and SHA.fullmatch(base),'Reviewed integration range required')
-        records=integration.get('records',{})
+        records=require_present(integration.get('records'),
+                                'Integration provider receipts are missing')
         require(isinstance(records,dict),'Integration provider receipts required')
-        index_binding=integration.get('readiness_index')
+        index_binding=require_present(integration.get('readiness_index'),
+                                      'Authenticated readiness index binding is missing')
         require(isinstance(index_binding,dict),'Authenticated readiness index binding required')
         index_ref=index_binding.get('normalization_ref') or index_binding.get('index_ref')
+        require_present(index_ref,'Readiness index provider reference is missing')
         loaded=load_readiness_index(index_ref,fetch,pull_request)
         require(loaded['index_ref']==index_binding.get('index_ref') and
                 loaded['index_sha256']==index_binding.get('index_sha256') and
@@ -271,23 +304,27 @@ def verify_evidence(evidence: JSON,
                               'sha256':loaded['normalization_sha256'],
                               'record':loaded['normalization_record']})
         expected={'base_revision':base,'head_revision':target}
-        author_record=fetch(records.get('author_execution',{}).get('ref'))
-        author_event=_receipt_event(author_record,records['author_execution'],owner_id,
-                                    'author_execution',pull_request)
+        author_entry=records.get('author_execution')
+        author_record,author_event=load_receipt_event(
+            fetch,author_entry,owner_id,'author_execution',pull_request)
         author_event=verify_execution_receipt(author_event,'author_execution',expected)
         verify_receipt_time(author_record,author_event)
         require(author_event['report'].get('role')=='author','Originating author execution required')
         author_id=author_event['execution']['execution_id']
-        snapshots.append({'gate':'author_execution','ref':records['author_execution']['ref'],
-                          'sha256':records['author_execution']['sha256'],'record':author_record})
+        snapshots.append({'gate':'author_execution','ref':author_entry['ref'],
+                          'sha256':author_entry['sha256'],'record':author_record})
         review_entries=records.get('independent_reviews')
         if review_entries is None and isinstance(records.get('independent_review'),dict):
             review_entries=[records['independent_review']]
-        require(isinstance(review_entries,list) and review_entries,'Independent review receipts required')
+        review_entries=require_present(review_entries,
+                                       'Independent review receipts are missing')
+        require(isinstance(review_entries,list),'Independent review receipts are malformed')
+        if not review_entries:
+            raise MissingEvidenceError('Independent review receipts are missing')
         chain=[];review_ids=set();review_records=[]
         for entry in review_entries:
-            actual=fetch(entry.get('ref'))
-            event=_receipt_event(actual,entry,owner_id,'independent_review',pull_request)
+            actual,event=load_receipt_event(
+                fetch,entry,owner_id,'independent_review',pull_request)
             step=event.get('report',{}).get('review_step')
             require(isinstance(step,dict),'Structured review step required')
             execution_range={'base_revision':step.get('base_revision'),
@@ -318,10 +355,9 @@ def verify_evidence(evidence: JSON,
             actual_diff=digest(git(root,'diff','--binary',step['base_revision'],diff_head))
             require(step.get('diff_sha256')==actual_diff,
                     'Review chain diff bytes differ from the authenticated Git range')
-        chat_entry=records.get('chatgpt_inspection',{})
-        chat_record=fetch(chat_entry.get('ref'))
-        chat_event=_receipt_event(chat_record,chat_entry,owner_id,
-                                  'chatgpt_inspection',pull_request)
+        chat_entry=records.get('chatgpt_inspection')
+        chat_record,chat_event=load_receipt_event(
+            fetch,chat_entry,owner_id,'chatgpt_inspection',pull_request)
         chat_event=verify_execution_receipt(chat_event,'chatgpt_inspection',expected)
         verify_receipt_time(chat_record,chat_event)
         require(chat_event['execution'].get('system')=='chatgpt',
@@ -337,23 +373,32 @@ def verify_evidence(evidence: JSON,
                 'ChatGPT transcript omits inspected source or test files')
         snapshots.append({'gate':'chatgpt_inspection','ref':chat_entry['ref'],
                           'sha256':chat_entry['sha256'],'record':chat_record})
-        owner_entry=records.get('owner_authorization',{})
-        owner_record=fetch(owner_entry.get('ref'))
-        owner_event=_receipt_event(owner_record,owner_entry,owner_id,
-                                   'owner_authorization',pull_request)
+        owner_entry=records.get('owner_authorization')
+        owner_record,owner_event=load_receipt_event(
+            fetch,owner_entry,owner_id,'owner_authorization',pull_request)
         owner_report=owner_event.get('report',{})
         require(owner_event.get('revision')==target and owner_report.get('action')=='merge' and
                 owner_report.get('verdict')=='approve','Pre-merge owner authorization required')
         snapshots.append({'gate':'owner_authorization','ref':owner_entry['ref'],
                           'sha256':owner_entry['sha256'],'record':owner_record})
-        ci_entry=records.get('ci',{})
+        ci_entry=require_present(records.get('ci'),'Candidate CI provider receipt is missing')
+        require(isinstance(ci_entry,dict),'Candidate CI provider receipt is malformed')
+        require_present(ci_entry.get('ref'),'Candidate CI provider receipt reference is missing')
+        require_present(ci_entry.get('sha256'),'Candidate CI provider receipt digest is missing')
+        ci_attempt=ci_entry.get('run_attempt')
+        require(type(ci_attempt) is int and ci_attempt>0,
+                'Candidate CI run attempt identity is invalid')
         ci_record=fetch(ci_entry.get('ref'))
         require(isinstance(ci_record,dict) and digest(canonical(ci_record))==ci_entry.get('sha256'),
                 'Stale CI provider record')
+        record_attempt=ci_record.get('run_attempt')
+        require(type(record_attempt) is int and record_attempt>0 and
+                record_attempt==ci_attempt,
+                'CI provider record run attempt identity mismatch')
         require(ci_record.get('repository',{}).get('full_name')==REPOSITORY and
                 ci_record.get('event')=='pull_request' and ci_record.get('status')=='completed' and
                 ci_record.get('conclusion')=='success' and ci_record.get('head_sha')==target and
-                ci_record.get('run_attempt')==ci_entry.get('run_attempt') and ci_record.get('completed_at'),
+                ci_record.get('completed_at'),
                 'Successful CI must test the reviewed candidate')
         verify_ci_pull_request(ci_record,integration.get('pull_request'),target,base)
         snapshots.append({'gate':'ci','ref':ci_entry['ref'],'sha256':ci_entry['sha256'],
@@ -380,8 +425,8 @@ class VerifiedBaselineAdmission(list):
 def verify_coverage(root: RepositoryPath, evidence: JSON,
                     target: str, *, admitted: bool = False,
                     baseline_admission: VerifiedBaselineAdmission | None = None
-                    ) -> None:
-    """Require exact baseline identity and complete first-parent integration coverage."""
+                    ) -> JSON:
+    """Verify integration coverage and return the exact Git coverage set."""
     baseline=revision(root,evidence.get('baseline_revision'))
     target=revision(root,target)
     if evidence.get('schema_version')==1:
@@ -408,7 +453,9 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
             require(members==expected,'Frozen integration membership is not contiguous')
             covered.update(members)
         require(required<=covered,'Uncovered main integrations in frozen evidence')
-        return
+        return {'schema_version':1,'origin':'frozen','baseline_revision':baseline,
+                'target_revision':target,'required_integrations':sorted(required),
+                'covered_integrations':sorted(covered)}
     origin=evidence.get('origin',{})
     integrations=evidence.get('integrations',[])
     require(isinstance(integrations,list),'Integration evidence list required')
@@ -423,7 +470,10 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
                 'Prospective baseline admission must be independently verified')
         require(target==baseline,'Prospective baseline target must exactly match its admitted revision')
         require(not integrations,'Prospective baseline requires zero ordinary integrations')
-        return
+        return {'schema_version':2,'origin':'prospective_baseline',
+                'baseline_revision':baseline,'target_revision':target,
+                'admission_evidence_sha256':proof.evidence_digest,
+                'dispatch_run_id':proof.dispatch_run_id,'integrations':[]}
     require(origin.get('kind')=='ordinary','Trusted evidence origin required')
     require(admitted or evidence.get('anchor_release'),
             'Ordinary evidence requires a verified immutable baseline')
@@ -443,6 +493,9 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
         require(members==expected,'Integration membership is not a contiguous first-parent range')
         covered.update(members)
     require(required<=covered,'Uncovered main integrations')
+    return {'schema_version':2,'origin':'ordinary','baseline_revision':baseline,
+            'target_revision':target,'required_integrations':sorted(required),
+            'covered_integrations':sorted(covered)}
 
 def verify_pending_baseline_coverage(
         root: RepositoryPath, evidence: JSON,

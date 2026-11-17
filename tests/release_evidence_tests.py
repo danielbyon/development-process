@@ -492,6 +492,46 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
         self.assertTrue(any(item['gate']=='readiness_normalization' for item in snapshots))
         evidence_call('verify_live_integrations',api,evidence,root)
 
+    def test_missing_v2_ci_status_is_classified_as_missing_evidence(self):
+        from release_evidence.audit import _audit_error_status
+        from release_evidence.common import MissingEvidenceError
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        job.pop('status')
+        with self.assertRaises(MissingEvidenceError) as result:
+            evidence_call('verify_live_integrations',api,evidence,root)
+        self.assertEqual(_audit_error_status(result.exception),'MISSING_EVIDENCE')
+
+    def test_ci_run_attempt_must_be_present_and_positive_in_both_records(self):
+        import copy,json
+        from release_evidence.audit import _audit_error_status
+        cases=('both_missing','boolean_receipt_attempt')
+        for case in cases:
+            with self.subTest(case=case):
+                fixture=EvidenceV2Tests().ordinary_fixture()
+                evidence,records,_,root=fixture
+                entry=evidence['integrations'][0]['records']['ci']
+                record=records[entry['ref']]
+                if case=='both_missing':
+                    entry.pop('run_attempt')
+                    record.pop('run_attempt')
+                else:
+                    entry['run_attempt']=True
+                entry['sha256']=release.digest(release.canonical(record))
+                binding=evidence['integrations'][0]['readiness_index']
+                index_record=records[binding['original_ref']]
+                wrapper=json.loads(index_record['body'].split(
+                    '<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+                wrapper['evidence']['integrations'][0]['records']['ci']=copy.deepcopy(entry)
+                index_record['body']='<!-- release-readiness\n'+json.dumps(
+                    wrapper,sort_keys=True)+'\n-->'
+                binding['original_sha256']=release.digest(
+                    release.canonical(index_record))
+                binding['index_sha256']=binding['original_sha256']
+                root,api,evidence,records,job,pr=self.qualified_fixture(fixture)
+                with self.assertRaisesRegex(release.ReleaseError,'run attempt') as result:
+                    evidence_call('verify_evidence',evidence,api.record,root)
+                self.assertEqual(_audit_error_status(result.exception),'FAIL')
+
     def test_original_index_edit_after_merge_invalidates_normalization(self):
         import json
         root,api,evidence,records,job,pr=self.qualified_fixture()

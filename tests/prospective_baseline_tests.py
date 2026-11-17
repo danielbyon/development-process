@@ -207,8 +207,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
         import subprocess
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
         proof=evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
-        self.assertIsNone(evidence_call('verify_coverage',root,evidence,baseline,
-            baseline_admission=proof))
+        coverage=evidence_call('verify_coverage',root,evidence,baseline,
+            baseline_admission=proof)
+        self.assertEqual(coverage['origin'],'prospective_baseline')
+        self.assertEqual(coverage['baseline_revision'],baseline)
+        self.assertEqual(coverage['target_revision'],baseline)
+        self.assertEqual(coverage['integrations'],[])
         subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm','same tree descendant'],check=True)
         descendant=release.git(root,'rev-parse','HEAD').decode().strip()
         with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
@@ -226,8 +230,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
             {'baseline_review','chatgpt_inspection','ci','baseline_admission',
              'readiness_index','corrected_merge','ci_job','ci_log','release_dispatch',
              'baseline_main_ref'})
-        self.assertIsNone(evidence_call('verify_coverage',root,evidence,baseline,
-            baseline_admission=snapshots))
+        coverage=evidence_call('verify_coverage',root,evidence,baseline,
+            baseline_admission=snapshots)
+        self.assertEqual(coverage['origin'],'prospective_baseline')
+        self.assertEqual(coverage['baseline_revision'],baseline)
+        self.assertEqual(coverage['target_revision'],baseline)
+        self.assertEqual(coverage['integrations'],[])
 
     def test_baseline_review_execution_must_run_after_the_corrected_merge(self):
         import json
@@ -342,8 +350,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
         self.assertEqual(discovered['baseline_revision'],baseline)
         self.assertEqual(discovered['integrations'],[])
         proof=evidence_call('verify_baseline_admission',root,api,discovered,baseline,baseline,900)
-        self.assertIsNone(evidence_call('verify_coverage',root,discovered,baseline,
-            baseline_admission=proof))
+        coverage=evidence_call('verify_coverage',root,discovered,baseline,
+            baseline_admission=proof)
+        self.assertEqual(coverage['origin'],'prospective_baseline')
+        self.assertEqual(coverage['baseline_revision'],baseline)
+        self.assertEqual(coverage['target_revision'],baseline)
+        self.assertEqual(coverage['integrations'],[])
 
     def test_admission_after_original_dispatch_is_rejected(self):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
@@ -398,6 +410,21 @@ class ProspectiveBaselineTests(unittest.TestCase):
 
 
 class AuditTests(unittest.TestCase):
+    def test_audit_status_does_not_use_error_wording(self):
+        status=evidence_operation('_audit_error_status')(
+            release.ReleaseError('Missing provider record'))
+        self.assertEqual(status,'FAIL')
+
+    def test_audit_status_uses_typed_missing_evidence(self):
+        from release_evidence.common import MissingEvidenceError
+        status=evidence_operation('_audit_error_status')(
+            MissingEvidenceError('Provider returned no readiness index'))
+        self.assertEqual(status,'MISSING_EVIDENCE')
+
+    def test_presence_check_does_not_treat_false_as_absent(self):
+        from release_evidence.common import require_present
+        self.assertIs(require_present(False,'Provider reported an invalid value'),False)
+
     def test_merged_ordinary_pr_without_release_anchor_runs_git_coverage(self):
         root,api,evidence,records,job,pr=(
             OrdinaryChronologyIntegrationTests().qualified_fixture())

@@ -13,8 +13,8 @@ from typing import Any, Sequence
 import yaml
 
 from .common import (
-    BASE, JSON, REPOSITORY, SHA, SUITES, ReleaseError, _EvidenceAPI, _utc_now, canonical,
-    digest, git, require,
+    BASE, JSON, MissingEvidenceError, REPOSITORY, SHA, SUITES, ReleaseError,
+    _EvidenceAPI, _utc_now, canonical, digest, git, require, require_present,
 )
 
 def _readiness_payload(reference,record,owner_id,pull_request):
@@ -25,6 +25,8 @@ def _readiness_payload(reference,record,owner_id,pull_request):
             'Readiness index must be owner-authenticated')
     _require_pull_request_comment(record,pull_request,'Readiness index')
     marker='<!-- release-readiness\n';body=record.get('body','')
+    if marker not in body:
+        raise MissingEvidenceError('Readiness index payload is missing')
     require(body.count(marker)==1 and '\n-->' in body,
             'Inspectable release-readiness index required')
     try: payload=json.loads(body.split(marker,1)[1].split('\n-->',1)[0])
@@ -34,6 +36,7 @@ def _readiness_payload(reference,record,owner_id,pull_request):
             payload.get('pull_request')==pull_request,
             'Readiness index schema, repository or pull request mismatch')
     evidence=payload.get('evidence')
+    require_present(evidence,'Readiness index evidence payload is missing')
     require(isinstance(evidence,dict) and evidence.get('schema_version')==2,
             'Readiness index evidence payload missing')
     return payload,evidence
@@ -200,9 +203,11 @@ def build_owner_receipt(gate: str, revision_id: str) -> str:
     return '<!-- release-evidence-v2\n'+json.dumps(event,sort_keys=True)+'\n-->'
 
 def _bind_provider_entry(entry,api,owner_id,pull_request,*,owner_comment):
-    require(isinstance(entry,dict) and isinstance(entry.get('ref'),str),
-            'Provider receipt reference required')
-    record=api.record(entry['ref'])
+    require_present(entry,'Provider receipt reference is missing')
+    require(isinstance(entry,dict),'Provider receipt entry is malformed')
+    reference=require_present(entry.get('ref'),'Provider receipt reference is missing')
+    require(isinstance(reference,str) and reference,'Provider receipt reference is malformed')
+    record=api.record(reference)
     if owner_comment:
         require(record.get('user',{}).get('id')==owner_id,
                 'Execution receipt must be posted by the repository owner')
@@ -311,7 +316,9 @@ def prepare_readiness_index(evidence: JSON,
     return body
 
 def _evidence_timestamp(value):
-    require(isinstance(value,str) and value,'Provider timestamp required')
+    if value is None or value=='':
+        raise MissingEvidenceError('Provider timestamp is missing')
+    require(isinstance(value,str),'Provider timestamp is malformed')
     if value.endswith('Z'):
         require(value.count('Z')==1,'Invalid provider timestamp')
         value=value[:-1]+'+00:00'
@@ -327,7 +334,9 @@ def _evidence_timestamp(value):
 def verify_event_chronology(provider_records,cutoff):
     """Require immutable provider records to predate a trusted cutoff."""
     cutoff=_evidence_timestamp(cutoff)
-    require(isinstance(provider_records,list) and provider_records,'Provider records required')
+    require(isinstance(provider_records,list),'Provider records are malformed')
+    if not provider_records:
+        raise MissingEvidenceError('Provider records are missing')
     for record in provider_records:
         require(isinstance(record,dict),'Provider record required')
         created_value=record.get('created_at') or record.get('started_at')
@@ -344,7 +353,9 @@ def verify_event_chronology(provider_records,cutoff):
 def verify_ci_pull_request(ci_record,pull_request,head_revision,base_revision):
     """Bind a successful Actions run to the exact PR, head and tested base."""
     relationships=ci_record.get('pull_requests')
-    require(isinstance(relationships,list),'CI pull request identity unavailable')
+    require(isinstance(relationships,list),'CI pull request relationships are malformed')
+    if not relationships:
+        raise MissingEvidenceError('CI pull request identity is missing')
     matches=[item for item in relationships if item.get('number')==pull_request]
     require(len(matches)==1,'CI run does not identify the exact pull request')
     relation=matches[0]

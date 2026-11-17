@@ -89,6 +89,45 @@ class LiveEvidenceTests(unittest.TestCase):
     def test_missing_pr_cannot_be_admitted_from_reports(self):
         with self.assertRaisesRegex(release.ReleaseError,'Merged PR reference'):
             evidence_call('verify_live_integrations',None,{'integrations':[{}]})
+
+    def test_in_progress_ci_job_is_missing_evidence(self):
+        from release_evidence.common import MissingEvidenceError
+        from release_evidence.integrations import _required_ci_job
+        class API:
+            def ci_jobs(self,*args):
+                return [{'name':'Validate committed PR integration diff',
+                         'status':'in_progress','conclusion':None,'steps':[]}]
+        with self.assertRaises(MissingEvidenceError):
+            _required_ci_job(API(),{'id':1},1,completion_required=True,
+                job_error='Required completed candidate CI job unavailable',
+                steps_error='Candidate CI contains failed or skipped steps')
+
+    def test_ambiguous_required_ci_jobs_are_failures_not_absence(self):
+        from release_evidence.audit import _audit_error_status
+        from release_evidence.integrations import _required_ci_job
+        job={'name':'Validate committed PR integration diff',
+             'status':'completed','conclusion':'success','steps':[{'conclusion':'success'}]}
+        class API:
+            def ci_jobs(self,*args): return [job,dict(job)]
+        with self.assertRaises(release.ReleaseError) as result:
+            _required_ci_job(API(),{'id':1},1,completion_required=True,
+                job_error='Required completed candidate CI job unavailable',
+                steps_error='Candidate CI contains failed or skipped steps')
+        self.assertEqual(_audit_error_status(result.exception),'FAIL')
+
+    def test_cancelled_ci_job_is_a_failure_not_missing_evidence(self):
+        from release_evidence.audit import _audit_error_status
+        from release_evidence.integrations import _required_ci_job
+        job={'name':'Validate committed PR integration diff','status':'cancelled',
+             'conclusion':'cancelled','steps':[]}
+        class API:
+            def ci_jobs(self,*args): return [job]
+        with self.assertRaisesRegex(release.ReleaseError,'did not complete') as result:
+            _required_ci_job(API(),{'id':1},1,completion_required=True,
+                job_error='Required completed candidate CI job unavailable',
+                steps_error='Candidate CI contains failed or skipped steps')
+        self.assertEqual(_audit_error_status(result.exception),'FAIL')
+
     def test_ci_summary_success_without_jobs_does_not_pass(self):
         integration={'pull_request':1,'reviewed_revision':'a'*40,'integrated_revision':'b'*40,
                      'records':{'ci':{'ref':'ci','run_attempt':1}}}
@@ -114,6 +153,8 @@ class StateMachineTests(unittest.TestCase):
             patch.object(release.evidence_integrations,'verify_live_integrations'),patch.object(release,'admit_anchor'),patch.object(release.evidence_qualification,'verify_coverage'),
             patch.object(release,'verify_bundle')]
         for p in self.patches: p.start()
+        release.evidence_qualification.verify_coverage.side_effect=lambda root,evidence,target,**kwargs: {
+            'target_revision':target,'required_integrations':[],'covered_integrations':[]}
         from unittest.mock import Mock
         self.api=Mock()
         self.api.releases.return_value=[];self.api.tags.return_value=[]
@@ -176,6 +217,46 @@ class StateMachineTests(unittest.TestCase):
         with patch.object(release,'verify_remote',return_value=draft):
             release.publish(Path('.'),self.api,self.context,self.directory)
         self.assertEqual(events,['attestation','draft']+['upload']*8+['tag','publish'])
+
+    def test_evidence_change_during_publication_blocks_release(self):
+        from unittest.mock import patch
+        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
+        self.api.create_draft.return_value=draft
+        self.api.release.return_value=draft
+        release.evidence_qualification.verify_evidence.side_effect=[[],[{'gate':'changed'}]]
+        with patch.object(release,'verify_remote',return_value=draft):
+            with self.assertRaisesRegex(release.ReleaseError,'Evidence drift before publication'):
+                release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+
+    def test_coverage_change_during_publication_blocks_release(self):
+        from unittest.mock import patch
+        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
+        self.api.create_draft.return_value=draft
+        self.api.release.return_value=draft
+        release.evidence_qualification.verify_coverage.side_effect=[
+            {'target':'source','covered':['a']},
+            {'target':'builder','covered':['b']},
+            {'target':'source','covered':['changed']},
+            {'target':'builder','covered':['b']}]
+        with patch.object(release,'verify_remote',return_value=draft):
+            with self.assertRaisesRegex(release.ReleaseError,'Coverage changed before publication'):
+                release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+
+    def test_ordinary_integration_change_during_publication_blocks_release(self):
+        from unittest.mock import patch
+        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
+        self.api.create_draft.return_value=draft
+        self.api.release.return_value=draft
+        release.evidence_integrations.verify_live_integrations.side_effect=[
+            None,release.ReleaseError('CI state changed')]
+        with patch.object(release,'verify_remote',return_value=draft):
+            with self.assertRaisesRegex(release.ReleaseError,'CI state changed'):
+                release.publish(Path('.'),self.api,self.context,self.directory)
+        self.assertEqual(
+            release.evidence_integrations.verify_live_integrations.call_count,2)
+        self.api.publish.assert_not_called()
 
 class DispatchTests(unittest.TestCase):
     def setUp(self):

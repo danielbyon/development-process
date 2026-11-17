@@ -30,6 +30,9 @@ RepositoryPath = str | Path
 class ReleaseError(RuntimeError):
     """A mandatory release prerequisite could not be verified."""
 
+class MissingEvidenceError(ReleaseError):
+    """A required evidence record or qualification has not been supplied."""
+
 class _EvidenceAPI(Protocol):
     """Read-only provider operations used to authenticate release evidence."""
 
@@ -45,6 +48,12 @@ class _EvidenceAPI(Protocol):
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ReleaseError(message)
+
+def require_present(value: Any, message: str) -> Any:
+    """Return a required value or raise when the provider omitted it."""
+    if value is None:
+        raise MissingEvidenceError(message)
+    return value
 
 def digest(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()

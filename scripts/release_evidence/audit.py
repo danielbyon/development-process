@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from github_releases import APIError
 
-from .common import BASE, JSON, REPOSITORY, ReleaseError, _EvidenceAPI, canonical, digest, require
+from .common import (
+    BASE, JSON, MissingEvidenceError, REPOSITORY, ReleaseError, _EvidenceAPI,
+    canonical, digest, require,
+)
 from .baseline import verify_baseline_admission
 from .integrations import verify_live_integrations, verify_premerge_integrations
 from .qualification import (
@@ -12,11 +15,8 @@ from .qualification import (
 )
 from .records import load_readiness_index, readiness_index_binding
 
-def _audit_error_status(error):
-    message=str(error).lower()
-    if any(word in message for word in ('missing','required','unavailable','absent')):
-        return 'MISSING_EVIDENCE'
-    return 'FAIL'
+def _audit_error_status(error: Exception) -> str:
+    return 'MISSING_EVIDENCE' if isinstance(error,MissingEvidenceError) else 'FAIL'
 
 def audit_pull_request(root: RepositoryPath,
                        api: _EvidenceAPI, number: int) -> JSON:
@@ -52,6 +52,8 @@ def audit_pull_request(root: RepositoryPath,
             reference=BASE+f'/issues/comments/{comment.get("id")}'
             loaded=load_readiness_index(reference,api.record,int(number))
             candidates.append(loaded)
+        if not candidates:
+            raise MissingEvidenceError('No release-readiness index was found')
         normalized=[item for item in candidates if item['normalization_record'] is not None]
         originals=[item for item in candidates if item['normalization_record'] is None]
         pending_baselines=[]
@@ -60,6 +62,9 @@ def audit_pull_request(root: RepositoryPath,
                 if item['evidence'].get('origin',{}).get('kind')=='prospective_baseline']
             if len(normalized)==1 and not pending_baselines:
                 loaded=normalized[0]
+            elif not normalized and len(originals)==1 and not pending_baselines:
+                raise MissingEvidenceError(
+                    'Merged ordinary pull request has no normalized readiness index')
             else:
                 require(not normalized and len(originals)==1 and len(pending_baselines)==1,
                         'Missing or contradictory release-readiness normalization or baseline index')
@@ -70,7 +75,9 @@ def audit_pull_request(root: RepositoryPath,
             loaded=originals[0]
         evidence=loaded['evidence']
         if evidence.get('origin',{}).get('kind')=='prospective_baseline':
-            require(pr.get('merged_at'),'Prospective baseline admission requires the corrected merge')
+            if not pr.get('merged_at'):
+                raise MissingEvidenceError(
+                    'Prospective baseline admission requires the corrected merge')
             evidence['readiness_index']=readiness_index_binding(loaded)
             current_gate='baseline_admission'
             baseline=evidence.get('baseline_revision')
@@ -91,7 +98,8 @@ def audit_pull_request(root: RepositoryPath,
             try:
                 main_ref=api.record(BASE+'/git/ref/heads/main')
                 main_revision=main_ref.get('object',{}).get('sha')
-                require(main_revision,'Current main revision unavailable')
+                if not main_revision:
+                    raise MissingEvidenceError('Current main revision is unavailable')
                 verify_pending_baseline_coverage(root,evidence,qualification,baseline,main_revision)
                 result['gates']['git_coverage']='PASS'
             except (ReleaseError,APIError,OSError,ValueError,KeyError,TypeError) as error:
