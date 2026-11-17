@@ -10,7 +10,8 @@ from .common import (
 )
 from .records import (
     _evidence_timestamp, load_readiness_index, readiness_index_binding,
-    verify_ci_pull_request, verify_ci_suites, verify_event_chronology,
+    verify_ci_job_identity, verify_ci_test_commit, verify_ci_suites,
+    verify_event_chronology,
 )
 from .qualification import (
     BaselineQualification, VerifiedBaselineAdmission, load_receipt_event,
@@ -129,12 +130,14 @@ def verify_baseline_admission(
             ci_record.get('run_attempt')==ci_entry.get('run_attempt') and
             ci_record.get('completed_at'),
             'Successful correction PR CI bound to the baseline is required')
-    tested=revision(root,ci_entry.get('tested_revision'))
-    require(git(root,'rev-parse',tested+'^{tree}').decode().strip()==tree,
-            'Baseline CI tested tree differs from the exact admitted source')
+    tested=ci_entry.get('tested_revision')
     require(parents and ci_entry.get('tested_base_revision')==parents[0],
             'Baseline CI tested base differs from corrected integration base')
-    verify_ci_pull_request(ci_record,pr_number,pr.get('head',{}).get('sha'),parents[0])
+    tested_record,test_strategy=verify_ci_test_commit(
+        api.record,root,ci_record,pr_number,tested,pr.get('head',{}).get('sha'),
+        parents[0],baseline)
+    require(tested_record.get('tree',{}).get('sha')==tree,
+            'Baseline CI tested tree differs from the exact admitted source')
     jobs=api.ci_jobs(ci_record['id'],ci_entry['run_attempt'])
     required=[job for job in jobs if job.get('name')=='Validate committed PR integration diff']
     if not required:
@@ -152,6 +155,7 @@ def verify_baseline_admission(
     steps=required[0].get('steps',[])
     require(steps and all(step.get('conclusion')=='success' for step in steps),
             'Baseline CI contains failed or skipped steps')
+    verify_ci_job_identity(ci_record,required[0],ci_entry['run_attempt'],steps)
     logs=api.job_log(required[0]['id'])
     for label,value in (('PR HEAD',pr['head']['sha']),
                         ('Tested integration revision',tested),
@@ -196,6 +200,8 @@ def verify_baseline_admission(
     snapshots.extend([
         {'gate':'readiness_index','ref':loaded['original_ref'],
          'sha256':loaded['original_sha256'],'record':loaded['original_record']},
+        {'gate':'tested_commit','ref':BASE+'/commits/'+tested,
+         'sha256':digest(canonical(tested_record)),'record':tested_record},
         {'gate':'corrected_merge','ref':BASE+f'/pulls/{pr_number}',
          'sha256':digest(canonical(pr)),'record':pr},
         {'gate':'ci_job','ref':str(required[0]['id']),
@@ -203,8 +209,12 @@ def verify_baseline_admission(
         {'gate':'ci_log','ref':str(required[0]['id']),'sha256':digest(logs.encode()),'record':logs},
     ])
     evidence_hash=digest(canonical(evidence))
+    tested_commit={'reviewed_revision':pr.get('head',{}).get('sha'),
+                   'base_revision':parents[0],'tested_revision':tested,
+                   'strategy':test_strategy,'record':tested_record}
     if dispatch_run_id is None:
-        return BaselineQualification(snapshots,baseline,source,builder,evidence_hash)
+        return BaselineQualification(snapshots,baseline,source,builder,evidence_hash,
+                                     tested_commit)
     dispatch=api.run(int(dispatch_run_id))
     require(type(dispatch.get('id')) is int and dispatch['id']==int(dispatch_run_id) and
             dispatch.get('event')=='workflow_dispatch' and
@@ -231,4 +241,4 @@ def verify_baseline_admission(
                       'sha256':digest(canonical(main_ref)),
                       'record':main_ref})
     return VerifiedBaselineAdmission(snapshots,baseline,source,builder,int(dispatch_run_id),
-                                     evidence_hash)
+                                     evidence_hash,tested_commit)

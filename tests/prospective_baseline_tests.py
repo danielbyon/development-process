@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
 import release_evidence as evidence
-from release_evidence_tests import EvidenceV2Tests, OrdinaryChronologyIntegrationTests, evidence_operation
+from release_evidence_tests import EvidenceV2Tests, OrdinaryChronologyIntegrationTests, evidence_operation, isolated_repository
 
 def evidence_call(name,*args,**kwargs):
     if name=='discover_evidence':
@@ -14,7 +14,7 @@ def evidence_call(name,*args,**kwargs):
 
 class ProspectiveBaselineTests(unittest.TestCase):
     def qualified_fixture(self,chat_source_files=None,chat_test_files=None):
-        import json,tempfile,subprocess
+        import json,tempfile,subprocess,yaml
         from unittest.mock import Mock
         temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
         root=Path(temporary.name)
@@ -31,10 +31,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
         (root/'tests/release_evidence_tests.py').write_text('# baseline evidence tests\n')
         (root/'tests/prospective_baseline_tests.py').write_text('# baseline prospective tests\n')
         suites=list(release.SUITES)
-        steps=[{'name':suite,'run':'python3 -m unittest discover -s tests -p '+suite+' -v'} for suite in suites]
-        workflow={'jobs':{'integration':{'name':'Validate committed PR integration diff','steps':steps}}}
-        import yaml
-        (root/'.github/workflows/ci.yml').write_text(yaml.safe_dump(workflow,sort_keys=False))
+        workflow=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
+        (root/'.github/workflows/ci.yml').write_text(workflow)
+        workflow_data=yaml.safe_load(workflow)
+        workflow_steps=next(job['steps'] for job in workflow_data['jobs'].values()
+            if job.get('name')=='Validate committed PR integration diff')
+        steps=[{'name':step['name'],'conclusion':'success'} for step in workflow_steps]
         git('add','.');git('commit','-qm','base before correction');base=git('rev-parse','HEAD')
         (root/'scripts/skill_release.py').write_text('# reviewed ordinary integration source\n')
         (root/'tests/test_skill_releases.py').write_text('# reviewed ordinary integration tests\n')
@@ -50,13 +52,20 @@ class ProspectiveBaselineTests(unittest.TestCase):
         (root/'tests/test_skill_releases.py').write_text('# corrected release controller tests\n')
         (root/'tests/release_evidence_tests.py').write_text('# corrected release evidence tests\n')
         (root/'tests/prospective_baseline_tests.py').write_text('# corrected prospective baseline tests\n')
-        git('add','.');git('commit','-qm','corrected release evidence process');baseline=git('rev-parse','HEAD')
-        tree=git('rev-parse',baseline+'^{tree}')
+        git('add','.');git('commit','-qm','corrected release evidence PR head')
+        reviewed_head=git('rev-parse','HEAD')
+        tree=git('rev-parse',reviewed_head+'^{tree}')
+        baseline=git('commit-tree',tree,'-p',base,'-m','squash correction merge')
+        tested=git('commit-tree',tree,'-p',base,'-p',reviewed_head,
+                   '-m','synthetic correction CI merge')
         manifest=release.digest(release.git(root,'ls-tree','-r','--full-tree','-z',baseline))
         policy=git('log','--first-parent','-1','--format=%H',baseline,'--','docs/PROCESS.md')
         policy_digest=release.digest(release.git(root,'show',baseline+':docs/PROCESS.md'))
         owner=123; records={release.BASE:{'full_name':release.REPOSITORY,
             'owner':{'id':owner,'login':'danielbyon'}}};counter=0
+        parents=git('show','-s','--format=%P',tested).split()
+        records[release.BASE+'/commits/'+tested]={'sha':tested,'tree':{'sha':tree},
+            'parents':[{'sha':parent} for parent in parents]}
         records[release.BASE+'/git/ref/heads/main']={
             'ref':'refs/heads/main','object':{'type':'commit','sha':baseline}}
         def make_receipt(gate,report,system,reviewed_range,created_at,revision):
@@ -102,14 +111,15 @@ class ProspectiveBaselineTests(unittest.TestCase):
             {'baseline_revision':baseline,'tree_sha':tree},'2026-11-16T20:06:00Z',baseline)
         ci_ref=release.BASE+'/actions/runs/101'
         ci={'id':101,'repository':{'full_name':release.REPOSITORY},'event':'pull_request',
-            'head_sha':baseline,'status':'completed','conclusion':'success','run_attempt':1,
-            'pull_requests':[{'number':32,'head':{'sha':baseline},
+            'workflow_id':413585893,'path':'.github/workflows/ci.yml','name':'CI',
+            'head_sha':reviewed_head,'status':'completed','conclusion':'success','run_attempt':1,
+            'pull_requests':[{'number':32,'head':{'sha':reviewed_head},
                 'base':{'sha':base,'ref':'main'}}],
             'created_at':'2026-11-16T19:00:00Z','updated_at':'2026-11-16T20:07:00Z',
             'completed_at':'2026-11-16T20:07:00Z'}
         records[ci_ref]=ci
         ci_entry={'ref':ci_ref,'sha256':release.digest(release.canonical(ci)),
-                  'run_attempt':1,'tested_revision':baseline,'tested_base_revision':base}
+                  'run_attempt':1,'tested_revision':tested,'tested_base_revision':base}
         owner_ref=release.BASE+'/issues/comments/'+str(counter+1)
         owner_report={'action':'admit-baseline','verdict':'approve'}
         owner_event={'schema_version':2,'repository':release.REPOSITORY,
@@ -126,7 +136,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
             'source_revision':baseline,'builder_revision':baseline,
             'policy_revision':policy,'policy_sha256':policy_digest},
             'baseline_revision':baseline,'integrations':[],
-            'baseline_admission':{'correction_pull_request':32,'reviewed_revision':baseline,
+            'baseline_admission':{'correction_pull_request':32,'reviewed_revision':reviewed_head,
                 'full_review':review,'chatgpt_inspection':chat,'ci':ci_entry,
                 'owner_admission':owner_entry}}
         index_ref=release.BASE+'/issues/comments/'+str(counter+2)
@@ -144,18 +154,20 @@ class ProspectiveBaselineTests(unittest.TestCase):
         pr_ref=release.BASE+'/pulls/32'
         pr={'number':32,'merged':True,'merged_at':'2026-11-16T20:00:00Z',
             'base':{'ref':'main','repo':{'full_name':release.REPOSITORY}},
-            'head':{'sha':baseline,'repo':{'full_name':release.REPOSITORY}},
+            'head':{'sha':reviewed_head,'repo':{'full_name':release.REPOSITORY}},
             'merge_commit_sha':baseline}
         records[pr_ref]=pr
-        job={'id':201,'name':'Validate committed PR integration diff','status':'completed',
+        job={'id':201,'run_id':ci['id'],'run_attempt':ci['run_attempt'],
+             'name':'Validate committed PR integration diff','status':'completed',
              'conclusion':'success','started_at':'2026-11-16T19:10:00Z',
              'completed_at':'2026-11-16T20:07:00Z',
-             'steps':[{'name':step['name'],'conclusion':'success'} for step in steps]}
+             'steps':[{'name':step['name'],'status':'completed','conclusion':'success'}
+                      for step in steps]}
         logs=[]
         for suite in suites:
             command='python3 -m unittest discover -s tests -p '+suite+' -v'
             logs.append('##[group]Run '+command+'\n##[endgroup]\ntest_valid (tests.test_baseline.Baseline) ... ok\nRan 1 test in 0.001s\nOK\n')
-        job_log='PR HEAD: '+baseline+'\nTested integration revision: '+baseline+'\nTested base revision: '+base+'\n'+''.join(logs)
+        job_log='PR HEAD: '+reviewed_head+'\nTested integration revision: '+tested+'\nTested base revision: '+base+'\n'+''.join(logs)
         dispatch={'id':900,'event':'workflow_dispatch','head_sha':baseline,'head_branch':'main',
                   'actor':{'id':owner},'triggering_actor':{'id':owner},
                   'path':'.github/workflows/skill-release.yml@refs/heads/main',
@@ -228,7 +240,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
         snapshots=evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
         self.assertEqual({item['gate'] for item in snapshots},
             {'baseline_review','chatgpt_inspection','ci','baseline_admission',
-             'readiness_index','corrected_merge','ci_job','ci_log','release_dispatch',
+             'readiness_index','tested_commit','corrected_merge','ci_job','ci_log','release_dispatch',
              'baseline_main_ref'})
         coverage=evidence_call('verify_coverage',root,evidence,baseline,
             baseline_admission=snapshots)
@@ -236,6 +248,44 @@ class ProspectiveBaselineTests(unittest.TestCase):
         self.assertEqual(coverage['baseline_revision'],baseline)
         self.assertEqual(coverage['target_revision'],baseline)
         self.assertEqual(coverage['integrations'],[])
+
+    def test_baseline_rejects_same_tree_test_commit_with_wrong_parents(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        tested=evidence['baseline_admission']['ci']['tested_revision']
+        commit=api.records[release.BASE+'/commits/'+tested]
+        self.assertEqual(commit['tree']['sha'],
+                         release.git(root,'rev-parse',baseline+'^{tree}').decode().strip())
+        commit['parents']=[{'sha':base}]
+        with self.assertRaisesRegex(release.ReleaseError,'expected synthetic merge parents'):
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+
+    def test_baseline_ci_requires_the_expected_provider_workflow(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        entry=evidence['baseline_admission']['ci']
+        ci=api.records[entry['ref']]
+        ci['workflow_id']=0
+        entry['sha256']=release.digest(release.canonical(ci))
+        self.rewrite_readiness_index(api,evidence)
+        with self.assertRaisesRegex(release.ReleaseError,'required CI workflow'):
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+
+    def test_baseline_ci_job_must_match_the_provider_run_attempt(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        job=api.ci_jobs(101,1)[0]
+        job['run_attempt']=2
+        with self.assertRaisesRegex(release.ReleaseError,'CI job run identity mismatch'):
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+
+    def test_baseline_rejects_wrong_reviewed_head_and_tested_base(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        evidence['baseline_admission']['reviewed_revision']='0'*40
+        with self.assertRaisesRegex(release.ReleaseError,
+                                    'Prospective baseline is not the exact corrected main integration'):
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        evidence['baseline_admission']['ci']['tested_base_revision']='0'*40
+        with self.assertRaisesRegex(release.ReleaseError,'tested base differs'):
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
 
     def test_baseline_review_execution_must_run_after_the_corrected_merge(self):
         import json
@@ -303,8 +353,10 @@ class ProspectiveBaselineTests(unittest.TestCase):
             def run(self,run_id):return baseline_api.run(run_id)
         api=CombinedAPI()
         ordinary_snapshots=evidence_call('verify_evidence',ordinary_evidence,api.record,root)
-        evidence_call('verify_live_integrations',api,ordinary_evidence,root)
-        evidence_call('verify_coverage',root,ordinary_evidence,ordinary_head,admitted=True)
+        evidence_call('verify_live_integrations',api,ordinary_evidence,root,
+                      ordinary_evidence=ordinary_snapshots)
+        evidence_call('verify_coverage',root,ordinary_evidence,ordinary_head,admitted=True,
+                      ordinary_evidence=ordinary_snapshots)
         baseline_proof=evidence_call('verify_baseline_admission',root,api,baseline_evidence,
             baseline,baseline,900)
         evidence_call('verify_coverage',root,baseline_evidence,baseline,
@@ -403,10 +455,15 @@ class ProspectiveBaselineTests(unittest.TestCase):
             evidence_call('verify_coverage',root,evidence,base,baseline_admission=proof)
         with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
             evidence_call('verify_coverage',root,evidence,descendant,baseline_admission=proof)
-        ordinary={'schema_version':2,'origin':{'kind':'ordinary'},
-            'baseline_revision':baseline,'anchor_release':'2026.11.16','integrations':[]}
+        head=api.records[release.BASE+'/pulls/32']['head']['sha']
+        ordinary_fixture=EvidenceV2Tests().ordinary_fixture(
+            root,base,head,pull_request=31,comment_offset=100)
+        ordinary_root,ordinary_api,ordinary,ordinary_records,job,pr=(
+            OrdinaryChronologyIntegrationTests().qualified_fixture(ordinary_fixture))
+        ordinary_proof=evidence_call('verify_evidence',ordinary,ordinary_api.record,root)
         with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
-            evidence_call('verify_coverage',root,ordinary,descendant,admitted=True)
+            evidence_call('verify_coverage',root,ordinary,descendant,admitted=True,
+                          ordinary_evidence=ordinary_proof)
 
 
 class AuditTests(unittest.TestCase):
@@ -426,8 +483,21 @@ class AuditTests(unittest.TestCase):
         self.assertIs(require_present(False,'Provider reported an invalid value'),False)
 
     def test_merged_ordinary_pr_without_release_anchor_runs_git_coverage(self):
-        root,api,evidence,records,job,pr=(
-            OrdinaryChronologyIntegrationTests().qualified_fixture())
+        import subprocess
+        root=isolated_repository(self)
+        base=release.git(root,'rev-parse','HEAD').decode().strip()
+        source=root/'scripts/skill_release.py'
+        source.write_text(source.read_text()+'\n# uncovered source commit\n')
+        subprocess.run(['git','-C',str(root),'add','scripts/skill_release.py'],check=True)
+        subprocess.run(['git','-C',str(root),'commit','-qm','uncovered source commit'],check=True)
+        tests=root/'tests/test_skill_releases.py'
+        tests.write_text(tests.read_text()+'\n# reviewed PR head\n')
+        subprocess.run(['git','-C',str(root),'add','tests/test_skill_releases.py'],check=True)
+        subprocess.run(['git','-C',str(root),'commit','-qm','reviewed PR head'],check=True)
+        head=release.git(root,'rev-parse','HEAD').decode().strip()
+        fixture=EvidenceV2Tests().ordinary_fixture(root=root,base=base,head=head)
+        integration_case=OrdinaryChronologyIntegrationTests()
+        root,api,evidence,records,job,pr=integration_case.qualified_fixture(fixture)
         binding=evidence['integrations'][0]['readiness_index']
         provider_pages=api.pages.side_effect
         def pages(reference):
@@ -447,9 +517,9 @@ class AuditTests(unittest.TestCase):
     def test_open_pull_request_audit_marks_merge_and_release_gates_not_run(self):
         import json,yaml
         from unittest.mock import Mock
-        evidence,records,_,root=EvidenceV2Tests().ordinary_fixture()
+        evidence,records,_,root=EvidenceV2Tests().ordinary_fixture(
+            root=isolated_repository(self))
         integration=evidence['integrations'][0]
-        integration['tested_revision']=integration['reviewed_revision']
         base=integration['base_revision'];head=integration['reviewed_revision']
         pr_ref=release.BASE+'/pulls/5'
         records[pr_ref]={'number':5,'merged':False,'base':{'ref':'main',
@@ -458,8 +528,11 @@ class AuditTests(unittest.TestCase):
         workflow=yaml.safe_load(release.git(root,'show',head+':.github/workflows/ci.yml').decode())
         workflow_steps=next(job['steps'] for job in workflow['jobs'].values()
             if job.get('name')=='Validate committed PR integration diff')
-        steps=[{'name':step['name'],'conclusion':'success'} for step in workflow_steps]
-        job={'id':700,'name':'Validate committed PR integration diff','status':'completed',
+        steps=[{'name':step['name'],'status':'completed','conclusion':'success'}
+               for step in workflow_steps]
+        ci=records[integration['records']['ci']['ref']]
+        job={'id':700,'run_id':ci['id'],'run_attempt':integration['records']['ci']['run_attempt'],
+             'name':'Validate committed PR integration diff','status':'completed',
              'conclusion':'success','started_at':'2026-11-16T18:01:00Z',
              'completed_at':'2026-11-16T18:03:00Z','steps':steps}
         logs=[]
@@ -467,10 +540,9 @@ class AuditTests(unittest.TestCase):
             if 'run' in step:
                 logs.append('##[group]Run '+step['run']+'\n##[endgroup]\n'
                             'test_valid (tests.test_candidate.Candidate) ... ok\nRan 1 test in 0.001s\nOK\n')
-        ci=records[integration['records']['ci']['ref']]
         ci['head_sha']=head
         integration['records']['ci']['sha256']=release.digest(release.canonical(ci))
-        job_log='PR HEAD: '+head+'\nTested integration revision: '+head+'\nTested base revision: '+base+'\n'+''.join(logs)
+        job_log='PR HEAD: '+head+'\nTested integration revision: '+integration['tested_revision']+'\nTested base revision: '+base+'\n'+''.join(logs)
         comments=[records[evidence['integrations'][0]['readiness_index']['index_ref']]]
         records[release.BASE+'/pulls/5']={'number':5,'merged':False,
             'base':{'ref':'main','sha':base,'repo':{'full_name':release.REPOSITORY}},
@@ -494,7 +566,8 @@ class AuditTests(unittest.TestCase):
         self.assertTrue(all(method=='GET' for method,_ in api.methods))
 
     def test_audit_rejects_a_provider_record_for_a_different_pr_number(self):
-        evidence,records,_,root=EvidenceV2Tests().ordinary_fixture()
+        evidence,records,_,root=EvidenceV2Tests().ordinary_fixture(
+            root=isolated_repository(self))
         class API:
             def request(self,method,endpoint):return {'login':'danielbyon'}
             def record(self,ref):

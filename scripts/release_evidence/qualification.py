@@ -13,7 +13,7 @@ from .common import (
 )
 from .records import (
     _evidence_timestamp, _require_pull_request_comment, load_readiness_index,
-    verify_ci_pull_request, verify_event_chronology,
+    verify_ci_pull_request, verify_ci_test_commit, verify_event_chronology,
 )
 
 __all__ = [
@@ -26,6 +26,27 @@ __all__ = [
 _BASELINE_ADMISSION_SEAL=object()
 
 _BASELINE_QUALIFICATION_SEAL=object()
+
+_ORDINARY_EVIDENCE_SEAL=object()
+
+class VerifiedOrdinaryEvidence(list):
+    """Provider-authenticated review records and tested-commit proofs."""
+    def __init__(self,snapshots,evidence_digest,tested_commits):
+        super().__init__(snapshots)
+        self.evidence_digest=evidence_digest
+        self.tested_commits=tested_commits
+        self._seal=_ORDINARY_EVIDENCE_SEAL
+
+    def test_commit_for(self,integration):
+        require(self._seal is _ORDINARY_EVIDENCE_SEAL,
+                'Ordinary CI commit evidence is not verified')
+        identity=(integration.get('pull_request'),integration.get('reviewed_revision'),
+                  integration.get('base_revision'),integration.get('tested_revision'))
+        matches=[item for item in self.tested_commits
+                 if (item['pull_request'],item['reviewed_revision'],item['base_revision'],
+                     item['tested_revision'])==identity]
+        require(len(matches)==1,'Verified CI commit does not match this PR evidence')
+        return matches[0]
 
 def verify_execution_receipt(event,gate,reviewed_range):
     """Bind a claimed execution to captured command output and its review range.
@@ -249,7 +270,7 @@ def verify_inspection_files(root,revision_id,report,base_revision=None):
 
 def verify_evidence(evidence: JSON,
                     fetch: Callable[[str], Any],
-                    root: RepositoryPath | None = None) -> list[JSON]:
+                    root: RepositoryPath | None = None) -> VerifiedOrdinaryEvidence:
     """Authenticate chronological evidence for ordinary integrations."""
     require(isinstance(evidence,dict) and evidence.get('schema_version')==2,
             'New qualification requires evidence schema v2')
@@ -265,7 +286,7 @@ def verify_evidence(evidence: JSON,
     require(isinstance(baseline,str) and SHA.fullmatch(baseline),'Evidence baseline revision required')
     integrations=evidence.get('integrations')
     require(isinstance(integrations,list),'Integration evidence list required')
-    snapshots=[]
+    snapshots=[];tested_commits=[]
     for integration in integrations:
         require(isinstance(integration,dict),'Integration evidence object required')
         pull_request=integration.get('pull_request')
@@ -401,30 +422,42 @@ def verify_evidence(evidence: JSON,
                 ci_record.get('completed_at'),
                 'Successful CI must test the reviewed candidate')
         verify_ci_pull_request(ci_record,integration.get('pull_request'),target,base)
+        tested=integration.get('tested_revision')
+        tested_record,strategy=verify_ci_test_commit(
+            fetch,root,ci_record,pull_request,tested,target,base,target)
+        tested_commits.append({'pull_request':pull_request,'reviewed_revision':target,
+            'base_revision':base,'tested_revision':tested,'strategy':strategy,
+            'record':tested_record})
+        snapshots.append({'gate':'tested_commit','ref':BASE+'/commits/'+tested,
+                          'sha256':digest(canonical(tested_record)),
+                          'record':tested_record})
         snapshots.append({'gate':'ci','ref':ci_entry['ref'],'sha256':ci_entry['sha256'],
                           'record':ci_record})
     require(snapshots,'No admitted ordinary integration evidence')
-    return snapshots
+    return VerifiedOrdinaryEvidence(snapshots,digest(canonical(evidence)),tested_commits)
 
 class BaselineQualification(list):
     """Authenticated pre-dispatch baseline evidence; it cannot authorize release coverage."""
-    def __init__(self,snapshots,baseline,source,builder,evidence_digest):
+    def __init__(self,snapshots,baseline,source,builder,evidence_digest,tested_commit):
         super().__init__(snapshots)
         self.baseline=baseline;self.source=source;self.builder=builder
-        self.evidence_digest=evidence_digest
+        self.evidence_digest=evidence_digest;self.tested_commit=tested_commit
         self._seal=_BASELINE_QUALIFICATION_SEAL
 
 class VerifiedBaselineAdmission(list):
     """In-process result of the complete prospective admission verifier."""
-    def __init__(self,snapshots,baseline,source,builder,dispatch_run_id,evidence_digest):
+    def __init__(self,snapshots,baseline,source,builder,dispatch_run_id,evidence_digest,
+                 tested_commit):
         super().__init__(snapshots)
         self.baseline=baseline;self.source=source;self.builder=builder
         self.dispatch_run_id=dispatch_run_id;self.evidence_digest=evidence_digest
+        self.tested_commit=tested_commit
         self._seal=_BASELINE_ADMISSION_SEAL
 
 def verify_coverage(root: RepositoryPath, evidence: JSON,
                     target: str, *, admitted: bool = False,
-                    baseline_admission: VerifiedBaselineAdmission | None = None
+                    baseline_admission: VerifiedBaselineAdmission | None = None,
+                    ordinary_evidence: VerifiedOrdinaryEvidence | None = None
                     ) -> JSON:
     """Verify integration coverage and return the exact Git coverage set."""
     baseline=revision(root,evidence.get('baseline_revision'))
@@ -466,6 +499,9 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
                 proof.baseline==baseline and proof.source==baseline and
                 proof.builder==baseline and proof.dispatch_run_id is not None and
                 proof.evidence_digest==digest(canonical(evidence)) and
+                isinstance(proof.tested_commit,dict) and
+                proof.tested_commit.get('record',{}).get('tree',{}).get('sha')==
+                    git(root,'rev-parse',baseline+'^{tree}').decode().strip() and
                 evidence.get('baseline_admission'),
                 'Prospective baseline admission must be independently verified')
         require(target==baseline,'Prospective baseline target must exactly match its admitted revision')
@@ -477,14 +513,19 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
     require(origin.get('kind')=='ordinary','Trusted evidence origin required')
     require(admitted or evidence.get('anchor_release'),
             'Ordinary evidence requires a verified immutable baseline')
+    require(isinstance(ordinary_evidence,VerifiedOrdinaryEvidence) and
+            ordinary_evidence._seal is _ORDINARY_EVIDENCE_SEAL and
+            ordinary_evidence.evidence_digest==digest(canonical(evidence)),
+            'Ordinary Git coverage requires authenticated CI commit evidence')
     git(root,'merge-base','--is-ancestor',baseline,target)
     required=set(git(root,'rev-list','--first-parent',baseline+'..'+target).decode().split())
     covered=set()
     for integration in integrations:
         result=revision(root,integration.get('integrated_revision'))
         revision(root,integration.get('reviewed_revision'))
-        tested=revision(root,integration.get('tested_revision'))
-        require(git(root,'rev-parse',result+'^{tree}')==git(root,'rev-parse',tested+'^{tree}'),
+        tested_commit=ordinary_evidence.test_commit_for(integration)
+        tested_tree=tested_commit['record']['tree']['sha']
+        require(git(root,'rev-parse',result+'^{tree}').decode().strip()==tested_tree,
                 'Integration tree differs from tested tree')
         members=integration.get('integrated_commits',[result])
         require(isinstance(members,list) and members and len(set(members))==len(members)

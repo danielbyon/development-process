@@ -8,12 +8,14 @@ import shlex
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import yaml
 
 from .common import (
-    BASE, JSON, MissingEvidenceError, REPOSITORY, SHA, SUITES, ReleaseError,
+    BASE, CI_REQUIRED_JOB_NAME, CI_REVISION_CHECK_STEP_NAME, CI_WORKFLOW_ID,
+    CI_WORKFLOW_NAME, CI_WORKFLOW_PATH, JSON, MissingEvidenceError,
+    REPOSITORY, SHA, SUITES, ReleaseError,
     _EvidenceAPI, _utc_now, canonical, digest, git, require, require_present,
 )
 
@@ -364,6 +366,132 @@ def verify_ci_pull_request(ci_record,pull_request,head_revision,base_revision):
             relation.get('base',{}).get('sha')==base_revision,
             'CI pull request head or base identity mismatch')
     return True
+
+def verify_ci_workflow_identity(ci_record: JSON) -> bool:
+    """Require the provider run to come from this repository's CI workflow."""
+    require(type(ci_record.get('workflow_id')) is int and
+            ci_record.get('workflow_id')==CI_WORKFLOW_ID and
+            ci_record.get('path')==CI_WORKFLOW_PATH and
+            ci_record.get('name')==CI_WORKFLOW_NAME and
+            ci_record.get('event')=='pull_request',
+            'CI run is not from the required CI workflow')
+    return True
+
+def verify_ci_job_identity(ci_record: JSON, job: JSON, attempt: int,
+                           steps: Sequence[JSON]) -> bool:
+    """Bind the required job and its revision check to one provider run attempt."""
+    run_id=ci_record.get('id')
+    require(type(run_id) is int and run_id>0 and type(attempt) is int and attempt>0 and
+            type(job.get('run_id')) is int and job.get('run_id')==run_id and
+            type(job.get('run_attempt')) is int and job.get('run_attempt')==attempt,
+            'CI job run identity mismatch')
+    require(isinstance(steps,list) and all(isinstance(step,dict) for step in steps),
+            'Required CI job steps are unavailable')
+    required=[step for step in steps
+              if step.get('name')==CI_REVISION_CHECK_STEP_NAME]
+    require(len(required)==1,'Required CI revision-check step is missing or ambiguous')
+    step=required[0]
+    require(step.get('status')=='completed' and step.get('conclusion')=='success' and
+            step.get('outcome','success')=='success',
+            'Required CI revision-check step did not complete successfully')
+    return True
+
+def _ci_test_strategy(root,workflow_revision,base_revision):
+    workflow_bytes=git(root,'show',workflow_revision+':.github/workflows/ci.yml')
+    base_workflow=git(root,'show',base_revision+':.github/workflows/ci.yml')
+    require(workflow_bytes==base_workflow,
+            'CI workflow differs from the PR base')
+    workflow=yaml.safe_load(workflow_bytes.decode())
+    require(isinstance(workflow,dict) and isinstance(workflow.get('jobs'),dict),
+            'CI tested-commit workflow is malformed')
+    jobs=[job for job in workflow['jobs'].values()
+          if job.get('name')==CI_REQUIRED_JOB_NAME]
+    require(len(jobs)==1 and not any(key in jobs[0]
+            for key in ('if','continue-on-error','strategy')),
+            'CI tested-commit job is conditional or ambiguous')
+    steps=jobs[0].get('steps',[])
+    require(isinstance(steps,list) and all(isinstance(step,dict) for step in steps),
+            'CI tested-commit steps are malformed')
+    checkouts=[step for step in steps
+               if isinstance(step.get('uses'),str) and step['uses'].startswith('actions/checkout@')
+               and not step.get('with',{}).get('path')]
+    checks=[step for step in steps
+            if step.get('name')==CI_REVISION_CHECK_STEP_NAME]
+    require(len(checkouts)==1 and len(checks)==1,
+            'CI tested-commit checkout or identity step is missing or ambiguous')
+    checkout=checkouts[0]
+    check=checks[0]
+    require(steps.index(checkout)<steps.index(check) and
+            checkout.get('with',{}).get('fetch-depth')==0 and
+            not any(key in checkout for key in ('if','continue-on-error')) and
+            not any(key in check for key in ('if','continue-on-error')) and
+            check.get('shell')=='bash',
+            'CI tested-commit checkout or revision check is optional or incomplete')
+    checkout_ref=checkout.get('with',{}).get('ref')
+    environment=check.get('env',{})
+    require(environment.get('EXPECTED_BASE_SHA')=='${{ github.event.pull_request.base.sha }}' and
+            environment.get('EXPECTED_HEAD_SHA')=='${{ github.event.pull_request.head.sha }}',
+            'CI tested-commit workflow does not bind the PR head and base')
+    run='\n'.join(line for line in check.get('run','').splitlines()
+                   if line.strip() and not line.lstrip().startswith('#'))
+    require('actual_test_sha="$(git rev-parse HEAD)"' in run and
+            'if [[ "$actual_test_sha" != "$EXPECTED_TEST_SHA" ]]' in run,
+            'CI does not verify the checked-out test revision')
+    test_sha=environment.get('EXPECTED_TEST_SHA')
+    if checkout_ref=='${{ github.sha }}' and test_sha=='${{ github.sha }}':
+        require('git rev-list --parents -n 1 HEAD' in run and
+                'git rev-parse HEAD^1' in run and 'git rev-parse HEAD^2' in run and
+                'if [[ "$actual_base_sha" != "$EXPECTED_BASE_SHA" ]]' in run and
+                'if [[ "$actual_head_sha" != "$EXPECTED_HEAD_SHA" ]]' in run,
+                'Synthetic-merge CI does not verify both expected parents')
+        return 'synthetic_merge'
+    direct_head='${{ github.event.pull_request.head.sha }}'
+    if checkout_ref==direct_head and test_sha==direct_head:
+        require('git merge-base --is-ancestor "$EXPECTED_BASE_SHA" "$EXPECTED_TEST_SHA"' in run,
+                'Direct-head CI does not verify base ancestry')
+        return 'direct_head'
+    raise ReleaseError('CI tested-commit checkout strategy is unsupported')
+
+def verify_ci_test_commit(fetch: Callable[[str], Any], root: str | Path,
+                          ci_record: JSON, pull_request: int,
+                          tested_revision: str, reviewed_revision: str,
+                          base_revision: str, workflow_revision: str) -> tuple[JSON, str]:
+    """Bind CI's tested commit to the reviewed PR head and base using Git parents."""
+    require(type(pull_request) is int and pull_request>0,
+            'CI tested-commit pull request identity is invalid')
+    for value in (tested_revision,reviewed_revision,base_revision,workflow_revision):
+        require(isinstance(value,str) and SHA.fullmatch(value),
+                'CI tested-commit revisions must be full immutable SHAs')
+    require(ci_record.get('head_sha')==reviewed_revision,
+            'CI run head differs from the reviewed PR head')
+    verify_ci_pull_request(ci_record,pull_request,reviewed_revision,base_revision)
+    verify_ci_workflow_identity(ci_record)
+    strategy=_ci_test_strategy(root,workflow_revision,base_revision)
+    record=fetch(BASE+'/commits/'+tested_revision)
+    require(isinstance(record,dict) and record.get('sha')==tested_revision,
+            'Provider commit identity differs from the CI-tested revision')
+    tree=record.get('tree',{}).get('sha')
+    parents=record.get('parents')
+    require(isinstance(tree,str) and SHA.fullmatch(tree) and
+            isinstance(parents,list) and all(isinstance(parent,dict) and
+            isinstance(parent.get('sha'),str) and SHA.fullmatch(parent['sha'])
+            for parent in parents),
+            'Provider CI-tested commit tree or parents are malformed')
+    parent_shas=[parent['sha'] for parent in parents]
+    if strategy=='synthetic_merge':
+        require(parent_shas==[base_revision,reviewed_revision],
+                'CI-tested commit does not have the expected synthetic merge parents')
+    else:
+        require(tested_revision==reviewed_revision,
+                'Direct-head CI must test the exact reviewed PR head')
+        local_parents=git(root,'show','-s','--format=%P',reviewed_revision).decode().split()
+        require(parent_shas==local_parents,
+                'Provider and local reviewed-head parents differ')
+        try:
+            git(root,'merge-base','--is-ancestor',base_revision,reviewed_revision)
+        except ReleaseError as error:
+            raise ReleaseError('Direct-head CI base is not an ancestor of the reviewed head') from error
+    return record,strategy
 
 def verify_ci_suites(logs,schema,steps,workflow):
     """Bind each suite result to its committed command and successful CI step."""

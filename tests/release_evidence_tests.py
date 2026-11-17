@@ -19,6 +19,16 @@ def evidence_call(name,*args,**kwargs):
         kwargs.setdefault('select_anchor',release.select_anchor)
     return evidence_operation(name)(*args,**kwargs)
 
+def isolated_repository(test_case):
+    import subprocess,tempfile
+    temporary=tempfile.TemporaryDirectory(prefix='release-evidence-fixture-')
+    test_case.addCleanup(temporary.cleanup)
+    source=Path(__file__).resolve().parents[1]
+    root=Path(temporary.name)/'repository'
+    subprocess.run(['git','clone','--quiet','--shared',str(source),str(root)],
+        check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    return root
+
 class EvidenceModuleBoundaryTests(unittest.TestCase):
     def test_controller_uses_module_operations_without_reexporting_them(self):
         import inspect
@@ -87,17 +97,39 @@ class EvidenceModuleBoundaryTests(unittest.TestCase):
 
 
 class EvidenceV2Tests(unittest.TestCase):
-    def ordinary_fixture(self,root=None,base=None,head=None,pull_request=5,comment_offset=0):
-        import json
-        root=Path(__file__).resolve().parents[1] if root is None else Path(root)
+    def ordinary_fixture(self,root=None,base=None,head=None,pull_request=5,comment_offset=0,
+                         tested_parents=None):
+        import json,os,subprocess
+        root=isolated_repository(self) if root is None else Path(root)
         owner=123
         default_head=head is None
         head=head or release.git(root,'rev-parse','HEAD').decode().strip()
-        default_base=release.BOOTSTRAP_BASELINE if default_head else \
+        default_base=release.git(root,'rev-parse',head+'^').decode().strip() if default_head else \
             release.git(root,'rev-parse',head+'^').decode().strip()
         base=base or default_base
+        tree=release.git(root,'rev-parse',head+'^{tree}').decode().strip()
+        if tested_parents=='unrelated':
+            parents=[base]
+        elif tested_parents=='wrong_order':
+            parents=[head,base]
+        else:
+            parents=tested_parents or [base,head]
+        env=os.environ.copy()
+        env.update(GIT_AUTHOR_NAME='Release Evidence Test',
+                   GIT_AUTHOR_EMAIL='release-evidence@example.invalid',
+                   GIT_COMMITTER_NAME='Release Evidence Test',
+                   GIT_COMMITTER_EMAIL='release-evidence@example.invalid',
+                   GIT_AUTHOR_DATE='2026-11-16 17:45:00 +0000',
+                   GIT_COMMITTER_DATE='2026-11-16 17:45:00 +0000')
+        command=['git','-C',str(root),'commit-tree',tree]
+        for parent in parents: command.extend(['-p',parent])
+        command.extend(['-m','synthetic pull request test commit'])
+        tested_revision=subprocess.check_output(command,env=env).decode().strip()
+        tested_record={'sha':tested_revision,'tree':{'sha':tree},
+            'parents':[{'sha':parent} for parent in parents]}
         records={release.BASE:{
             'full_name':release.REPOSITORY,'owner':{'id':owner,'login':'danielbyon'}}};counter=comment_offset
+        records[release.BASE+'/commits/'+tested_revision]=tested_record
         def post(gate,report,system,reviewed_range,created_at,transcript=None):
             nonlocal counter
             from unittest.mock import patch
@@ -153,6 +185,7 @@ class EvidenceV2Tests(unittest.TestCase):
         owner_entry={'ref':owner_ref,'sha256':release.digest(release.canonical(owner_record))}
         ci_ref=release.BASE+'/actions/runs/7'
         ci={'id':7,'repository':{'full_name':release.REPOSITORY},'event':'pull_request',
+            'workflow_id':413585893,'path':'.github/workflows/ci.yml','name':'CI',
             'status':'completed','conclusion':'success','head_sha':head,'run_attempt':1,
             'pull_requests':[{'number':pull_request,'head':{'sha':head},
                 'base':{'sha':base,'ref':'main'}}],
@@ -165,7 +198,8 @@ class EvidenceV2Tests(unittest.TestCase):
             'sha256':release.digest(release.canonical(ci)),'run_attempt':1}}
         evidence={'schema_version':2,'owner_id':owner,'origin':{'kind':'ordinary'},
             'baseline_revision':base,'integrations':[{'pull_request':pull_request,'base_revision':base,
-            'reviewed_revision':head,'tested_revision':head,'records':integration_records}]}
+            'reviewed_revision':head,'tested_revision':tested_revision,
+            'records':integration_records}]}
         index_evidence={'schema_version':2,'owner_id':owner,'origin':{'kind':'ordinary'},
             'baseline_revision':base,'integrations':[dict(evidence['integrations'][0])]}
         index_ref=release.BASE+'/issues/comments/'+str(counter+2)
@@ -181,6 +215,205 @@ class EvidenceV2Tests(unittest.TestCase):
             'original_ref':index_ref,'original_sha256':release.digest(release.canonical(index_record)),
             'normalization_ref':None,'normalization_sha256':None}
         return evidence,records,{'author':author_event,'review':review_event,'chat':chat_event},root
+
+    def test_default_fixture_uses_an_isolated_repository(self):
+        import os,subprocess,tempfile
+        from unittest.mock import patch
+        source=Path(__file__).resolve().parents[1]
+        common_dir=Path(subprocess.check_output(
+            ['git','-C',str(source),'rev-parse','--git-common-dir'],
+            text=True).strip())
+        if not common_dir.is_absolute():common_dir=source/common_dir
+        with tempfile.TemporaryDirectory() as object_directory:
+            environment={'GIT_OBJECT_DIRECTORY':object_directory,
+                'GIT_ALTERNATE_OBJECT_DIRECTORIES':str(common_dir/'objects')}
+            with patch.dict(os.environ,environment):
+                _,_,_,fixture_root=self.ordinary_fixture()
+        self.assertNotEqual(fixture_root.resolve(),source.resolve())
+
+    def test_ordinary_ci_commit_verifies_synthetic_merge_parents(self):
+        from release_evidence.records import verify_ci_test_commit
+        evidence,records,_,root=self.ordinary_fixture()
+        integration=evidence['integrations'][0]
+        ci=records[integration['records']['ci']['ref']]
+        commit,strategy=verify_ci_test_commit(
+            records.__getitem__,root,ci,integration['pull_request'],
+            integration['tested_revision'],integration['reviewed_revision'],
+            integration['base_revision'],integration['reviewed_revision'])
+        self.assertEqual(strategy,'synthetic_merge')
+        self.assertEqual([parent['sha'] for parent in commit['parents']],
+                         [integration['base_revision'],integration['reviewed_revision']])
+
+    def test_unrelated_test_commit_with_identical_tree_is_rejected(self):
+        evidence,records,_,root=self.ordinary_fixture(tested_parents='unrelated')
+        integration=evidence['integrations'][0]
+        tested=integration['tested_revision']
+        record=records[release.BASE+'/commits/'+tested]
+        self.assertEqual(record['tree']['sha'],
+                         release.git(root,'rev-parse',integration['reviewed_revision']+'^{tree}').decode().strip())
+        with self.assertRaisesRegex(release.ReleaseError,'expected synthetic merge parents'):
+            evidence_call('verify_evidence',evidence,records.__getitem__,root)
+
+    def test_ci_commit_with_wrong_parents_is_rejected_even_when_labels_can_match(self):
+        fixture=self.ordinary_fixture(tested_parents='wrong_order')
+        root,api,evidence,records,job,pr=OrdinaryChronologyIntegrationTests().qualified_fixture(fixture)
+        integration=evidence['integrations'][0]
+        self.assertIn('Tested integration revision: '+integration['tested_revision'],
+                      api.job_log.return_value)
+        with self.assertRaisesRegex(release.ReleaseError,'expected synthetic merge parents'):
+            evidence_call('verify_evidence',evidence,api.record,root)
+
+    def test_ci_test_commit_rejects_incorrect_reviewed_head_or_base(self):
+        from release_evidence.records import verify_ci_test_commit
+        evidence,records,_,root=self.ordinary_fixture()
+        integration=evidence['integrations'][0]
+        ci=records[integration['records']['ci']['ref']]
+        args=(records.__getitem__,root,ci,integration['pull_request'],
+              integration['tested_revision'])
+        with self.assertRaisesRegex(release.ReleaseError,'CI run head differs'):
+            verify_ci_test_commit(*args,'0'*40,integration['base_revision'],
+                                  integration['reviewed_revision'])
+        with self.assertRaisesRegex(release.ReleaseError,'head or base identity mismatch'):
+            verify_ci_test_commit(*args,integration['reviewed_revision'],'0'*40,
+                                  integration['reviewed_revision'])
+
+    def test_ci_test_commit_requires_the_provider_identified_ci_workflow(self):
+        from release_evidence.records import verify_ci_test_commit
+        evidence,records,_,root=self.ordinary_fixture()
+        integration=evidence['integrations'][0]
+        ci=records[integration['records']['ci']['ref']]
+        ci.update(workflow_id=413585893,path='.github/workflows/ci.yml')
+        arguments=(records.__getitem__,root,ci,integration['pull_request'],
+            integration['tested_revision'],integration['reviewed_revision'],
+            integration['base_revision'],integration['reviewed_revision'])
+        for field,value in (('path','.github/workflows/other.yml'),
+                            ('workflow_id',0),('name','Unrelated workflow'),
+                            ('event','workflow_dispatch')):
+            with self.subTest(field=field):
+                ci[field]=value
+                with self.assertRaisesRegex(release.ReleaseError,'required CI workflow'):
+                    verify_ci_test_commit(*arguments)
+                ci[field]={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
+                           'name':'CI','event':'pull_request'}[field]
+
+    def test_ci_workflow_change_cannot_comment_out_checks_then_switch_before_tests(self):
+        import subprocess,tempfile,yaml
+        from release_evidence.records import verify_ci_test_commit
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        root=Path(temporary.name)
+        def git(*args):
+            return subprocess.check_output(['git','-C',str(root),*args],
+                stderr=subprocess.DEVNULL).decode().strip()
+        git('init');git('config','user.name','Release Evidence Test')
+        git('config','user.email','release-evidence@example.invalid')
+        workflow_path=root/'.github/workflows/ci.yml';workflow_path.parent.mkdir(parents=True)
+        workflow_path.write_text((Path(__file__).resolve().parents[1]/
+            '.github/workflows/ci.yml').read_text())
+        (root/'candidate.txt').write_text('base\n')
+        git('add','.');git('commit','-qm','base workflow')
+        base=git('rev-parse','HEAD')
+        workflow=yaml.safe_load(workflow_path.read_text())
+        job=next(job for job in workflow['jobs'].values()
+            if job.get('name')=='Validate committed PR integration diff')
+        steps=job['steps']
+        check_index=next(index for index,step in enumerate(steps)
+            if step.get('name')=='Verify revision and check committed diff')
+        check=steps[check_index]
+        check['run']='true\n'+'\n'.join(
+            '# '+line.strip() for line in check['run'].splitlines() if line.strip())
+        steps.insert(check_index+1,{'name':'Switch before test steps',
+            'run':'git checkout '+base})
+        workflow_path.write_text(yaml.safe_dump(workflow,sort_keys=False))
+        (root/'candidate.txt').write_text('reviewed\n')
+        git('add','.');git('commit','-qm','reviewed workflow change')
+        head=git('rev-parse','HEAD')
+        tree=git('rev-parse',head+'^{tree}')
+        tested=subprocess.check_output(['git','-C',str(root),'commit-tree',tree,
+            '-p',base,'-p',head,'-m','synthetic test merge']).decode().strip()
+        tested_record={'sha':tested,'tree':{'sha':tree},
+            'parents':[{'sha':base},{'sha':head}]}
+        ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
+            'name':'CI','event':'pull_request',
+            'head_sha':head,'pull_requests':[{'number':17,
+                'head':{'sha':head},'base':{'ref':'main','sha':base}}]}
+        with self.assertRaisesRegex(release.ReleaseError,'workflow differs from the PR base'):
+            verify_ci_test_commit(lambda _:tested_record,root,ci,17,tested,head,base,head)
+
+    def test_direct_head_ci_is_accepted_only_with_matching_workflow_and_git_ancestry(self):
+        import subprocess,tempfile,yaml
+        from release_evidence.records import verify_ci_test_commit
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        root=Path(temporary.name)
+        def git(*args):
+            return subprocess.check_output(['git','-C',str(root),*args],
+                                           stderr=subprocess.DEVNULL).decode().strip()
+        git('init');git('config','user.name','Release Evidence Test')
+        git('config','user.email','release-evidence@example.invalid')
+        workflow=yaml.safe_load((Path(__file__).resolve().parents[1]/
+                                 '.github/workflows/ci.yml').read_text())
+        job=next(job for job in workflow['jobs'].values()
+                 if job.get('name')=='Validate committed PR integration diff')
+        checkout=next(step for step in job['steps']
+                      if step.get('uses','').startswith('actions/checkout@') and
+                      not step.get('with',{}).get('path'))
+        checkout['with']['ref']='${{ github.event.pull_request.head.sha }}'
+        check=next(step for step in job['steps']
+                   if step.get('name')=='Verify revision and check committed diff')
+        check['env']['EXPECTED_TEST_SHA']='${{ github.event.pull_request.head.sha }}'
+        check['run']='set -euo pipefail\nactual_test_sha="$(git rev-parse HEAD)"\n'
+        check['run']+='if [[ "$actual_test_sha" != "$EXPECTED_TEST_SHA" ]]; then exit 1; fi\n'
+        check['run']+='git cat-file -e "$EXPECTED_TEST_SHA^{commit}"\n'
+        check['run']+='git merge-base --is-ancestor "$EXPECTED_BASE_SHA" "$EXPECTED_TEST_SHA"\n'
+        check['run']+='printf "PR HEAD: %s\\n" "$EXPECTED_HEAD_SHA"\n'
+        check['run']+='printf "Tested integration revision: %s\\n" "$EXPECTED_TEST_SHA"\n'
+        check['run']+='printf "Tested base revision: %s\\n" "$EXPECTED_BASE_SHA"'
+        workflow_path=root/'.github/workflows/ci.yml';workflow_path.parent.mkdir(parents=True)
+        workflow_path.write_text(yaml.safe_dump(workflow,sort_keys=False))
+        (root/'source.txt').write_text('base\n');git('add','.');git('commit','-qm','base')
+        base=git('rev-parse','HEAD')
+        (root/'source.txt').write_text('reviewed\n');git('add','.');git('commit','-qm','reviewed head')
+        head=git('rev-parse','HEAD')
+        record={'sha':head,'tree':{'sha':git('rev-parse',head+'^{tree}')},
+                'parents':[{'sha':base}]}
+        ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml','name':'CI',
+            'event':'pull_request','head_sha':head,'pull_requests':[{'number':11,
+            'head':{'sha':head},'base':{'ref':'main','sha':base}}]}
+        self.assertEqual(verify_ci_test_commit(
+            lambda ref:record,root,ci,11,head,head,base,head)[1],'direct_head')
+
+    def test_ci_base_workflow_cannot_make_the_revision_check_optional(self):
+        import subprocess,yaml
+        from release_evidence.records import verify_ci_test_commit
+        root=isolated_repository(self)
+        def git(*args):
+            return subprocess.check_output(['git','-C',str(root),*args],
+                stderr=subprocess.DEVNULL).decode().strip()
+        git('config','user.name','Release Evidence Test')
+        git('config','user.email','release-evidence@example.invalid')
+        workflow_path=root/'.github/workflows/ci.yml'
+        workflow=yaml.safe_load(workflow_path.read_text())
+        job=next(job for job in workflow['jobs'].values()
+                 if job.get('name')=='Validate committed PR integration diff')
+        check=next(step for step in job['steps']
+                   if step.get('name')=='Verify revision and check committed diff')
+        check['continue-on-error']=True
+        workflow_path.write_text(yaml.safe_dump(workflow,sort_keys=False))
+        git('add','.github/workflows/ci.yml');git('commit','-qm','optional revision check')
+        base=git('rev-parse','HEAD')
+        (root/'candidate.txt').write_text('reviewed candidate\n')
+        git('add','candidate.txt');git('commit','-qm','reviewed candidate')
+        head=git('rev-parse','HEAD')
+        tree=git('rev-parse',head+'^{tree}')
+        tested=subprocess.check_output(['git','-C',str(root),'commit-tree',tree,
+            '-p',base,'-p',head,'-m','synthetic test merge']).decode().strip()
+        tested_record={'sha':tested,'tree':{'sha':tree},
+            'parents':[{'sha':base},{'sha':head}]}
+        ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
+            'name':'CI','event':'pull_request','head_sha':head,
+            'pull_requests':[{'number':18,'head':{'sha':head},
+                'base':{'ref':'main','sha':base}}]}
+        with self.assertRaisesRegex(release.ReleaseError,'revision check is optional'):
+            verify_ci_test_commit(lambda _:tested_record,root,ci,18,tested,head,base,head)
 
     def test_readiness_index_comment_cannot_be_replayed_across_pull_requests(self):
         evidence,records,_,root=self.ordinary_fixture()
@@ -246,7 +479,7 @@ class EvidenceV2Tests(unittest.TestCase):
 
     def test_authenticates_ordinary_author_review_chatgpt_and_ci_receipts(self):
         evidence,records,_,root=self.ordinary_fixture()
-        self.assertEqual(len(evidence_call('verify_evidence',evidence,records.__getitem__,root)),6)
+        self.assertEqual(len(evidence_call('verify_evidence',evidence,records.__getitem__,root)),7)
 
     def test_ordinary_receipt_from_another_pr_cannot_qualify(self):
         import json
@@ -401,7 +634,8 @@ class CaptureTests(unittest.TestCase):
     def test_premerge_index_preparation_binds_provider_records_without_self_reference(self):
         import json
         from unittest.mock import Mock
-        evidence,records,_,_=EvidenceV2Tests().ordinary_fixture()
+        evidence,records,_,_=EvidenceV2Tests().ordinary_fixture(
+            root=isolated_repository(self))
         api=Mock();api.request.return_value={'login':'danielbyon'}
         api.record.side_effect=records.__getitem__
         body=evidence_call('prepare_readiness_index',evidence,5,api)
@@ -415,7 +649,8 @@ class CaptureTests(unittest.TestCase):
     def test_postmerge_index_preparation_only_adds_actual_merge_identity(self):
         import json
         from unittest.mock import Mock
-        evidence,records,_,_=EvidenceV2Tests().ordinary_fixture()
+        evidence,records,_,_=EvidenceV2Tests().ordinary_fixture(
+            root=isolated_repository(self))
         integration=evidence['integrations'][0];head=integration['reviewed_revision']
         index_ref=integration['readiness_index']['original_ref']
         integration['integrated_revision']=head;integration['integrated_commits']=[head]
@@ -437,21 +672,24 @@ class CaptureTests(unittest.TestCase):
 
 
 class OrdinaryChronologyIntegrationTests(unittest.TestCase):
-    def qualified_fixture(self,fixture=None):
+    def qualified_fixture(self,fixture=None,integrated_commits=None,original_commits=None):
         from test_skill_releases import SuiteExecutionTests
         import copy,json
         from unittest.mock import Mock
-        evidence,records,_,root=(fixture or EvidenceV2Tests().ordinary_fixture())
+        evidence,records,_,root=(fixture or EvidenceV2Tests().ordinary_fixture(
+            root=isolated_repository(self)))
         integration=evidence['integrations'][0]
         pull_request=integration['pull_request']
         head=integration['reviewed_revision']
-        integration.update(integrated_revision=head,integrated_commits=[head])
+        members=integrated_commits or [head]
+        original_members=original_commits or members
+        integration.update(integrated_revision=head,integrated_commits=members)
         binding=integration['readiness_index']
         original=records[binding['original_ref']]
         payload=json.loads(original['body'].split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
         normalized_evidence=copy.deepcopy(payload['evidence'])
         normalized_evidence['integrations'][0].update(
-            integrated_revision=head,integrated_commits=[head])
+            integrated_revision=head,integrated_commits=members)
         normalized_id=original['id']+1
         normalized_ref=release.BASE+'/issues/comments/'+str(normalized_id)
         normalized={'id':normalized_id,'user':{'id':123},
@@ -469,16 +707,21 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
             'merge_commit_sha':head}
         records[release.BASE+f'/pulls/{pull_request}']=pr
         workflow,steps,logs=SuiteExecutionTests.fixture(head,root)
-        job={'id':81,'name':'Validate committed PR integration diff','status':'completed',
+        ci_entry=integration['records']['ci'];ci=records[ci_entry['ref']]
+        job={'id':81,'run_id':ci['id'],'run_attempt':ci.get('run_attempt',1),
+             'name':'Validate committed PR integration diff','status':'completed',
              'conclusion':'success','started_at':'2026-11-16T18:01:00Z',
              'completed_at':'2026-11-16T18:03:00Z','steps':steps}
-        ci_entry=integration['records']['ci'];ci=records[ci_entry['ref']]
-        log='PR HEAD: '+head+'\nTested integration revision: '+head+'\nTested base revision: '+integration['base_revision']+'\n'+logs
+        log='PR HEAD: '+head+'\nTested integration revision: '+integration['tested_revision']+'\nTested base revision: '+integration['base_revision']+'\n'+logs
         api=Mock()
         def record(ref):return records[ref]
         def pages(ref):
-            if ref.endswith(f'/pulls/{pull_request}/commits'):return [{'sha':head}]
-            if ref==release.BASE+'/commits/'+head+'/pulls':return [pr]
+            if ref.endswith(f'/pulls/{pull_request}/commits'):
+                return [{'sha':commit} for commit in original_members]
+            if any(ref==release.BASE+'/commits/'+commit+'/pulls' for commit in members):
+                return [pr]
+            if ref==release.BASE+f'/issues/{pull_request}/comments':
+                return [original,normalized]
             return []
         api.record.side_effect=record;api.pages.side_effect=pages
         api.ci_jobs.return_value=[job];api.job_log.return_value=log
@@ -490,15 +733,61 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
         root,api,evidence,records,job,pr=self.qualified_fixture()
         snapshots=evidence_call('verify_evidence',evidence,api.record,root)
         self.assertTrue(any(item['gate']=='readiness_normalization' for item in snapshots))
-        evidence_call('verify_live_integrations',api,evidence,root)
+        evidence_call('verify_live_integrations',api,evidence,root,
+                      ordinary_evidence=snapshots)
+
+    def test_ci_job_must_report_the_completed_revision_check_step(self):
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
+        job['steps']=[step for step in job['steps']
+            if step.get('name')!='Verify revision and check committed diff']
+        with self.assertRaisesRegex(release.ReleaseError,'revision-check step'):
+            evidence_call('verify_live_integrations',api,evidence,root,
+                ordinary_evidence=verified)
+
+    def test_ci_job_and_revision_step_are_bound_to_the_authenticated_attempt(self):
+        for field,value in (('run_id',999),('run_attempt',2)):
+            with self.subTest(field=field):
+                root,api,evidence,records,job,pr=self.qualified_fixture()
+                verified=evidence_call('verify_evidence',evidence,api.record,root)
+                job[field]=value
+                with self.assertRaisesRegex(release.ReleaseError,'CI job run identity mismatch'):
+                    evidence_call('verify_live_integrations',api,evidence,root,
+                                  ordinary_evidence=verified)
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
+        revision_step=next(step for step in job['steps']
+            if step.get('name')=='Verify revision and check committed diff')
+        revision_step['status']='in_progress'
+        with self.assertRaisesRegex(release.ReleaseError,'revision-check step'):
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
+        revision_step['status']='completed'
+        revision_step['outcome']='failure'
+        with self.assertRaisesRegex(release.ReleaseError,'revision-check step'):
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
+
+    def test_misleading_ci_log_identity_labels_are_rejected(self):
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
+        tested=evidence['integrations'][0]['tested_revision']
+        api.job_log.return_value=api.job_log.return_value.replace(
+            'Tested integration revision: '+tested,
+            'Tested integration revision: '+'0'*40)
+        with self.assertRaisesRegex(release.ReleaseError,'CI synthetic merge identity not established'):
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
 
     def test_missing_v2_ci_status_is_classified_as_missing_evidence(self):
         from release_evidence.audit import _audit_error_status
         from release_evidence.common import MissingEvidenceError
         root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
         job.pop('status')
         with self.assertRaises(MissingEvidenceError) as result:
-            evidence_call('verify_live_integrations',api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
         self.assertEqual(_audit_error_status(result.exception),'MISSING_EVIDENCE')
 
     def test_ci_run_attempt_must_be_present_and_positive_in_both_records(self):
@@ -507,7 +796,7 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
         cases=('both_missing','boolean_receipt_attempt')
         for case in cases:
             with self.subTest(case=case):
-                fixture=EvidenceV2Tests().ordinary_fixture()
+                fixture=EvidenceV2Tests().ordinary_fixture(root=isolated_repository(self))
                 evidence,records,_,root=fixture
                 entry=evidence['integrations'][0]['records']['ci']
                 record=records[entry['ref']]
@@ -535,6 +824,7 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
     def test_original_index_edit_after_merge_invalidates_normalization(self):
         import json
         root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
         binding=evidence['integrations'][0]['readiness_index']
         original=records[binding['original_ref']]
         original['updated_at']='2026-11-16T18:12:00Z'
@@ -545,19 +835,25 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
         loaded=evidence_call('load_readiness_index',binding['normalization_ref'],api.record,5)
         evidence['integrations'][0]['readiness_index']=evidence_call('readiness_index_binding',loaded)
         with self.assertRaisesRegex(release.ReleaseError,'updated after'):
-            evidence_call('verify_live_integrations',api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
 
     def test_ci_completion_after_merge_is_rejected(self):
         root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
         job['completed_at']='2026-11-16T18:12:00Z'
         with self.assertRaisesRegex(release.ReleaseError,'updated after|after the integration'):
-            evidence_call('verify_live_integrations',api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
 
     def test_missing_merge_timestamp_and_wrong_pr_identity_are_rejected(self):
         root,api,evidence,records,job,pr=self.qualified_fixture()
+        verified=evidence_call('verify_evidence',evidence,api.record,root)
         pr.pop('merged_at')
         with self.assertRaisesRegex(release.ReleaseError,'merge timestamp'):
-            evidence_call('verify_live_integrations',api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)
         pr['merged_at']='2026-11-16T18:10:00Z';pr['number']=6
         with self.assertRaisesRegex(release.ReleaseError,'number identity'):
-            evidence_call('verify_live_integrations',api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root,
+                          ordinary_evidence=verified)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from .common import (
     BASE, JSON, MissingEvidenceError, REPOSITORY, SHA, ReleaseError,
@@ -10,8 +11,11 @@ from .common import (
 )
 from .records import (
     _evidence_timestamp, load_readiness_index, verify_ci_pull_request,
-    verify_ci_suites, verify_event_chronology,
+    verify_ci_job_identity, verify_ci_suites, verify_event_chronology,
 )
+
+if TYPE_CHECKING:
+    from .qualification import VerifiedOrdinaryEvidence
 
 def merged_pr_members(api,commit):
     return [pr for pr in api.pages(BASE+'/commits/'+commit+'/pulls')
@@ -82,9 +86,15 @@ def _verify_ci_suites_for_revision(root, revision, logs, steps):
 
 def verify_live_integrations(api: _EvidenceAPI,
                              evidence: JSON,
-                             root: RepositoryPath | None = None) -> list[JSON]:
+                             root: RepositoryPath | None = None,
+                             ordinary_evidence: VerifiedOrdinaryEvidence | None = None
+                             ) -> list[JSON]:
     """Check merged PR identity and actual required CI job execution."""
     version=evidence.get('schema_version')
+    if version==2:
+        from .qualification import VerifiedOrdinaryEvidence
+        require(isinstance(ordinary_evidence,VerifiedOrdinaryEvidence),
+                'Ordinary integration verification requires authenticated CI commit evidence')
     for integration in evidence.get('integrations',[]):
         number=integration.get('pull_request')
         require(type(number) is int and number>0,'Merged PR reference required')
@@ -104,10 +114,12 @@ def verify_live_integrations(api: _EvidenceAPI,
         if version==2:
             verify_ci_pull_request(ci,number,integration['reviewed_revision'],
                                    integration['base_revision'])
+            ordinary_evidence.test_commit_for(integration)
         required,steps=_required_ci_job(api,ci,entry['run_attempt'],completion_required=False,
             job_error='Required CI job unavailable',
             steps_error='CI contains failed or skipped steps')
         if version==2:
+            verify_ci_job_identity(ci,required,entry['run_attempt'],steps)
             merged_at=pr.get('merged_at')
             require_present(merged_at,'Provider merge timestamp is missing')
             job_status=require_present(required.get('status'),
@@ -166,8 +178,13 @@ def verify_live_integrations(api: _EvidenceAPI,
 
 def verify_premerge_integrations(api: _EvidenceAPI,
                                  evidence: JSON,
-                                 root: RepositoryPath) -> list[JSON]:
+                                 root: RepositoryPath,
+                                 ordinary_evidence: VerifiedOrdinaryEvidence | None = None
+                                 ) -> list[JSON]:
     """Verify PR evidence and successful candidate CI without claiming a merge."""
+    from .qualification import VerifiedOrdinaryEvidence
+    require(isinstance(ordinary_evidence,VerifiedOrdinaryEvidence),
+            'Candidate CI verification requires authenticated tested-commit evidence')
     for integration in evidence.get('integrations',[]):
         number=integration.get('pull_request')
         require(type(number) is int and number>0,'Pull request reference required')
@@ -203,9 +220,11 @@ def verify_premerge_integrations(api: _EvidenceAPI,
                 'Successful candidate CI provider record required')
         verify_ci_pull_request(ci,number,integration.get('reviewed_revision'),
                                integration.get('base_revision'))
+        ordinary_evidence.test_commit_for(integration)
         required,steps=_required_ci_job(api,ci,ci_entry['run_attempt'],completion_required=True,
             job_error='Required completed candidate CI job unavailable',
             steps_error='Candidate CI contains failed or skipped steps')
+        verify_ci_job_identity(ci,required,ci_entry['run_attempt'],steps)
         logs=api.job_log(required['id'])
         _verify_ci_log_identity(logs,integration,candidate=True)
         revision(root,integration['reviewed_revision'])

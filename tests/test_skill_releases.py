@@ -671,55 +671,36 @@ class IntegrationMembershipTests(unittest.TestCase):
 
 class RebaseDiscoveryTests(unittest.TestCase):
     def test_normal_dispatch_groups_all_rebased_commits(self):
-        import json,subprocess,tempfile
-        from unittest.mock import Mock,patch
+        import shutil,subprocess,tempfile
+        from unittest.mock import patch
+        from release_evidence_tests import EvidenceV2Tests,OrdinaryChronologyIntegrationTests
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary)
             def git(*args):return subprocess.check_output(['git','-C',temporary,*args],stderr=subprocess.DEVNULL).decode().strip()
             git('init');git('config','user.name','Test');git('config','user.email','test@example.invalid')
+            workflow=root/'.github/workflows/ci.yml';workflow.parent.mkdir(parents=True)
+            shutil.copyfile(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml',workflow)
+            (root/'scripts').mkdir();(root/'tests').mkdir()
+            (root/'scripts/changed.py').write_text('VALUE = "baseline"\n')
+            (root/'tests/changed_test.py').write_text('def test_value(): assert True\n')
             commits=[]
-            for content in ('baseline','first rebased change','second rebased change'):
-                (root/'file').write_text(content);git('add','.');git('commit','-m',content);commits.append(git('rev-parse','HEAD'))
+            git('add','.');git('commit','-m','baseline');commits.append(git('rev-parse','HEAD'))
+            for content in ('first rebased change','second rebased change'):
+                (root/'scripts/changed.py').write_text(f'VALUE = "{content}"\n')
+                (root/'tests/changed_test.py').write_text(f'def test_value(): assert {content!r}\n')
+                git('add','.');git('commit','-m',content);commits.append(git('rev-parse','HEAD'))
             base,first,result=commits
-            pr={'number':9,'merged':True,'merge_commit_sha':result,
-                'merged_at':'2026-11-16T19:00:00Z','base':{'ref':'main'}}
-            integration={'pull_request':9,'integrated_revision':result,
-                'integrated_commits':[first,result],'reviewed_revision':result,
-                'tested_revision':result,'base_revision':base,'records':{}}
-            original_evidence={'schema_version':2,'owner_id':123,
-                'origin':{'kind':'ordinary'},'baseline_revision':base,
-                'integrations':[{'pull_request':9,'reviewed_revision':result,
-                    'tested_revision':result,'base_revision':base,'records':{}}]}
-            normalized_evidence={'schema_version':2,'owner_id':123,
-                'origin':{'kind':'ordinary'},'baseline_revision':base,
-                'integrations':[integration]}
-            original={'id':90,'user':{'id':123},'issue_url':release.BASE+'/issues/9',
-                'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
-                    'repository':release.REPOSITORY,'pull_request':9,
-                    'evidence':original_evidence},sort_keys=True)+'\n-->',
-                'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:00:00Z'}
-            normalized={'id':91,'user':{'id':123},'issue_url':release.BASE+'/issues/9',
-                'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
-                    'repository':release.REPOSITORY,'pull_request':9,
-                    'normalizes':{'ref':release.BASE+'/issues/comments/90',
-                        'sha256':release.digest(release.canonical(original))},
-                    'evidence':normalized_evidence},sort_keys=True)+'\n-->',
-                'created_at':'2026-11-16T19:01:00Z','updated_at':'2026-11-16T19:01:00Z'}
-            records={release.BASE:{'full_name':release.REPOSITORY,'owner':{'id':123}},
-                release.BASE+'/issues/comments/90':original,
-                release.BASE+'/issues/comments/91':normalized}
-            def pages(path):
-                if path.endswith('/pulls/9/commits'):return [{'sha':'original-first'},{'sha':'original-second'}]
-                if path.endswith('/issues/9/comments'):return [original,normalized]
-                if any('/commits/'+commit+'/pulls' in path for commit in (first,result)):return [pr]
-                return []
-            api=Mock();api.pages.side_effect=pages;api.record.side_effect=records.__getitem__
-            api.request.return_value=records[release.BASE]
+            fixture=EvidenceV2Tests().ordinary_fixture(root,base,result,pull_request=9)
+            root,api,_,_,_,_=OrdinaryChronologyIntegrationTests().qualified_fixture(
+                fixture,integrated_commits=[first,result],original_commits=[first,result])
+            api.request.return_value=api.record(release.BASE)
             with patch.object(release,'select_anchor',return_value=(base,'2026.11.15')):
                 evidence=evidence_call('discover_evidence',root,api,result,result)
             self.assertEqual(len(evidence['integrations']),1)
             self.assertEqual(evidence['integrations'][0]['integrated_commits'],[first,result])
-            evidence_call('verify_coverage',root,evidence,result,admitted=True)
+            ordinary_proof=evidence_call('verify_evidence',evidence,api.record,root)
+            evidence_call('verify_coverage',root,evidence,result,admitted=True,
+                ordinary_evidence=ordinary_proof)
 
 
 class SigningContextTests(unittest.TestCase):
@@ -766,9 +747,11 @@ class SuiteExecutionTests(unittest.TestCase):
         workflow=release.git(root,'show',revision+':.github/workflows/ci.yml').decode()
         data=yaml.safe_load(workflow)
         job=next(j for j in data['jobs'].values() if j.get('name')=='Validate committed PR integration diff')
-        steps=[s for s in job['steps'] if 'unittest discover' in s.get('run','')]
-        records=[{'name':s['name'],'conclusion':'success'} for s in steps]
-        logs=''.join('##[group]Run '+s['run'].strip()+'\n##[endgroup]\ntest_example (tests.Contract) ... ok\ntest_other (tests.Contract) ... ok\nRan 2 tests in 0.01s\n\nOK\n' for s in steps)
+        suite_steps=[s for s in job['steps'] if 'unittest discover' in s.get('run','')]
+        other_steps=[s for s in job['steps'] if 'unittest discover' not in s.get('run','')]
+        steps=suite_steps+other_steps
+        records=[{'name':s['name'],'status':'completed','conclusion':'success'} for s in steps]
+        logs=''.join('##[group]Run '+s['run'].strip()+'\n##[endgroup]\ntest_example (tests.Contract) ... ok\ntest_other (tests.Contract) ... ok\nRan 2 tests in 0.01s\n\nOK\n' for s in suite_steps)
         return workflow,records,logs
     def test_committed_contract_accepts_six_and_historical_four(self):
         for revision,schema in [('HEAD',2),(release.BOOTSTRAP_BASELINE,1)]:
@@ -780,7 +763,7 @@ class SuiteExecutionTests(unittest.TestCase):
         groups=logs.split('##[group]')[1:]
         variants=[('repeated suite','##[group]'+groups[0]*6,steps),
                   ('filename mentions','\n'.join(release.SUITES)+'\n'+('Ran 2 tests\nOK\n'*6),steps),
-                  ('missing step',logs,steps[:-1]),
+            ('missing step',logs,steps[1:]),
                   ('aggregate only',logs.replace('Ran 2 tests in 0.01s','no execution')+'Ran 12 tests\nOK',steps),
                   ('skipped',logs.replace('OK','OK (skipped=1)',1),steps),
                   ('unrelated count',logs.replace('Ran 2 tests','Ran 20 tests',1),steps),

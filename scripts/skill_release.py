@@ -151,12 +151,13 @@ def _qualify_candidate_evidence(root,api,evidence,source,builder,*,
         root,api,evidence,source,builder,dispatch_run_id)
     if baseline_proof is None:
         admit_anchor(root,api,evidence)
-        evidence_integrations.verify_live_integrations(api,evidence,root)
+        evidence_integrations.verify_live_integrations(
+            api,evidence,root,ordinary_evidence=snapshots)
     coverage_proof=[]
     for target in (source,builder):
         if baseline_proof is None:
             proof=evidence_qualification.verify_coverage(
-                root,evidence,target,admitted=True)
+                root,evidence,target,admitted=True,ordinary_evidence=snapshots)
         else:
             proof=evidence_qualification.verify_coverage(
                 root,evidence,target,baseline_admission=baseline_proof)

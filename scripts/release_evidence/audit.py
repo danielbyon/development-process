@@ -128,11 +128,13 @@ def audit_pull_request(root: RepositoryPath,
                     result['gates']['integrated_revision']='PASS'
                     try:
                         current_gate='candidate_ci'
-                        verify_live_integrations(api,{'schema_version':2,'integrations':[integration]},root)
+                        verify_live_integrations(
+                            api,{'schema_version':2,'integrations':[integration]},root,
+                            ordinary_evidence=snapshots)
                         result['gates']['candidate_ci']='PASS'
                         current_gate='git_coverage'
-                        verify_coverage(root,evidence,
-                                        integration['integrated_revision'],admitted=True)
+                        verify_coverage(root,evidence,integration['integrated_revision'],
+                                        admitted=True,ordinary_evidence=snapshots)
                         result['gates']['git_coverage']='PASS'
                     except (ReleaseError,APIError,OSError,ValueError,KeyError,TypeError) as error:
                         result['gates'][current_gate]=_audit_error_status(error)
@@ -142,7 +144,8 @@ def audit_pull_request(root: RepositoryPath,
                     result['details']['integrated_revision']='Normalized evidence does not name the provider merge SHA'
             else:
                 current_gate='candidate_ci'
-                verify_premerge_integrations(api,{'integrations':[integration]},root)
+                verify_premerge_integrations(
+                    api,{'integrations':[integration]},root,ordinary_evidence=snapshots)
                 result['gates']['candidate_ci']='PASS'
             result['details'].update(evidence_digest=digest(canonical(snapshots)),
                                      reviewed_revision=integration.get('reviewed_revision'),

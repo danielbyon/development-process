@@ -22,6 +22,11 @@ SUITES = (
     'test_workflow_contract.py', 'test_skill_distribution.py',
     'test_distribution_smoke.py', 'test_primary_main_fast_forward.py',
     'test_skill_releases.py', 'test_github_releases.py')
+CI_WORKFLOW_ID = 413585893
+CI_WORKFLOW_PATH = '.github/workflows/ci.yml'
+CI_WORKFLOW_NAME = 'CI'
+CI_REQUIRED_JOB_NAME = 'Validate committed PR integration diff'
+CI_REVISION_CHECK_STEP_NAME = 'Verify revision and check committed diff'
 
 JSON = dict[str, Any]
 
