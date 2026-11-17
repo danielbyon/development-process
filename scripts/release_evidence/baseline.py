@@ -9,7 +9,7 @@ from .common import (
     _EvidenceAPI, canonical, digest, git, require, require_present, revision,
 )
 from .records import (
-    _evidence_timestamp, load_readiness_index, readiness_index_binding,
+    _evidence_timestamp, ci_test_commit_tree_sha, load_readiness_index, readiness_index_binding,
     verify_ci_job_identity, verify_ci_test_commit, verify_ci_suites,
     verify_event_chronology,
 )
@@ -127,8 +127,7 @@ def verify_baseline_admission(
             ci_record.get('event')=='pull_request' and ci_record.get('status')=='completed' and
             ci_record.get('conclusion')=='success' and
             ci_record.get('head_sha')==pr.get('head',{}).get('sha') and
-            ci_record.get('run_attempt')==ci_entry.get('run_attempt') and
-            ci_record.get('completed_at'),
+            ci_record.get('run_attempt')==ci_entry.get('run_attempt'),
             'Successful correction PR CI bound to the baseline is required')
     tested=ci_entry.get('tested_revision')
     require(parents and ci_entry.get('tested_base_revision')==parents[0],
@@ -136,7 +135,7 @@ def verify_baseline_admission(
     tested_record,test_strategy=verify_ci_test_commit(
         api.record,root,ci_record,pr_number,tested,pr.get('head',{}).get('sha'),
         parents[0],baseline)
-    require(tested_record.get('tree',{}).get('sha')==tree,
+    require(ci_test_commit_tree_sha(tested_record)==tree,
             'Baseline CI tested tree differs from the exact admitted source')
     jobs=api.ci_jobs(ci_record['id'],ci_entry['run_attempt'])
     required=[job for job in jobs if job.get('name')=='Validate committed PR integration diff']
@@ -156,6 +155,7 @@ def verify_baseline_admission(
     require(steps and all(step.get('conclusion')=='success' for step in steps),
             'Baseline CI contains failed or skipped steps')
     verify_ci_job_identity(ci_record,required[0],ci_entry['run_attempt'],steps)
+    verify_event_chronology([ci_record,required[0]],merged_at)
     logs=api.job_log(required[0]['id'])
     for label,value in (('PR HEAD',pr['head']['sha']),
                         ('Tested integration revision',tested),

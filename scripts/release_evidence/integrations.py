@@ -216,7 +216,7 @@ def verify_premerge_integrations(api: _EvidenceAPI,
                 ci.get('event')=='pull_request' and ci.get('status')=='completed' and
                 ci.get('conclusion')=='success' and
                 ci.get('head_sha')==integration.get('reviewed_revision') and
-                ci.get('run_attempt')==ci_entry.get('run_attempt') and ci.get('completed_at'),
+                ci.get('run_attempt')==ci_entry.get('run_attempt'),
                 'Successful candidate CI provider record required')
         verify_ci_pull_request(ci,number,integration.get('reviewed_revision'),
                                integration.get('base_revision'))

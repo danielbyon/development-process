@@ -12,7 +12,8 @@ from .common import (
     ReleaseError, canonical, digest, git, require, require_present, revision,
 )
 from .records import (
-    _evidence_timestamp, _require_pull_request_comment, load_readiness_index,
+    _evidence_timestamp, _require_pull_request_comment, ci_test_commit_tree_sha,
+    load_readiness_index,
     verify_ci_pull_request, verify_ci_test_commit, verify_event_chronology,
 )
 
@@ -418,8 +419,7 @@ def verify_evidence(evidence: JSON,
                 'CI provider record run attempt identity mismatch')
         require(ci_record.get('repository',{}).get('full_name')==REPOSITORY and
                 ci_record.get('event')=='pull_request' and ci_record.get('status')=='completed' and
-                ci_record.get('conclusion')=='success' and ci_record.get('head_sha')==target and
-                ci_record.get('completed_at'),
+                ci_record.get('conclusion')=='success' and ci_record.get('head_sha')==target,
                 'Successful CI must test the reviewed candidate')
         verify_ci_pull_request(ci_record,integration.get('pull_request'),target,base)
         tested=integration.get('tested_revision')
@@ -500,7 +500,8 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
                 proof.builder==baseline and proof.dispatch_run_id is not None and
                 proof.evidence_digest==digest(canonical(evidence)) and
                 isinstance(proof.tested_commit,dict) and
-                proof.tested_commit.get('record',{}).get('tree',{}).get('sha')==
+                isinstance(proof.tested_commit.get('record'),dict) and
+                ci_test_commit_tree_sha(proof.tested_commit['record'])==
                     git(root,'rev-parse',baseline+'^{tree}').decode().strip() and
                 evidence.get('baseline_admission'),
                 'Prospective baseline admission must be independently verified')
@@ -524,7 +525,7 @@ def verify_coverage(root: RepositoryPath, evidence: JSON,
         result=revision(root,integration.get('integrated_revision'))
         revision(root,integration.get('reviewed_revision'))
         tested_commit=ordinary_evidence.test_commit_for(integration)
-        tested_tree=tested_commit['record']['tree']['sha']
+        tested_tree=ci_test_commit_tree_sha(tested_commit['record'])
         require(git(root,'rev-parse',result+'^{tree}').decode().strip()==tested_tree,
                 'Integration tree differs from tested tree')
         members=integration.get('integrated_commits',[result])

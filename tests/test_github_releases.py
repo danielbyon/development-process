@@ -73,6 +73,17 @@ class AdapterTests(unittest.TestCase):
         api=github.GitHubAPI()
         with patch.object(api,'request',return_value={'artifacts':[{'id':1}]}):
             self.assertEqual(api.pages('/artifacts'),[{'id':1}])
+
+    def test_attempt_jobs_use_the_provider_jobs_wrapper_and_exact_attempt_url(self):
+        api=github.GitHubAPI()
+        job={'id':134308404673,'run_id':44159278451,'run_attempt':1,
+             'status':'completed','conclusion':'success',
+             'started_at':'2026-11-17T19:30:22Z',
+             'completed_at':'2026-11-17T19:31:02Z','steps':[]}
+        with patch.object(api,'request',return_value={'total_count':1,'jobs':[job]}) as request:
+            self.assertEqual(api.ci_jobs(44159278451,1),[job])
+        self.assertEqual(request.call_args.args[1],
+            api.base+'/actions/runs/44159278451/attempts/1/jobs?per_page=100&page=1')
     def test_raw_logs_allow_escape_sequences(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'log',b'')) as run:
             github.GitHubAPI().job_log(4)

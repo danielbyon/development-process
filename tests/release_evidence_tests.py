@@ -148,7 +148,7 @@ class EvidenceV2Tests(unittest.TestCase):
         for parent in parents: command.extend(['-p',parent])
         command.extend(['-m','synthetic pull request test commit'])
         tested_revision=subprocess.check_output(command,env=env).decode().strip()
-        tested_record={'sha':tested_revision,'tree':{'sha':tree},
+        tested_record={'sha':tested_revision,'commit':{'tree':{'sha':tree}},
             'parents':[{'sha':parent} for parent in parents]}
         records={release.BASE:{
             'full_name':release.REPOSITORY,'owner':{'id':owner,'login':'danielbyon'}}};counter=comment_offset
@@ -207,13 +207,14 @@ class EvidenceV2Tests(unittest.TestCase):
         records[owner_ref]=owner_record
         owner_entry={'ref':owner_ref,'sha256':release.digest(release.canonical(owner_record))}
         ci_ref=release.BASE+'/actions/runs/7'
-        ci={'id':7,'repository':{'full_name':release.REPOSITORY},'event':'pull_request',
+        ci={'id':7,'run_number':1,'repository':{'full_name':release.REPOSITORY},
+            'head_branch':'codex/provider-contract-fixture','event':'pull_request',
             'workflow_id':413585893,'path':'.github/workflows/ci.yml','name':'CI',
             'status':'completed','conclusion':'success','head_sha':head,'run_attempt':1,
             'pull_requests':[{'number':pull_request,'head':{'sha':head},
                 'base':{'sha':base,'ref':'main'}}],
-            'created_at':'2026-11-16T17:50:00Z','updated_at':'2026-11-16T18:03:00Z',
-            'completed_at':'2026-11-16T18:03:00Z'}
+            'created_at':'2026-11-16T17:50:00Z','run_started_at':'2026-11-16T17:50:30Z',
+            'updated_at':'2026-11-16T18:03:00Z'}
         records[ci_ref]=ci
         integration_records={'author_execution':author,
             'independent_reviews':[review],'chatgpt_inspection':chat,
@@ -266,13 +267,42 @@ class EvidenceV2Tests(unittest.TestCase):
         self.assertEqual(strategy,'synthetic_merge')
         self.assertEqual([parent['sha'] for parent in commit['parents']],
                          [integration['base_revision'],integration['reviewed_revision']])
+        self.assertEqual(commit['commit']['tree']['sha'],
+            release.git(root,'rev-parse',integration['reviewed_revision']+'^{tree}').decode().strip())
+
+    def test_repository_commit_tree_requires_the_nested_provider_field(self):
+        import copy
+        from release_evidence.records import verify_ci_test_commit
+        evidence,records,_,root=self.ordinary_fixture()
+        integration=evidence['integrations'][0]
+        reference=release.BASE+'/commits/'+integration['tested_revision']
+        original=records[reference]
+        ci=records[integration['records']['ci']['ref']]
+        cases=('top_level_decoy','missing_tree','malformed_tree_sha')
+        for case in cases:
+            with self.subTest(case=case):
+                candidate=copy.deepcopy(original)
+                if case=='top_level_decoy':
+                    candidate.pop('commit')
+                    candidate['tree']={'sha':original['commit']['tree']['sha']}
+                elif case=='missing_tree':
+                    candidate['commit'].pop('tree')
+                else:
+                    candidate['commit']['tree']['sha']='not-a-full-sha'
+                records[reference]=candidate
+                with self.assertRaisesRegex(release.ReleaseError,'tree|malformed'):
+                    verify_ci_test_commit(records.__getitem__,root,ci,
+                        integration['pull_request'],integration['tested_revision'],
+                        integration['reviewed_revision'],integration['base_revision'],
+                        integration['reviewed_revision'])
+        records[reference]=original
 
     def test_unrelated_test_commit_with_identical_tree_is_rejected(self):
         evidence,records,_,root=self.ordinary_fixture(tested_parents='unrelated')
         integration=evidence['integrations'][0]
         tested=integration['tested_revision']
         record=records[release.BASE+'/commits/'+tested]
-        self.assertEqual(record['tree']['sha'],
+        self.assertEqual(record['commit']['tree']['sha'],
                          release.git(root,'rev-parse',integration['reviewed_revision']+'^{tree}').decode().strip())
         with self.assertRaisesRegex(release.ReleaseError,'expected synthetic merge parents'):
             evidence_call('verify_evidence',evidence,records.__getitem__,root)
@@ -352,7 +382,7 @@ class EvidenceV2Tests(unittest.TestCase):
         tree=git('rev-parse',head+'^{tree}')
         tested=subprocess.check_output(['git','-C',str(root),'commit-tree',tree,
             '-p',base,'-p',head,'-m','synthetic test merge']).decode().strip()
-        tested_record={'sha':tested,'tree':{'sha':tree},
+        tested_record={'sha':tested,'commit':{'tree':{'sha':tree}},
             'parents':[{'sha':base},{'sha':head}]}
         ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
             'name':'CI','event':'pull_request','head_sha':head,
@@ -397,7 +427,7 @@ class EvidenceV2Tests(unittest.TestCase):
         tree=git('rev-parse',head+'^{tree}')
         tested=subprocess.check_output(['git','-C',str(root),'commit-tree',tree,
             '-p',base,'-p',head,'-m','synthetic test merge']).decode().strip()
-        tested_record={'sha':tested,'tree':{'sha':tree},
+        tested_record={'sha':tested,'commit':{'tree':{'sha':tree}},
             'parents':[{'sha':base},{'sha':head}]}
         ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
             'name':'CI','event':'pull_request',
@@ -440,7 +470,7 @@ class EvidenceV2Tests(unittest.TestCase):
         base=git('rev-parse','HEAD')
         (root/'source.txt').write_text('reviewed\n');git('add','.');git('commit','-qm','reviewed head')
         head=git('rev-parse','HEAD')
-        record={'sha':head,'tree':{'sha':git('rev-parse',head+'^{tree}')},
+        record={'sha':head,'commit':{'tree':{'sha':git('rev-parse',head+'^{tree}')}},
                 'parents':[{'sha':base}]}
         ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml','name':'CI',
             'event':'pull_request','head_sha':head,'pull_requests':[{'number':11,
@@ -477,7 +507,7 @@ class EvidenceV2Tests(unittest.TestCase):
         tree=git('rev-parse',head+'^{tree}')
         tested=subprocess.check_output(['git','-C',str(root),'commit-tree',tree,
             '-p',base,'-p',head,'-m','synthetic test merge']).decode().strip()
-        tested_record={'sha':tested,'tree':{'sha':tree},
+        tested_record={'sha':tested,'commit':{'tree':{'sha':tree}},
             'parents':[{'sha':base},{'sha':head}]}
         ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
             'name':'CI','event':'pull_request','head_sha':head,
@@ -647,10 +677,11 @@ class EvidenceV2Tests(unittest.TestCase):
         record={'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:03:00Z'}
         with self.assertRaisesRegex(release.ReleaseError,'updated after'):
             evidence_call('verify_event_chronology',[record],'2026-11-16T18:02:00Z')
-        ci={'created_at':'2026-11-16T17:50:00Z','updated_at':'2026-11-16T18:01:00Z',
+        required_job={'id':201,'run_id':101,'run_attempt':1,'status':'completed',
+            'conclusion':'success','started_at':'2026-11-16T18:00:00Z',
             'completed_at':'2026-11-16T18:03:00Z'}
-        with self.assertRaisesRegex(release.ReleaseError,'CI completed after'):
-            evidence_call('verify_event_chronology',[ci],'2026-11-16T18:02:00Z')
+        with self.assertRaisesRegex(release.ReleaseError,'updated after|completed after'):
+            evidence_call('verify_event_chronology',[required_job],'2026-11-16T18:02:00Z')
         self.assertTrue(evidence_call('verify_event_chronology',[
             {'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:00:00Z'}
         ],'2026-11-16T18:02:00Z'))
@@ -916,6 +947,22 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError,'updated after|after the integration'):
             evidence_call('verify_live_integrations',api,evidence,root,
                           ordinary_evidence=verified)
+
+    def test_required_ci_job_completion_time_must_match_the_provider_contract(self):
+        from release_evidence.common import MissingEvidenceError
+        cases=(('missing',None,MissingEvidenceError),
+               ('malformed','not-a-provider-timestamp',release.ReleaseError))
+        for label,value,error in cases:
+            with self.subTest(case=label):
+                root,api,evidence,records,job,pr=self.qualified_fixture()
+                verified=evidence_call('verify_evidence',evidence,api.record,root)
+                if value is None:
+                    job.pop('completed_at')
+                else:
+                    job['completed_at']=value
+                with self.assertRaises(error):
+                    evidence_call('verify_live_integrations',api,evidence,root,
+                                  ordinary_evidence=verified)
 
     def test_missing_merge_timestamp_and_wrong_pr_identity_are_rejected(self):
         root,api,evidence,records,job,pr=self.qualified_fixture()

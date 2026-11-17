@@ -64,7 +64,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
         owner=123; records={release.BASE:{'full_name':release.REPOSITORY,
             'owner':{'id':owner,'login':'danielbyon'}}};counter=0
         parents=git('show','-s','--format=%P',tested).split()
-        records[release.BASE+'/commits/'+tested]={'sha':tested,'tree':{'sha':tree},
+        records[release.BASE+'/commits/'+tested]={'sha':tested,'commit':{'tree':{'sha':tree}},
             'parents':[{'sha':parent} for parent in parents]}
         records[release.BASE+'/git/ref/heads/main']={
             'ref':'refs/heads/main','object':{'type':'commit','sha':baseline}}
@@ -110,13 +110,14 @@ class ProspectiveBaselineTests(unittest.TestCase):
         chat=make_receipt('chatgpt_inspection',chat_report,'chatgpt',
             {'baseline_revision':baseline,'tree_sha':tree},'2026-11-16T20:06:00Z',baseline)
         ci_ref=release.BASE+'/actions/runs/101'
-        ci={'id':101,'repository':{'full_name':release.REPOSITORY},'event':'pull_request',
+        ci={'id':101,'run_number':1,'repository':{'full_name':release.REPOSITORY},
+            'head_branch':'codex/provider-contract-fixture','event':'pull_request',
             'workflow_id':413585893,'path':'.github/workflows/ci.yml','name':'CI',
             'head_sha':reviewed_head,'status':'completed','conclusion':'success','run_attempt':1,
             'pull_requests':[{'number':32,'head':{'sha':reviewed_head},
                 'base':{'sha':base,'ref':'main'}}],
-            'created_at':'2026-11-16T19:00:00Z','updated_at':'2026-11-16T20:07:00Z',
-            'completed_at':'2026-11-16T20:07:00Z'}
+            'created_at':'2026-11-16T19:00:00Z','run_started_at':'2026-11-16T19:05:00Z',
+            'updated_at':'2026-11-16T19:30:00Z'}
         records[ci_ref]=ci
         ci_entry={'ref':ci_ref,'sha256':release.digest(release.canonical(ci)),
                   'run_attempt':1,'tested_revision':tested,'tested_base_revision':base}
@@ -160,7 +161,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
         job={'id':201,'run_id':ci['id'],'run_attempt':ci['run_attempt'],
              'name':'Validate committed PR integration diff','status':'completed',
              'conclusion':'success','started_at':'2026-11-16T19:10:00Z',
-             'completed_at':'2026-11-16T20:07:00Z',
+             'completed_at':'2026-11-16T19:30:00Z',
              'steps':[{'name':step['name'],'status':'completed','conclusion':'success'}
                       for step in steps]}
         logs=[]
@@ -253,7 +254,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
         tested=evidence['baseline_admission']['ci']['tested_revision']
         commit=api.records[release.BASE+'/commits/'+tested]
-        self.assertEqual(commit['tree']['sha'],
+        self.assertEqual(commit['commit']['tree']['sha'],
                          release.git(root,'rev-parse',baseline+'^{tree}').decode().strip())
         commit['parents']=[{'sha':base}]
         with self.assertRaisesRegex(release.ReleaseError,'expected synthetic merge parents'):
@@ -275,6 +276,21 @@ class ProspectiveBaselineTests(unittest.TestCase):
         job['run_attempt']=2
         with self.assertRaisesRegex(release.ReleaseError,'CI job run identity mismatch'):
             evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+
+    def test_baseline_ci_job_completion_must_be_valid_and_precede_merge(self):
+        cases=(('missing',None),('malformed','not-a-provider-timestamp'),
+               ('after_merge','2026-11-16T20:01:00Z'))
+        for label,value in cases:
+            with self.subTest(case=label):
+                root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+                job=api.ci_jobs(101,1)[0]
+                if value is None:
+                    job.pop('completed_at')
+                else:
+                    job['completed_at']=value
+                with self.assertRaises(release.ReleaseError):
+                    evidence_call('verify_baseline_admission',root,api,evidence,
+                                  baseline,baseline,900)
 
     def test_baseline_rejects_wrong_reviewed_head_and_tested_base(self):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
@@ -329,7 +345,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
                         gate+' provider record belongs to a different pull request'):
                     evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
 
-    def test_ordinary_chronology_and_prospective_admission_share_real_git_history(self):
+    def test_real_provider_shapes_qualify_ordinary_and_prospective_paths_together(self):
         root,baseline_api,baseline_evidence,ordinary_head,baseline,dispatch,owner_record=(
             self.qualified_fixture())
         ordinary_base=release.git(root,'rev-parse',ordinary_head+'^').decode().strip()
@@ -339,6 +355,17 @@ class ProspectiveBaselineTests(unittest.TestCase):
         ordinary_integration=OrdinaryChronologyIntegrationTests().qualified_fixture(ordinary_fixture)
         ordinary_root,ordinary_api,ordinary_evidence,ordinary_records,job,pr=ordinary_integration
         self.assertEqual(ordinary_root,root)
+        ordinary_ci_entry=ordinary_evidence['integrations'][0]['records']['ci']
+        ordinary_ci=ordinary_records[ordinary_ci_entry['ref']]
+        ordinary_commit=ordinary_records[release.BASE+'/commits/'+
+            ordinary_evidence['integrations'][0]['tested_revision']]
+        self.assertNotIn('completed_at',ordinary_ci)
+        self.assertEqual(ordinary_commit['commit']['tree']['sha'],
+            release.git(root,'rev-parse',ordinary_head+'^{tree}').decode().strip())
+        self.assertEqual((job['run_id'],job['run_attempt'],job['status'],
+                          job['conclusion'],job['completed_at']),
+                         (ordinary_ci['id'],ordinary_ci_entry['run_attempt'],
+                          'completed','success','2026-11-16T18:03:00Z'))
         class CombinedAPI:
             def record(self,reference):
                 try:return ordinary_api.record(reference)
@@ -353,12 +380,38 @@ class ProspectiveBaselineTests(unittest.TestCase):
             def run(self,run_id):return baseline_api.run(run_id)
         api=CombinedAPI()
         ordinary_snapshots=evidence_call('verify_evidence',ordinary_evidence,api.record,root)
+        ordinary_commit_snapshot=next(item for item in ordinary_snapshots
+            if item['gate']=='tested_commit')
+        self.assertEqual(ordinary_commit_snapshot['record'],ordinary_commit)
+        self.assertEqual(ordinary_commit_snapshot['ref'],release.BASE+'/commits/'+
+            ordinary_evidence['integrations'][0]['tested_revision'])
+        self.assertEqual(ordinary_commit_snapshot['sha256'],
+            release.digest(release.canonical(ordinary_commit)))
         evidence_call('verify_live_integrations',api,ordinary_evidence,root,
                       ordinary_evidence=ordinary_snapshots)
         evidence_call('verify_coverage',root,ordinary_evidence,ordinary_head,admitted=True,
                       ordinary_evidence=ordinary_snapshots)
         baseline_proof=evidence_call('verify_baseline_admission',root,api,baseline_evidence,
             baseline,baseline,900)
+        baseline_commit_snapshot=next(item for item in baseline_proof
+            if item['gate']=='tested_commit')
+        baseline_ci=baseline_api.records[baseline_evidence['baseline_admission']['ci']['ref']]
+        baseline_commit=baseline_api.records[release.BASE+'/commits/'+
+            baseline_evidence['baseline_admission']['ci']['tested_revision']]
+        baseline_job=baseline_api.ci_jobs(101,1)[0]
+        self.assertNotIn('completed_at',baseline_ci)
+        self.assertEqual(baseline_commit['commit']['tree']['sha'],
+            release.git(root,'rev-parse',baseline+'^{tree}').decode().strip())
+        self.assertEqual(baseline_commit_snapshot['record'],baseline_commit)
+        self.assertEqual(baseline_commit_snapshot['ref'],release.BASE+'/commits/'+
+            baseline_evidence['baseline_admission']['ci']['tested_revision'])
+        self.assertEqual(baseline_commit_snapshot['sha256'],
+            release.digest(release.canonical(baseline_commit)))
+        self.assertEqual((baseline_job['run_id'],baseline_job['run_attempt'],
+                          baseline_job['status'],baseline_job['conclusion'],
+                          baseline_job['completed_at']),
+                         (baseline_ci['id'],1,'completed','success',
+                          '2026-11-16T19:30:00Z'))
         evidence_call('verify_coverage',root,baseline_evidence,baseline,
             baseline_admission=baseline_proof)
         self.assertEqual(pr['number'],31)

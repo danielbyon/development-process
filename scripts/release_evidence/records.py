@@ -486,6 +486,15 @@ def _ci_test_strategy(root,workflow_revision,base_revision):
         return 'direct_head'
     raise ReleaseError('CI tested-commit checkout strategy is unsupported')
 
+def ci_test_commit_tree_sha(record: JSON) -> str:
+    """Read the tree identity from GitHub's repository-commit response."""
+    commit=record.get('commit') if isinstance(record,dict) else None
+    tree=commit.get('tree') if isinstance(commit,dict) else None
+    tree_sha=tree.get('sha') if isinstance(tree,dict) else None
+    require(isinstance(tree_sha,str) and SHA.fullmatch(tree_sha),
+            'Provider CI-tested commit tree is malformed')
+    return tree_sha
+
 def verify_ci_test_commit(fetch: Callable[[str], Any], root: str | Path,
                           ci_record: JSON, pull_request: int,
                           tested_revision: str, reviewed_revision: str,
@@ -504,13 +513,12 @@ def verify_ci_test_commit(fetch: Callable[[str], Any], root: str | Path,
     record=fetch(BASE+'/commits/'+tested_revision)
     require(isinstance(record,dict) and record.get('sha')==tested_revision,
             'Provider commit identity differs from the CI-tested revision')
-    tree=record.get('tree',{}).get('sha')
+    tree=ci_test_commit_tree_sha(record)
     parents=record.get('parents')
-    require(isinstance(tree,str) and SHA.fullmatch(tree) and
-            isinstance(parents,list) and all(isinstance(parent,dict) and
+    require(isinstance(parents,list) and all(isinstance(parent,dict) and
             isinstance(parent.get('sha'),str) and SHA.fullmatch(parent['sha'])
             for parent in parents),
-            'Provider CI-tested commit tree or parents are malformed')
+            'Provider CI-tested commit parents are malformed')
     parent_shas=[parent['sha'] for parent in parents]
     if strategy=='synthetic_merge':
         require(parent_shas==[base_revision,reviewed_revision],
