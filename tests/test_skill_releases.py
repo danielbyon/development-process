@@ -4,6 +4,20 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
+import release_evidence as evidence
+from release_evidence import audit, baseline, common, discovery, integrations, legacy, qualification, records
+EVIDENCE_MODULES=(audit,baseline,discovery,integrations,legacy,qualification,records)
+evidence_module=discovery
+
+def evidence_operation(name):
+    for module in EVIDENCE_MODULES:
+        if hasattr(module,name): return getattr(module,name)
+    raise AttributeError(f'No evidence operation named {name}')
+
+def evidence_call(name,*args,**kwargs):
+    if name=='discover_evidence':
+        kwargs.setdefault('select_anchor',release.select_anchor)
+    return evidence_operation(name)(*args,**kwargs)
 
 
 
@@ -74,7 +88,7 @@ class PublicationTests(unittest.TestCase):
 class LiveEvidenceTests(unittest.TestCase):
     def test_missing_pr_cannot_be_admitted_from_reports(self):
         with self.assertRaisesRegex(release.ReleaseError,'Merged PR reference'):
-            release.verify_live_integrations(None,{'integrations':[{}]})
+            evidence_call('verify_live_integrations',None,{'integrations':[{}]})
     def test_ci_summary_success_without_jobs_does_not_pass(self):
         integration={'pull_request':1,'reviewed_revision':'a'*40,'integrated_revision':'b'*40,
                      'records':{'ci':{'ref':'ci','run_attempt':1}}}
@@ -84,7 +98,7 @@ class LiveEvidenceTests(unittest.TestCase):
                 return {'merged':True,'base':{'ref':'main'},'head':{'sha':'a'*40},'merge_commit_sha':'b'*40}
             def ci_jobs(self,*args): return []
         with self.assertRaisesRegex(release.ReleaseError,'Required CI job'):
-            release.verify_live_integrations(API(),{'integrations':[integration]})
+            evidence_call('verify_live_integrations',API(),{'integrations':[integration]})
 
 class StateMachineTests(unittest.TestCase):
     def setUp(self):
@@ -96,8 +110,8 @@ class StateMachineTests(unittest.TestCase):
             'run_attempt':1,'evidence':{},'evidence_snapshots':[],
             'qualification':{'run_attempt':1,'suites':[{'suite':s,'tests':1} for s in release.SUITES]},
             'qualified_artifacts':release.artifact_hashes(self.directory)}
-        self.patches=[patch.object(release,'check_settings'),patch.object(release,'verify_evidence',return_value=[]),
-            patch.object(release,'verify_live_integrations'),patch.object(release,'admit_anchor'),patch.object(release,'verify_coverage'),
+        self.patches=[patch.object(release,'check_settings'),patch.object(release.evidence_qualification,'verify_evidence',return_value=[]),
+            patch.object(release.evidence_integrations,'verify_live_integrations'),patch.object(release,'admit_anchor'),patch.object(release.evidence_qualification,'verify_coverage'),
             patch.object(release,'verify_bundle')]
         for p in self.patches: p.start()
         from unittest.mock import Mock
@@ -392,12 +406,12 @@ class HistoryCoverageTests(unittest.TestCase):
                 {'integrated_revision':base,'reviewed_revision':base,'tested_revision':base},
                 {'base_revision':base,'integrated_revision':result,'reviewed_revision':result,'tested_revision':result}]}
             with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
-                release.verify_coverage(root,evidence,result,admitted=True)
+                evidence_call('verify_coverage',root,evidence,result,admitted=True)
             evidence['integrations'][-1]['integrated_commits']=git('rev-list','--first-parent',base+'..'+result).split()[::-1]
-            release.verify_coverage(root,evidence,result,admitted=True)
+            evidence_call('verify_coverage',root,evidence,result,admitted=True)
             evidence['integrations'].pop()
             with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
-                release.verify_coverage(root,evidence,result,admitted=True)
+                evidence_call('verify_coverage',root,evidence,result,admitted=True)
 
 class DiscoveryTests(unittest.TestCase):
     def test_discovery_reuses_verified_anchor_without_bootstrap_ancestry(self):
@@ -409,8 +423,8 @@ class DiscoveryTests(unittest.TestCase):
                 value=args[1][:-len('^{commit}')]
                 return (value+'\n').encode() if value in revisions else b''
             return b''
-        with patch.object(release,'select_anchor',return_value=('a'*40,'2026.11.15')),patch.object(release,'git',side_effect=git):
-            evidence=release.discover_evidence(Path('.'),api,'b'*40,'c'*40)
+        with patch.object(release,'select_anchor',return_value=('a'*40,'2026.11.15')),patch.object(evidence_module,'git',side_effect=git),patch.object(common,'git',side_effect=git):
+            evidence=evidence_call('discover_evidence',Path('.'),api,'b'*40,'c'*40)
         self.assertEqual(evidence['schema_version'],2)
         self.assertEqual(evidence['baseline_revision'],'a'*40)
         self.assertEqual(evidence['anchor_release'],'2026.11.15')
@@ -423,7 +437,7 @@ class DiscoveryTests(unittest.TestCase):
         api=Mock();api.request.return_value={'full_name':release.REPOSITORY,'owner':{'id':123}}
         with patch.object(release,'select_anchor',return_value=None):
             with self.assertRaisesRegex(release.ReleaseError,'source and builder'):
-                release.discover_evidence(root,api,source,builder)
+                evidence_call('discover_evidence',root,api,source,builder)
     def test_failed_release_verification_is_not_silently_skipped(self):
         from unittest.mock import Mock,patch
         api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
@@ -534,7 +548,7 @@ class DurableResolutionTests(unittest.TestCase):
         api.pages.side_effect=lambda path: ([{'sha':revision}] if path.endswith('/commits') else [{'number':27,'merged_at':'date','base':{'ref':'main'},'merge_commit_sha':revision}])
         authority=release.EvidenceAuthority(api)
         snapshots=release.verify_frozen_release_evidence(f['evidence'],authority.record)
-        release.verify_live_integrations(authority,f['evidence'],root)
+        evidence_call('verify_live_integrations',authority,f['evidence'],root)
         context={'repository':release.REPOSITORY,'release_version':'2026.11.16','source_revision':revision,
             'builder_revision':revision,'policy_revision':'e2afa055d1126763c69f0e0392d25b86bab98014',
             'transform_version':1,'owner_id':123,'run_id':7,'evidence':f['evidence'],
@@ -621,10 +635,10 @@ class RebaseDiscoveryTests(unittest.TestCase):
             api=Mock();api.pages.side_effect=pages;api.record.side_effect=records.__getitem__
             api.request.return_value=records[release.BASE]
             with patch.object(release,'select_anchor',return_value=(base,'2026.11.15')):
-                evidence=release.discover_evidence(root,api,result,result)
+                evidence=evidence_call('discover_evidence',root,api,result,result)
             self.assertEqual(len(evidence['integrations']),1)
             self.assertEqual(evidence['integrations'][0]['integrated_commits'],[first,result])
-            release.verify_coverage(root,evidence,result,admitted=True)
+            evidence_call('verify_coverage',root,evidence,result,admitted=True)
 
 
 class SigningContextTests(unittest.TestCase):
@@ -789,7 +803,7 @@ from prospective_baseline_tests import ProspectiveBaselineTests, AuditTests
 
 
 class CLIEntrypointTests(unittest.TestCase):
-    def test_audit_cli_reaches_evidence_service_before_reporting_missing_data(self):
+    def test_audit_cli_reaches_evidence_module_before_reporting_missing_data(self):
         import io,json,os,runpy,subprocess
         from unittest.mock import patch
         repository='danielbyon/development-process'

@@ -4,10 +4,16 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
-from release_evidence_tests import EvidenceV2Tests, OrdinaryChronologyIntegrationTests
+import release_evidence as evidence
+from release_evidence_tests import EvidenceV2Tests, OrdinaryChronologyIntegrationTests, evidence_operation
+
+def evidence_call(name,*args,**kwargs):
+    if name=='discover_evidence':
+        kwargs.setdefault('select_anchor',release.select_anchor)
+    return evidence_operation(name)(*args,**kwargs)
 
 class ProspectiveBaselineTests(unittest.TestCase):
-    def qualified_fixture(self):
+    def qualified_fixture(self,chat_source_files=None,chat_test_files=None):
         import json,tempfile,subprocess
         from unittest.mock import Mock
         temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
@@ -20,7 +26,10 @@ class ProspectiveBaselineTests(unittest.TestCase):
         (root/'docs/PROCESS.md').write_text('Pinned process policy for baseline qualification.\n')
         (root/'skills/distribution.json').write_text('{"schema_version":2}\n')
         (root/'scripts/skill_release.py').write_text('# baseline source\n')
+        (root/'scripts/release_evidence.py').write_text('# baseline evidence source\n')
         (root/'tests/test_skill_releases.py').write_text('# baseline tests\n')
+        (root/'tests/release_evidence_tests.py').write_text('# baseline evidence tests\n')
+        (root/'tests/prospective_baseline_tests.py').write_text('# baseline prospective tests\n')
         suites=list(release.SUITES)
         steps=[{'name':suite,'run':'python3 -m unittest discover -s tests -p '+suite+' -v'} for suite in suites]
         workflow={'jobs':{'integration':{'name':'Validate committed PR integration diff','steps':steps}}}
@@ -31,6 +40,16 @@ class ProspectiveBaselineTests(unittest.TestCase):
         (root/'tests/test_skill_releases.py').write_text('# reviewed ordinary integration tests\n')
         git('add','.');git('commit','-qm','ordinary integration before correction');base=git('rev-parse','HEAD')
         (root/'docs/PROCESS.md').write_text('Corrected policy source for the prospective release baseline.\n')
+        (root/'scripts/skill_release.py').write_text('# corrected release controller source\n')
+        (root/'scripts/release_evidence.py').unlink()
+        evidence_package=root/'scripts/release_evidence';evidence_package.mkdir()
+        evidence_modules=('__init__','audit','baseline','common','discovery',
+                          'integrations','legacy','qualification','records')
+        for module in evidence_modules:
+            (evidence_package/f'{module}.py').write_text('# corrected evidence package source\n')
+        (root/'tests/test_skill_releases.py').write_text('# corrected release controller tests\n')
+        (root/'tests/release_evidence_tests.py').write_text('# corrected release evidence tests\n')
+        (root/'tests/prospective_baseline_tests.py').write_text('# corrected prospective baseline tests\n')
         git('add','.');git('commit','-qm','corrected release evidence process');baseline=git('rev-parse','HEAD')
         tree=git('rev-parse',baseline+'^{tree}')
         manifest=release.digest(release.git(root,'ls-tree','-r','--full-tree','-z',baseline))
@@ -66,13 +85,19 @@ class ProspectiveBaselineTests(unittest.TestCase):
                        'summary':'Reviewed every tracked file in the corrected baseline.'}
         review=make_receipt('baseline_review',review_report,'local_cubic',
             {'baseline_revision':baseline,'tree_sha':tree},'2026-11-16T20:05:00Z',baseline)
+        source_files=chat_source_files or sorted([
+            'scripts/skill_release.py',
+            *[f'scripts/release_evidence/{module}.py' for module in evidence_modules]])
+        test_files=chat_test_files or sorted([
+            'tests/test_skill_releases.py','tests/release_evidence_tests.py',
+            'tests/prospective_baseline_tests.py'])
+        inspected_files=source_files+test_files
         chat_report={'coverage':'full-baseline','reviewed_revision':baseline,'tree_sha':tree,
-                     'manifest_sha256':manifest,'source_files':['scripts/skill_release.py'],
-                     'test_files':['tests/test_skill_releases.py'],
-                     'file_sha256':{
-                         'scripts/skill_release.py':release.digest(release.git(root,'show',baseline+':scripts/skill_release.py')),
-                         'tests/test_skill_releases.py':release.digest(release.git(root,'show',baseline+':tests/test_skill_releases.py'))},
-                     'summary':'Inspected the baseline source and release tests: scripts/skill_release.py tests/test_skill_releases.py'}
+                     'manifest_sha256':manifest,'source_files':source_files,
+                     'test_files':test_files,
+                     'file_sha256':{name:release.digest(release.git(
+                         root,'show',baseline+':'+name)) for name in inspected_files},
+                     'summary':'Inspected the baseline source and tests: '+' '.join(inspected_files)}
         chat=make_receipt('chatgpt_inspection',chat_report,'chatgpt',
             {'baseline_revision':baseline,'tree_sha':tree},'2026-11-16T20:06:00Z',baseline)
         ci_ref=release.BASE+'/actions/runs/101'
@@ -181,27 +206,27 @@ class ProspectiveBaselineTests(unittest.TestCase):
     def test_admitted_prospective_root_has_zero_integrations_but_no_descendants(self):
         import subprocess
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
-        proof=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
-        self.assertIsNone(release.verify_coverage(root,evidence,baseline,
+        proof=evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+        self.assertIsNone(evidence_call('verify_coverage',root,evidence,baseline,
             baseline_admission=proof))
         subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm','same tree descendant'],check=True)
         descendant=release.git(root,'rev-parse','HEAD').decode().strip()
         with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
-            release.verify_coverage(root,evidence,descendant,baseline_admission=proof)
+            evidence_call('verify_coverage',root,evidence,descendant,baseline_admission=proof)
 
     def test_boolean_cannot_substitute_for_verified_baseline_admission(self):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
         with self.assertRaisesRegex(release.ReleaseError,'independently verified'):
-            release.verify_coverage(root,evidence,baseline,admitted=True)
+            evidence_call('verify_coverage',root,evidence,baseline,admitted=True)
 
     def test_full_baseline_admission_uses_authenticated_records_and_real_git_history(self):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
-        snapshots=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+        snapshots=evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
         self.assertEqual({item['gate'] for item in snapshots},
             {'baseline_review','chatgpt_inspection','ci','baseline_admission',
              'readiness_index','corrected_merge','ci_job','ci_log','release_dispatch',
              'baseline_main_ref'})
-        self.assertIsNone(release.verify_coverage(root,evidence,baseline,
+        self.assertIsNone(evidence_call('verify_coverage',root,evidence,baseline,
             baseline_admission=snapshots))
 
     def test_baseline_review_execution_must_run_after_the_corrected_merge(self):
@@ -229,7 +254,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
 
                 with self.assertRaisesRegex(release.ReleaseError,
                         label+' execution must start and finish after the corrected merge'):
-                    release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+                    evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
 
     def test_baseline_review_and_chatgpt_receipts_must_belong_to_the_correction_pr(self):
         cases=(('full_review','baseline_review'),
@@ -244,7 +269,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
                 self.rewrite_readiness_index(api,evidence)
                 with self.assertRaisesRegex(release.ReleaseError,
                         gate+' provider record belongs to a different pull request'):
-                    release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+                    evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
 
     def test_ordinary_chronology_and_prospective_admission_share_real_git_history(self):
         root,baseline_api,baseline_evidence,ordinary_head,baseline,dispatch,owner_record=(
@@ -269,12 +294,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
                 return baseline_api.job_log(job_id)
             def run(self,run_id):return baseline_api.run(run_id)
         api=CombinedAPI()
-        ordinary_snapshots=release.verify_evidence(ordinary_evidence,api.record,root)
-        release.verify_live_integrations(api,ordinary_evidence,root)
-        release.verify_coverage(root,ordinary_evidence,ordinary_head,admitted=True)
-        baseline_proof=release.verify_baseline_admission(root,api,baseline_evidence,
+        ordinary_snapshots=evidence_call('verify_evidence',ordinary_evidence,api.record,root)
+        evidence_call('verify_live_integrations',api,ordinary_evidence,root)
+        evidence_call('verify_coverage',root,ordinary_evidence,ordinary_head,admitted=True)
+        baseline_proof=evidence_call('verify_baseline_admission',root,api,baseline_evidence,
             baseline,baseline,900)
-        release.verify_coverage(root,baseline_evidence,baseline,
+        evidence_call('verify_coverage',root,baseline_evidence,baseline,
             baseline_admission=baseline_proof)
         self.assertEqual(pr['number'],31)
         self.assertEqual(ordinary_evidence['integrations'][0]['integrated_revision'],ordinary_head)
@@ -284,16 +309,25 @@ class ProspectiveBaselineTests(unittest.TestCase):
 
     def test_explicit_baseline_admission_accepts_zero_integration_root(self):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
-        proof=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
-        self.assertEqual(proof,release.verify_baseline_admission(
+        proof=evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
+        self.assertEqual(proof,evidence_call('verify_baseline_admission',
             root,api,evidence,baseline,baseline,900))
         with self.assertRaisesRegex(release.ReleaseError,'Ordinary integration evidence origin'):
-            release.verify_evidence(evidence,api.record,root)
+            evidence_call('verify_evidence',evidence,api.record,root)
+
+    def test_baseline_chatgpt_inspection_must_cover_every_changed_source_and_test(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture(
+            chat_source_files=['scripts/skill_release.py'],
+            chat_test_files=['tests/test_skill_releases.py'])
+        with self.assertRaisesRegex(release.ReleaseError,
+                'ChatGPT inspection omits changed source or test files'):
+            evidence_call('verify_baseline_admission',root,api,evidence,
+                          baseline,baseline,900)
 
     def test_baseline_index_preparation_binds_review_ci_and_owner_admission(self):
         import json
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
-        body=release.prepare_readiness_index(evidence,32,api)
+        body=evidence_call('prepare_readiness_index',evidence,32,api)
         wrapper=json.loads(body.split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
         self.assertEqual(wrapper['evidence']['origin']['kind'],'prospective_baseline')
         self.assertEqual(wrapper['evidence']['integrations'],[])
@@ -303,12 +337,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
         from unittest.mock import patch
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
         with patch.object(release,'select_anchor',return_value=None):
-            discovered=release.discover_evidence(root,api,baseline,baseline)
+            discovered=evidence_call('discover_evidence',root,api,baseline,baseline)
         self.assertEqual(discovered['origin']['kind'],'prospective_baseline')
         self.assertEqual(discovered['baseline_revision'],baseline)
         self.assertEqual(discovered['integrations'],[])
-        proof=release.verify_baseline_admission(root,api,discovered,baseline,baseline,900)
-        self.assertIsNone(release.verify_coverage(root,discovered,baseline,
+        proof=evidence_call('verify_baseline_admission',root,api,discovered,baseline,baseline,900)
+        self.assertIsNone(evidence_call('verify_coverage',root,discovered,baseline,
             baseline_admission=proof))
 
     def test_admission_after_original_dispatch_is_rejected(self):
@@ -316,7 +350,7 @@ class ProspectiveBaselineTests(unittest.TestCase):
         dispatch['created_at']='2026-11-16T20:07:30Z'
         dispatch['run_attempt']=2
         with self.assertRaisesRegex(release.ReleaseError,'precede the original release dispatch'):
-            release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
 
     def test_dispatch_requires_main_to_remain_at_the_admitted_baseline(self):
         import subprocess
@@ -328,20 +362,20 @@ class ProspectiveBaselineTests(unittest.TestCase):
             'ref':'refs/heads/main','object':{'type':'commit','sha':current_main}}
         with self.assertRaisesRegex(release.ReleaseError,
                 'Main must remain exactly at the admitted baseline through original release dispatch'):
-            release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+            evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
 
     def test_frozen_main_ref_snapshot_keeps_immutable_admission_verifiable(self):
         import copy,subprocess
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
         live=release.EvidenceAuthority(api)
-        release.verify_baseline_admission(root,live,evidence,baseline,baseline,900)
+        evidence_call('verify_baseline_admission',root,live,evidence,baseline,baseline,900)
         frozen=release.EvidenceAuthority(data=copy.deepcopy(live.data))
         subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm',
                         'ordinary integration after release activation'],check=True)
         current_main=release.git(root,'rev-parse','HEAD').decode().strip()
         api.records[release.BASE+'/git/ref/heads/main']={
             'ref':'refs/heads/main','object':{'type':'commit','sha':current_main}}
-        proof=release.verify_baseline_admission(root,frozen,evidence,baseline,baseline,900)
+        proof=evidence_call('verify_baseline_admission',root,frozen,evidence,baseline,baseline,900)
         main_snapshot=next(item for item in proof if item['gate']=='baseline_main_ref')
         self.assertEqual(main_snapshot['record']['object']['sha'],baseline)
 
@@ -351,19 +385,38 @@ class ProspectiveBaselineTests(unittest.TestCase):
         subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm','same tree later commit'],check=True)
         descendant=release.git(root,'rev-parse','HEAD').decode().strip()
         with self.assertRaisesRegex(release.ReleaseError,'source and builder'):
-            release.verify_baseline_admission(root,api,evidence,descendant,descendant,900)
-        proof=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+            evidence_call('verify_baseline_admission',root,api,evidence,descendant,descendant,900)
+        proof=evidence_call('verify_baseline_admission',root,api,evidence,baseline,baseline,900)
         with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
-            release.verify_coverage(root,evidence,base,baseline_admission=proof)
+            evidence_call('verify_coverage',root,evidence,base,baseline_admission=proof)
         with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
-            release.verify_coverage(root,evidence,descendant,baseline_admission=proof)
+            evidence_call('verify_coverage',root,evidence,descendant,baseline_admission=proof)
         ordinary={'schema_version':2,'origin':{'kind':'ordinary'},
             'baseline_revision':baseline,'anchor_release':'2026.11.16','integrations':[]}
         with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
-            release.verify_coverage(root,ordinary,descendant,admitted=True)
+            evidence_call('verify_coverage',root,ordinary,descendant,admitted=True)
 
 
 class AuditTests(unittest.TestCase):
+    def test_merged_ordinary_pr_without_release_anchor_runs_git_coverage(self):
+        root,api,evidence,records,job,pr=(
+            OrdinaryChronologyIntegrationTests().qualified_fixture())
+        binding=evidence['integrations'][0]['readiness_index']
+        provider_pages=api.pages.side_effect
+        def pages(reference):
+            if reference==release.BASE+'/issues/5/comments':
+                return [records[binding['original_ref']],
+                        records[binding['normalization_ref']]]
+            return provider_pages(reference)
+        api.pages.side_effect=pages
+        api.request.return_value={'login':'danielbyon'}
+
+        result=evidence_call('audit_pull_request',root,api,5)
+
+        self.assertEqual(result['gates']['git_coverage'],'FAIL')
+        self.assertIn('Uncovered main integrations',
+                      result['details']['git_coverage'])
+
     def test_open_pull_request_audit_marks_merge_and_release_gates_not_run(self):
         import json,yaml
         from unittest.mock import Mock
@@ -404,7 +457,7 @@ class AuditTests(unittest.TestCase):
             def ci_jobs(self,run_id,attempt):return [job]
             def job_log(self,job_id):return job_log
         api=API()
-        result=release.audit_pull_request(root,api,5)
+        result=evidence_call('audit_pull_request',root,api,5)
         self.assertEqual(result['gates']['candidate_ci'],'PASS',result['details'])
         self.assertEqual(result['gates']['merge'],'NOT_RUN')
         self.assertEqual(result['gates']['integrated_revision'],'NOT_RUN')
@@ -424,7 +477,7 @@ class AuditTests(unittest.TestCase):
                 return records[ref]
             def pages(self,ref):
                 return [records[evidence['integrations'][0]['readiness_index']['index_ref']]]
-        result=release.audit_pull_request(root,API(),5)
+        result=evidence_call('audit_pull_request',root,API(),5)
         self.assertEqual(result['gates']['pull_request_identity'],'FAIL')
         self.assertEqual(result['gates']['release_dispatch'],'NOT_RUN')
 
@@ -455,7 +508,7 @@ class AuditTests(unittest.TestCase):
                 self.methods.append(('GET','job_log'))
                 return source_api.job_log(job_id)
         api=API()
-        result=release.audit_pull_request(root,api,32)
+        result=evidence_call('audit_pull_request',root,api,32)
         for gate in ('account','repository_identity','pull_request_identity',
                      'evidence_receipts','candidate_ci','merge','integrated_revision',
                      'git_coverage','baseline_admission'):
@@ -485,7 +538,7 @@ class AuditTests(unittest.TestCase):
                 return [index_record] if ref==release.BASE+'/issues/32/comments' else source_api.pages(ref)
             def ci_jobs(self,run_id,attempt):return source_api.ci_jobs(run_id,attempt)
             def job_log(self,job_id):return source_api.job_log(job_id)
-        result=release.audit_pull_request(root,API(),32)
+        result=evidence_call('audit_pull_request',root,API(),32)
         self.assertEqual(result['gates']['baseline_admission'],'PASS',result['details'])
         self.assertEqual(result['gates']['git_coverage'],'FAIL')
         self.assertEqual(result['gates']['release_dispatch'],'NOT_RUN')

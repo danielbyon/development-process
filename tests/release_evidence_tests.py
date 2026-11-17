@@ -5,38 +5,59 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
 import release_evidence as evidence
-import release_evidence_records as evidence_records
-import release_evidence_baseline as evidence_baseline
-import release_evidence_qualification as evidence_qualification
-import release_evidence_integrations as evidence_integrations
-import release_evidence_audit as evidence_audit
+from release_evidence import audit, baseline, discovery, integrations, legacy, qualification, records
+EVIDENCE_MODULES=(audit,baseline,discovery,integrations,legacy,qualification,records)
+evidence_module=records
+
+def evidence_operation(name):
+    for module in EVIDENCE_MODULES:
+        if hasattr(module,name): return getattr(module,name)
+    raise AttributeError(f'No evidence operation named {name}')
 
 def evidence_call(name,*args,**kwargs):
-    for module in (evidence_records,evidence_baseline,evidence_qualification,
-                   evidence_integrations,evidence_audit):
-        operation=getattr(module,name,None)
-        if operation is not None:
-            return operation(release._evidence_context(),*args,**kwargs)
-    raise AttributeError(f'Unknown evidence operation: {name}')
+    if name=='discover_evidence':
+        kwargs.setdefault('select_anchor',release.select_anchor)
+    return evidence_operation(name)(*args,**kwargs)
 
 class EvidenceModuleBoundaryTests(unittest.TestCase):
-    def test_controller_exposes_only_evidence_service_operations(self):
+    def test_controller_uses_module_operations_without_reexporting_them(self):
+        import inspect
         operations={
             'audit_pull_request','build_owner_receipt','capture_execution',
             'discover_evidence','prepare_readiness_index',
             'verify_baseline_admission','verify_coverage','verify_evidence',
             'verify_live_integrations','verify_pending_baseline_coverage',
             'verify_premerge_integrations'}
-        self.assertIsInstance(release._EVIDENCE,evidence.EvidenceService)
-        self.assertEqual(set(evidence.__all__),{
-            'EvidenceContext','EvidenceService','BaselineQualification',
-            'VerifiedBaselineAdmission'})
-        for operation in operations:
+        self.assertFalse(hasattr(release,'_EVIDENCE_CONTEXT'))
+        self.assertFalse(hasattr(evidence,'EvidenceContext'))
+        self.assertFalse(hasattr(evidence,'EvidenceService'))
+        owners={
+            'audit_pull_request':audit,
+            'build_owner_receipt':records,
+            'capture_execution':records,
+            'discover_evidence':discovery,
+            'prepare_readiness_index':records,
+            'verify_baseline_admission':baseline,
+            'verify_coverage':qualification,
+            'verify_evidence':qualification,
+            'verify_live_integrations':integrations,
+            'verify_pending_baseline_coverage':qualification,
+            'verify_premerge_integrations':integrations,
+        }
+        for operation,module in owners.items():
             with self.subTest(operation=operation):
-                controller_operation=getattr(release,operation)
-                service_operation=getattr(release._EVIDENCE,operation)
-                self.assertIs(controller_operation.__self__,release._EVIDENCE)
-                self.assertIs(controller_operation.__func__,service_operation.__func__)
+                implementation=getattr(module,operation)
+                self.assertTrue(callable(implementation))
+                self.assertEqual(inspect.getmodule(implementation).__name__,module.__name__)
+                self.assertFalse(hasattr(evidence,operation))
+                self.assertFalse(hasattr(release,operation))
+        self.assertEqual(set(owners),operations)
+        self.assertEqual(inspect.getmodule(release.verify_frozen_release_evidence).__name__,
+                         'release_evidence.legacy')
+        self.assertEqual(inspect.getmodule(release.load_evidence_export).__name__,
+                         'release_evidence.legacy')
+        self.assertFalse(hasattr(release,'execution_provenance'))
+        self.assertFalse(hasattr(release,'_verify_frozen_release_evidence_v1'))
         for implementation_detail in (
                 'verify_review_chain','verify_review_dispositions',
                 'verify_event_chronology','verify_ci_pull_request',
@@ -45,7 +66,7 @@ class EvidenceModuleBoundaryTests(unittest.TestCase):
             with self.subTest(implementation_detail=implementation_detail):
                 self.assertFalse(hasattr(release,implementation_detail))
 
-    def test_service_methods_have_explicit_typed_signatures(self):
+    def test_module_operations_have_explicit_typed_signatures(self):
         import inspect
         operations=(
             'audit_pull_request','build_owner_receipt','capture_execution',
@@ -55,8 +76,8 @@ class EvidenceModuleBoundaryTests(unittest.TestCase):
             'verify_premerge_integrations')
         for name in operations:
             with self.subTest(operation=name):
-                signature=inspect.signature(getattr(evidence.EvidenceService,name))
-                parameters=list(signature.parameters.values())[1:]
+                signature=inspect.signature(evidence_operation(name))
+                parameters=list(signature.parameters.values())
                 self.assertFalse(any(parameter.kind in (
                     inspect.Parameter.VAR_POSITIONAL,
                     inspect.Parameter.VAR_KEYWORD) for parameter in parameters))
@@ -86,8 +107,8 @@ class EvidenceV2Tests(unittest.TestCase):
                 '2026-11-16T18:03:00Z':('2026-11-16T18:02:30Z','2026-11-16T18:02:45Z')}
             summary=report['summary']
             command=[sys.executable,'-c','import sys; print(sys.argv[1])',summary]
-            with patch.object(release,'_utc_now',side_effect=times[created_at]):
-                result=release.capture_execution(root,gate,system,command,report,
+            with patch.object(evidence_module,'_utc_now',side_effect=times[created_at]):
+                result=evidence_call('capture_execution',root,gate,system,command,report,
                     reviewed_range,transcript)
             counter+=1
             ref=release.BASE+'/issues/comments/'+str(counter)
@@ -172,13 +193,13 @@ class EvidenceV2Tests(unittest.TestCase):
         binding['original_sha256']=index_digest
         with self.assertRaisesRegex(release.ReleaseError,
                 'Readiness index provider record belongs to a different pull request'):
-            release.verify_evidence(evidence,records.__getitem__,root)
+            evidence_call('verify_evidence',evidence,records.__getitem__,root)
 
     def test_schema_v1_is_not_accepted_for_new_qualification(self):
         from test_skill_releases import EvidenceTests
         legacy=EvidenceTests().fixture()['evidence']
         with self.assertRaisesRegex(release.ReleaseError,'schema v2'):
-            release.verify_evidence(legacy,lambda ref: {})
+            evidence_call('verify_evidence',legacy,lambda ref: {})
 
     def test_schema_v1_remains_available_only_for_frozen_release_verification(self):
         from test_skill_releases import EvidenceTests
@@ -225,7 +246,7 @@ class EvidenceV2Tests(unittest.TestCase):
 
     def test_authenticates_ordinary_author_review_chatgpt_and_ci_receipts(self):
         evidence,records,_,root=self.ordinary_fixture()
-        self.assertEqual(len(release.verify_evidence(evidence,records.__getitem__,root)),6)
+        self.assertEqual(len(evidence_call('verify_evidence',evidence,records.__getitem__,root)),6)
 
     def test_ordinary_receipt_from_another_pr_cannot_qualify(self):
         import json
@@ -246,7 +267,7 @@ class EvidenceV2Tests(unittest.TestCase):
         binding['original_sha256']=index_digest
         with self.assertRaisesRegex(release.ReleaseError,
                 'author_execution provider record belongs to a different pull request'):
-            release.verify_evidence(evidence,records.__getitem__,root)
+            evidence_call('verify_evidence',evidence,records.__getitem__,root)
 
     def test_reviewer_cannot_reuse_author_execution_after_rehashing_receipt(self):
         import json
@@ -268,7 +289,7 @@ class EvidenceV2Tests(unittest.TestCase):
         binding['index_sha256']=release.digest(release.canonical(index_record))
         binding['original_sha256']=binding['index_sha256']
         with self.assertRaisesRegex(release.ReleaseError,'cannot independently review'):
-            release.verify_evidence(evidence,records.__getitem__,root)
+            evidence_call('verify_evidence',evidence,records.__getitem__,root)
 
     def test_review_correction_chain_is_contiguous_and_preserves_findings(self):
         chain=[
@@ -345,7 +366,7 @@ class CaptureTests(unittest.TestCase):
         root=Path(__file__).resolve().parents[1]
         head=release.git(root,'rev-parse','HEAD').decode().strip()
         base=release.git(root,'rev-parse',head+'^').decode().strip()
-        result=release.capture_execution(root,'author_execution','separate_codex',
+        result=evidence_call('capture_execution',root,'author_execution','separate_codex',
             [sys.executable,'-c','print("Captured author command")'],
             {'role':'author','summary':'Captured author command'},
             {'base_revision':base,'head_revision':head})
@@ -368,7 +389,7 @@ class CaptureTests(unittest.TestCase):
             'tree_sha':tree,'source_files':source_files,'test_files':test_files,
             'summary':summary}
         transcript=summary+' '+' '.join(names)
-        result=release.capture_execution(root,'chatgpt_inspection','chatgpt',[],report,
+        result=evidence_call('capture_execution',root,'chatgpt_inspection','chatgpt',[],report,
             {'baseline_revision':baseline,'tree_sha':tree},transcript)
         event=json.loads(result['body'].split('<!-- release-evidence-v2\n',1)[1].split('\n-->',1)[0])
         self.assertEqual(event['revision'],baseline)
@@ -383,7 +404,7 @@ class CaptureTests(unittest.TestCase):
         evidence,records,_,_=EvidenceV2Tests().ordinary_fixture()
         api=Mock();api.request.return_value={'login':'danielbyon'}
         api.record.side_effect=records.__getitem__
-        body=release.prepare_readiness_index(evidence,5,api)
+        body=evidence_call('prepare_readiness_index',evidence,5,api)
         wrapper=json.loads(body.split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
         self.assertEqual(wrapper['schema_version'],2)
         self.assertNotIn('normalizes',wrapper)
@@ -402,7 +423,7 @@ class CaptureTests(unittest.TestCase):
             'merged_at':'2026-11-16T18:10:00Z'}
         api=Mock();api.request.return_value={'login':'danielbyon'}
         api.record.side_effect=records.__getitem__
-        body=release.prepare_readiness_index(evidence,5,api,normalizes_reference=index_ref)
+        body=evidence_call('prepare_readiness_index',evidence,5,api,normalizes_reference=index_ref)
         wrapper=json.loads(body.split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
         self.assertEqual(wrapper['normalizes']['ref'],index_ref)
         self.assertEqual(wrapper['evidence']['integrations'][0]['integrated_revision'],head)
@@ -410,7 +431,7 @@ class CaptureTests(unittest.TestCase):
 
     def test_owner_receipt_names_the_distinct_authorized_action(self):
         import json
-        body=release.build_owner_receipt('baseline_admission','a'*40)
+        body=evidence_call('build_owner_receipt','baseline_admission','a'*40)
         event=json.loads(body.split('<!-- release-evidence-v2\n',1)[1].split('\n-->',1)[0])
         self.assertEqual(event['report'],{'action':'admit-baseline','verdict':'approve'})
 
@@ -467,9 +488,9 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
 
     def test_authenticated_receipts_normalization_ci_and_actual_merge_chronology(self):
         root,api,evidence,records,job,pr=self.qualified_fixture()
-        snapshots=release.verify_evidence(evidence,api.record,root)
+        snapshots=evidence_call('verify_evidence',evidence,api.record,root)
         self.assertTrue(any(item['gate']=='readiness_normalization' for item in snapshots))
-        release.verify_live_integrations(api,evidence,root)
+        evidence_call('verify_live_integrations',api,evidence,root)
 
     def test_original_index_edit_after_merge_invalidates_normalization(self):
         import json
@@ -484,19 +505,19 @@ class OrdinaryChronologyIntegrationTests(unittest.TestCase):
         loaded=evidence_call('load_readiness_index',binding['normalization_ref'],api.record,5)
         evidence['integrations'][0]['readiness_index']=evidence_call('readiness_index_binding',loaded)
         with self.assertRaisesRegex(release.ReleaseError,'updated after'):
-            release.verify_live_integrations(api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root)
 
     def test_ci_completion_after_merge_is_rejected(self):
         root,api,evidence,records,job,pr=self.qualified_fixture()
         job['completed_at']='2026-11-16T18:12:00Z'
         with self.assertRaisesRegex(release.ReleaseError,'updated after|after the integration'):
-            release.verify_live_integrations(api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root)
 
     def test_missing_merge_timestamp_and_wrong_pr_identity_are_rejected(self):
         root,api,evidence,records,job,pr=self.qualified_fixture()
         pr.pop('merged_at')
         with self.assertRaisesRegex(release.ReleaseError,'merge timestamp'):
-            release.verify_live_integrations(api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root)
         pr['merged_at']='2026-11-16T18:10:00Z';pr['number']=6
         with self.assertRaisesRegex(release.ReleaseError,'number identity'):
-            release.verify_live_integrations(api,evidence,root)
+            evidence_call('verify_live_integrations',api,evidence,root)
