@@ -70,8 +70,11 @@ class EvidenceV2Tests(unittest.TestCase):
         import json
         root=Path(__file__).resolve().parents[1] if root is None else Path(root)
         owner=123
+        default_head=head is None
         head=head or release.git(root,'rev-parse','HEAD').decode().strip()
-        base=base or release.git(root,'rev-parse',head+'^').decode().strip()
+        default_base=release.BOOTSTRAP_BASELINE if default_head else \
+            release.git(root,'rev-parse',head+'^').decode().strip()
+        base=base or default_base
         records={release.BASE:{
             'full_name':release.REPOSITORY,'owner':{'id':owner,'login':'danielbyon'}}};counter=comment_offset
         def post(gate,report,system,reviewed_range,created_at,transcript=None):
