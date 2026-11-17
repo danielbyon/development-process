@@ -282,12 +282,12 @@ class ProspectiveBaselineTests(unittest.TestCase):
         self.assertEqual(baseline_evidence['integrations'],[])
         self.assertIn('baseline_admission',{item['gate'] for item in baseline_proof})
 
-    def test_verify_evidence_accepts_verified_zero_integration_baseline(self):
+    def test_explicit_baseline_admission_accepts_zero_integration_root(self):
         root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
-        proof=release.verify_evidence(evidence,api,root,dispatch_run_id=900)
+        proof=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
         self.assertEqual(proof,release.verify_baseline_admission(
             root,api,evidence,baseline,baseline,900))
-        with self.assertRaisesRegex(release.ReleaseError,'dispatch identity'):
+        with self.assertRaisesRegex(release.ReleaseError,'Ordinary integration evidence origin'):
             release.verify_evidence(evidence,api.record,root)
 
     def test_baseline_index_preparation_binds_review_ci_and_owner_admission(self):

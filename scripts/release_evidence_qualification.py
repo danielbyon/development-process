@@ -210,16 +210,12 @@ def verify_inspection_files(ctx, root,revision_id,report,base_revision=None):
                 required_tests<=set(report['test_files']),
                 'ChatGPT inspection omits changed source or test files')
 
-def verify_evidence(ctx, evidence,source,root=None,*,dispatch_run_id=None):
+def verify_evidence(ctx, evidence,fetch,root=None):
     """Authenticate chronological evidence for ordinary integrations."""
     ctx.require(isinstance(evidence,dict) and evidence.get('schema_version')==2,
             'New qualification requires evidence schema v2')
     ctx.require(root is not None,'Git checkout required to bind reviewed diff and inspected files')
-    if callable(source):
-        fetch=source;api=getattr(source,'__self__',None)
-    else:
-        api=source if hasattr(source,'record') else None
-        fetch=api.record if api is not None else source
+    ctx.require(callable(fetch),'Authenticated evidence fetch function required')
     origin=evidence.get('origin',{})
     repository=fetch(ctx.BASE)
     owner_id=repository.get('owner',{}).get('id')

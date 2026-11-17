@@ -75,26 +75,9 @@ class EvidenceService:
                                        pull_request, api,
                                        normalizes_reference=normalizes_reference)
 
-    def verify_evidence(self, evidence: JSON,
-                        source: _EvidenceAPI | Callable[[str], Any],
-                        root: RepositoryPath | None = None, *,
-                        dispatch_run_id: int | None = None
-                        ) -> list[JSON] | VerifiedBaselineAdmission:
-        context=self._context_provider()
-        origin=evidence.get('origin',{}) if isinstance(evidence,dict) else {}
-        if origin.get('kind')=='prospective_baseline':
-            context.require(root is not None,
-                    'Git checkout required to bind reviewed diff and inspected files')
-            api=(getattr(source,'__self__',None) if callable(source) else
-                 source if hasattr(source,'record') else None)
-            context.require(api is not None and hasattr(api,'run') and
-                    dispatch_run_id is not None,
-                    'Prospective evidence requires an authenticated API and original dispatch identity')
-            return verify_baseline_admission(context,root,api,evidence,
-                origin.get('source_revision'),origin.get('builder_revision'),
-                dispatch_run_id)
-        return verify_evidence(context, evidence, source, root,
-                               dispatch_run_id=dispatch_run_id)
+    def verify_evidence(self, evidence: JSON, fetch: Callable[[str], Any],
+                        root: RepositoryPath | None = None) -> list[JSON]:
+        return verify_evidence(self._context_provider(), evidence, fetch, root)
 
     def verify_coverage(self, root: RepositoryPath, evidence: JSON, target: str,
                         *, admitted: bool = False,

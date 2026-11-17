@@ -786,3 +786,39 @@ from release_evidence_tests import (
     EvidenceModuleBoundaryTests, EvidenceV2Tests, CaptureTests,
     OrdinaryChronologyIntegrationTests, evidence_call)
 from prospective_baseline_tests import ProspectiveBaselineTests, AuditTests
+
+
+class CLIEntrypointTests(unittest.TestCase):
+    def test_audit_cli_reaches_evidence_service_before_reporting_missing_data(self):
+        import io,json,os,runpy,subprocess
+        from unittest.mock import patch
+        repository='danielbyon/development-process'
+        base='/repos/'+repository
+        token_name='CODEX_TEST_AUDIT_TOKEN'
+        script=Path(__file__).resolve().parents[1]/'scripts'/'skill_release.py'
+        output=io.StringIO();errors=io.StringIO()
+        def fake_run(command,**kwargs):
+            self.assertEqual(command[3],'GET')
+            endpoint=command[4]
+            if endpoint=='/user':
+                payload={'login':'danielbyon'}
+            elif endpoint==base:
+                payload={'full_name':repository,'owner':{'login':'danielbyon'}}
+            elif endpoint==base+'/pulls/33':
+                payload={'number':33,'base':{'ref':'main','repo':{'full_name':repository}}}
+            elif endpoint.startswith(base+'/issues/33/comments?'):
+                payload=[]
+            else:
+                raise AssertionError('Unexpected audit request: '+endpoint)
+            return subprocess.CompletedProcess(command,0,json.dumps(payload).encode(),b'')
+        argv=[str(script),'audit','--root',str(script.parents[1]),
+              '--pr','33','--token-env',token_name]
+        with patch.dict(os.environ,{token_name:'offline-test-token'}), \
+                patch.object(sys,'argv',argv), patch('subprocess.run',side_effect=fake_run), \
+                patch('sys.stdout',output), patch('sys.stderr',errors):
+            with self.assertRaises(SystemExit) as result:
+                runpy.run_path(str(script),run_name='__main__')
+        self.assertEqual(result.exception.code,2)
+        self.assertEqual(json.loads(output.getvalue())['gates']['evidence_receipts'],
+                         'MISSING_EVIDENCE')
+        self.assertEqual(errors.getvalue(),'')

@@ -637,6 +637,33 @@ def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatib
         require(report.get('installed_payload')==installed_payload and SHA.fullmatch(report.get('installed_source','')) and report.get('differences') and report.get('validation') and report.get('execution_id') and report.get('verdict')=='pass','Incomplete compatibility inspection')
     return {'task_pin':tag,'provenance':context}
 
+
+# Bind the controller to the evidence service before the CLI is defined.
+import release_evidence as _release_evidence
+
+def _evidence_context():
+    return _release_evidence.EvidenceContext(
+        BASE=BASE, REPOSITORY=REPOSITORY, SHA=SHA,
+        BOOTSTRAP_BASELINE=BOOTSTRAP_BASELINE, SUITES=SUITES,
+        ReleaseError=ReleaseError, APIError=APIError,
+        require=require, canonical=canonical, digest=digest, git=git,
+        revision=revision, select_anchor=select_anchor, utc_now=_utc_now)
+
+_EVIDENCE=_release_evidence.EvidenceService(_evidence_context)
+audit_pull_request=_EVIDENCE.audit_pull_request
+build_owner_receipt=_EVIDENCE.build_owner_receipt
+capture_execution=_EVIDENCE.capture_execution
+discover_evidence=_EVIDENCE.discover_evidence
+prepare_readiness_index=_EVIDENCE.prepare_readiness_index
+verify_baseline_admission=_EVIDENCE.verify_baseline_admission
+verify_coverage=_EVIDENCE.verify_coverage
+verify_evidence=_EVIDENCE.verify_evidence
+verify_live_integrations=_EVIDENCE.verify_live_integrations
+verify_pending_baseline_coverage=_EVIDENCE.verify_pending_baseline_coverage
+verify_premerge_integrations=_EVIDENCE.verify_premerge_integrations
+BaselineQualification=_release_evidence.BaselineQualification
+VerifiedBaselineAdmission=_release_evidence.VerifiedBaselineAdmission
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
@@ -765,29 +792,4 @@ def main(argv=None):
 
 
 
-# Keep release orchestration independent of the evidence implementation.
-import release_evidence as _release_evidence
-
-def _evidence_context():
-    return _release_evidence.EvidenceContext(
-        BASE=BASE, REPOSITORY=REPOSITORY, SHA=SHA,
-        BOOTSTRAP_BASELINE=BOOTSTRAP_BASELINE, SUITES=SUITES,
-        ReleaseError=ReleaseError, APIError=APIError,
-        require=require, canonical=canonical, digest=digest, git=git,
-        revision=revision, select_anchor=select_anchor, utc_now=_utc_now)
-
-_EVIDENCE=_release_evidence.EvidenceService(_evidence_context)
-audit_pull_request=_EVIDENCE.audit_pull_request
-build_owner_receipt=_EVIDENCE.build_owner_receipt
-capture_execution=_EVIDENCE.capture_execution
-discover_evidence=_EVIDENCE.discover_evidence
-prepare_readiness_index=_EVIDENCE.prepare_readiness_index
-verify_baseline_admission=_EVIDENCE.verify_baseline_admission
-verify_coverage=_EVIDENCE.verify_coverage
-verify_evidence=_EVIDENCE.verify_evidence
-verify_live_integrations=_EVIDENCE.verify_live_integrations
-verify_pending_baseline_coverage=_EVIDENCE.verify_pending_baseline_coverage
-verify_premerge_integrations=_EVIDENCE.verify_premerge_integrations
-BaselineQualification=_release_evidence.BaselineQualification
-VerifiedBaselineAdmission=_release_evidence.VerifiedBaselineAdmission
 if __name__=='__main__': sys.exit(main())
