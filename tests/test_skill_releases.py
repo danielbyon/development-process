@@ -5,9 +5,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
 import release_evidence as evidence
+import release_evidence_records as evidence_records
+import release_evidence_qualification as evidence_qualification
+import release_evidence_integrations as evidence_integrations
+import release_evidence_audit as evidence_audit
 
 def evidence_call(name,*args,**kwargs):
-    return getattr(evidence,name)(release._evidence_context(),*args,**kwargs)
+    for module in (evidence_records,evidence_qualification,
+                   evidence_integrations,evidence_audit):
+        operation=getattr(module,name,None)
+        if operation is not None:
+            return operation(release._evidence_context(),*args,**kwargs)
+    raise AttributeError(f'Unknown evidence operation: {name}')
 
 class EvidenceModuleBoundaryTests(unittest.TestCase):
     def test_controller_exposes_only_evidence_service_operations(self):
