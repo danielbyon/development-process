@@ -17,29 +17,18 @@ class GitHubAPI:
         self.repository = repository
         self.base = '/repos/' + repository
         self.historical_publication = False
-        self.read_only = False
-        self._read_only_token = None
 
     @classmethod
     def for_read_only_audit(cls, token):
-        """Create a GET-only client bound to one explicitly selected token."""
-        if not isinstance(token,str) or not token:
-            raise APIError('Explicit read-only audit credential required')
-        api=cls()
-        api.read_only=True
-        api._read_only_token=token
-        return api
+        """Create a dedicated GET-only client for release evidence audits."""
+        return ReadOnlyAuditAPI(token)
 
     def authorize_historical_publication(self):
-        if self.read_only:
-            raise APIError('read-only audit client cannot authorize publication')
         if os.environ.get('RELEASE_WORKFLOW_WRITE_AUTHORIZED')!='true' or not os.environ.get('RELEASE_WORKFLOW_WRITE_TOKEN'):
             raise APIError('Separate owner-authorized Workflows-write capability required')
         self.historical_publication=True
 
     def request(self, method, endpoint, data=None, raw=False):
-        if self.read_only and method!='GET':
-            raise APIError('read-only audit client refuses write requests')
         command = ['gh','api','--method',method,endpoint,'-H','X-GitHub-Api-Version: 2022-11-28']
         if raw: command += ['--allow-escape-sequences','-H','Accept: application/octet-stream']
         payload = None
@@ -47,12 +36,7 @@ class GitHubAPI:
             command += ['--input','-']; payload=json.dumps(data).encode()
         try:
             environment=os.environ.copy()
-            if self.read_only:
-                for key in ('GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN'):
-                    environment.pop(key,None)
-                environment['GH_HOST']='github.com'
-                environment['GH_TOKEN']=self._read_only_token
-            if not self.read_only and method=='GET' and (endpoint.endswith('/immutable-releases') or '/rules/' in endpoint or '/rulesets' in endpoint or '/collaborators' in endpoint):
+            if method=='GET' and (endpoint.endswith('/immutable-releases') or '/rules/' in endpoint or '/rulesets' in endpoint or '/collaborators' in endpoint):
                 token=environment.get('RELEASE_ADMIN_READ_TOKEN')
                 if not token: raise APIError('Owner-provisioned Administration-read credential required')
                 environment['GH_TOKEN']=token
@@ -129,8 +113,6 @@ class GitHubAPI:
         return self.request('PATCH',self.base+f'/releases/{int(release_id)}',{'draft':False})
     def upload(self, release_id, path):
         # Asset upload uses the release ID; never replace an existing asset.
-        if self.read_only:
-            raise APIError('read-only audit client refuses asset upload')
         from urllib.parse import quote
         endpoint='https://uploads.github.com'+self.base+f'/releases/{int(release_id)}/assets?name='+quote(path.name,safe='')
         try:
@@ -176,3 +158,41 @@ class GitHubAPI:
                 if path.name=='release-context.json': continue
                 subprocess.run(['gh','release','verify-asset',tag,str(path),'--repo',self.repository],check=True,capture_output=True)
         except subprocess.CalledProcessError as error: raise APIError('Release attestation verification unavailable or failed') from error
+
+
+class ReadOnlyAuditAPI(GitHubAPI):
+    """GitHub read client that can only use an explicitly supplied audit token."""
+
+    def __init__(self, token):
+        if not isinstance(token,str) or not token:
+            raise APIError('Explicit read-only audit credential required')
+        self.repository='danielbyon/development-process'
+        self.base='/repos/'+self.repository
+        self._audit_token=token
+
+    def authorize_historical_publication(self):
+        raise APIError('read-only audit client cannot authorize publication')
+
+    def request(self, method, endpoint, data=None, raw=False):
+        if method!='GET' or data is not None:
+            raise APIError('read-only audit client refuses write requests')
+        command=['gh','api','--method','GET',endpoint,
+                 '-H','X-GitHub-Api-Version: 2022-11-28']
+        if raw:
+            command+=['--allow-escape-sequences','-H','Accept: application/octet-stream']
+        try:
+            environment=os.environ.copy()
+            for key in ('GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN',
+                        'GITHUB_ENTERPRISE_TOKEN','RELEASE_WORKFLOW_WRITE_TOKEN',
+                        'RELEASE_ADMIN_READ_TOKEN'):
+                environment.pop(key,None)
+            environment['GH_HOST']='github.com'
+            environment['GH_TOKEN']=self._audit_token
+            result=subprocess.run(command,stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE,check=True,env=environment)
+            return result.stdout if raw else json.loads(result.stdout or b'null')
+        except (subprocess.CalledProcessError,ValueError) as error:
+            raise APIError(f'GET {endpoint} failed; reconcile remote state before retrying') from error
+
+    def upload(self, release_id, path):
+        raise APIError('read-only audit client refuses asset upload')

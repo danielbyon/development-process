@@ -15,6 +15,7 @@ def _readiness_payload(ctx, reference,record,owner_id,pull_request):
             'Readiness index provider record identity mismatch')
     ctx.require(record.get('user',{}).get('id')==owner_id,
             'Readiness index must be owner-authenticated')
+    _require_pull_request_comment(ctx,record,pull_request,'Readiness index')
     marker='<!-- release-readiness\n';body=record.get('body','')
     ctx.require(body.count(marker)==1 and '\n-->' in body,
             'Inspectable release-readiness index required')
@@ -28,6 +29,11 @@ def _readiness_payload(ctx, reference,record,owner_id,pull_request):
     ctx.require(isinstance(evidence,dict) and evidence.get('schema_version')==2,
             'Readiness index evidence payload missing')
     return payload,evidence
+
+def _require_pull_request_comment(ctx,record,pull_request,gate):
+    ctx.require(type(pull_request) is int and pull_request>0 and
+            record.get('issue_url')==ctx.BASE+f'/issues/{pull_request}',
+            f'{gate} provider record belongs to a different pull request')
 
 def _readiness_before_merge(ctx, evidence):
     """Compare premerge and normalized payloads after allowed merge fields."""
@@ -183,13 +189,14 @@ def build_owner_receipt(ctx, gate,revision_id):
            'report_sha256':ctx.digest(ctx.canonical(report))}
     return '<!-- release-evidence-v2\n'+json.dumps(event,sort_keys=True)+'\n-->'
 
-def _bind_provider_entry(ctx, entry,api,owner_id,*,owner_comment):
+def _bind_provider_entry(ctx, entry,api,owner_id,pull_request,*,owner_comment):
     ctx.require(isinstance(entry,dict) and isinstance(entry.get('ref'),str),
             'Provider receipt reference required')
     record=api.record(entry['ref'])
     if owner_comment:
         ctx.require(record.get('user',{}).get('id')==owner_id,
                 'Execution receipt must be posted by the repository owner')
+        _require_pull_request_comment(ctx,record,pull_request,'Evidence receipt')
     else:
         ctx.require(record.get('repository',{}).get('full_name')==ctx.REPOSITORY,
                 'CI record belongs to a different repository')
@@ -225,17 +232,21 @@ def prepare_readiness_index(ctx, evidence,pull_request,api,*,normalizes_referenc
                 integrations[0].get('pull_request')==pull_request,
                 'Ordinary readiness index must cover exactly its pull request')
         integration=integrations[0];records=integration.get('records',{})
-        author=_bind_provider_entry(ctx, records.get('author_execution'),api,owner_id,owner_comment=True)
+        author=_bind_provider_entry(ctx, records.get('author_execution'),api,owner_id,
+                                    pull_request,owner_comment=True)
         review_entries=records.get('independent_reviews')
         if review_entries is None and isinstance(records.get('independent_review'),dict):
             review_entries=[records['independent_review']]
         ctx.require(isinstance(review_entries,list) and review_entries,
                 'Independent review receipt references required')
-        reviews=[_bind_provider_entry(ctx, entry,api,owner_id,owner_comment=True)
+        reviews=[_bind_provider_entry(ctx, entry,api,owner_id,pull_request,owner_comment=True)
                  for entry in review_entries]
-        chat=_bind_provider_entry(ctx, records.get('chatgpt_inspection'),api,owner_id,owner_comment=True)
-        owner=_bind_provider_entry(ctx, records.get('owner_authorization'),api,owner_id,owner_comment=True)
-        ci_entry=records.get('ci');ci=_bind_provider_entry(ctx, ci_entry,api,owner_id,owner_comment=False)
+        chat=_bind_provider_entry(ctx, records.get('chatgpt_inspection'),api,owner_id,
+                                  pull_request,owner_comment=True)
+        owner=_bind_provider_entry(ctx, records.get('owner_authorization'),api,owner_id,
+                                   pull_request,owner_comment=True)
+        ci_entry=records.get('ci');ci=_bind_provider_entry(ctx, ci_entry,api,owner_id,
+                                                           pull_request,owner_comment=False)
         ctx.require(ci.get('run_attempt')==ci_entry.get('run_attempt') and
                 ci.get('head_sha')==integration.get('reviewed_revision'),
                 'CI attempt or reviewed head differs from the evidence index')
@@ -265,10 +276,14 @@ def prepare_readiness_index(ctx, evidence,pull_request,api,*,normalizes_referenc
                 evidence.get('baseline_admission',{}).get('correction_pull_request')==pull_request,
                 'Prospective baseline index must identify its corrected merge PR')
         admission=evidence['baseline_admission']
-        _bind_provider_entry(ctx, admission.get('full_review'),api,owner_id,owner_comment=True)
-        _bind_provider_entry(ctx, admission.get('chatgpt_inspection'),api,owner_id,owner_comment=True)
-        ci_entry=admission.get('ci');ci=_bind_provider_entry(ctx, ci_entry,api,owner_id,owner_comment=False)
-        _bind_provider_entry(ctx, admission.get('owner_admission'),api,owner_id,owner_comment=True)
+        _bind_provider_entry(ctx, admission.get('full_review'),api,owner_id,
+                             pull_request,owner_comment=True)
+        _bind_provider_entry(ctx, admission.get('chatgpt_inspection'),api,owner_id,
+                             pull_request,owner_comment=True)
+        ci_entry=admission.get('ci');ci=_bind_provider_entry(ctx, ci_entry,api,owner_id,
+                                                            pull_request,owner_comment=False)
+        _bind_provider_entry(ctx, admission.get('owner_admission'),api,owner_id,
+                             pull_request,owner_comment=True)
         ctx.require(ci.get('head_sha')==admission.get('reviewed_revision') and
                 ci.get('run_attempt')==ci_entry.get('run_attempt'),
                 'Baseline CI identity differs from its correction PR')
@@ -285,8 +300,13 @@ def prepare_readiness_index(ctx, evidence,pull_request,api,*,normalizes_referenc
 
 def _evidence_timestamp(ctx, value):
     ctx.require(isinstance(value,str) and value,'Provider timestamp required')
+    if value.endswith('Z'):
+        ctx.require(value.count('Z')==1,'Invalid provider timestamp')
+        value=value[:-1]+'+00:00'
+    else:
+        ctx.require('Z' not in value,'Invalid provider timestamp')
     try:
-        parsed=datetime.fromisoformat(value.replace('Z','+00:00'))
+        parsed=datetime.fromisoformat(value)
     except ValueError as error:
         raise ctx.ReleaseError('Invalid provider timestamp') from error
     ctx.require(parsed.tzinfo is not None,'Provider timestamp must include a timezone')

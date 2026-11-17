@@ -17,20 +17,34 @@ class AdapterTests(unittest.TestCase):
             self.assertIn('GET',run.call_args.args[0])
     def test_audit_uses_only_the_explicit_token(self):
         import os
-        with patch.dict(os.environ,{'GH_TOKEN':'ambient-token','GITHUB_TOKEN':'other-token'}):
+        with patch.dict(os.environ,{'GH_TOKEN':'ambient-token','GITHUB_TOKEN':'other-token',
+                                   'RELEASE_WORKFLOW_WRITE_TOKEN':'write-token',
+                                   'RELEASE_ADMIN_READ_TOKEN':'admin-token'}):
             with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
                 api=github.GitHubAPI.for_read_only_audit('selected-token')
                 api.request('GET','/user')
         self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],'selected-token')
         self.assertNotIn('GITHUB_TOKEN',run.call_args.kwargs['env'])
+        self.assertNotIn('RELEASE_WORKFLOW_WRITE_TOKEN',run.call_args.kwargs['env'])
+        self.assertNotIn('RELEASE_ADMIN_READ_TOKEN',run.call_args.kwargs['env'])
+        self.assertIsInstance(api,github.ReadOnlyAuditAPI)
+        self.assertFalse(hasattr(api,'read_only'))
+        self.assertFalse(hasattr(api,'historical_publication'))
     def test_audit_transport_refuses_every_write(self):
         api=github.GitHubAPI.for_read_only_audit('selected-token')
         with patch('subprocess.run') as run:
-            with self.assertRaisesRegex(github.APIError,'read-only'):
-                api.request('POST','/repos/danielbyon/development-process/releases',{})
+            writes=(
+                ('request',lambda: api.request('POST','/repos/danielbyon/development-process/releases',{})),
+                ('create_draft',lambda: api.create_draft(
+                    {'release_version':'2026.11.16','source_revision':'a'*40},'draft')),
+                ('create_tag',lambda: api.create_tag('2026.11.16','a'*40)),
+                ('publish',lambda: api.publish(1)),
+                ('authorize',lambda: api.authorize_historical_publication()),
+                ('upload',lambda: api.upload(1,Path('asset'))))
+            for name,write in writes:
+                with self.subTest(write=name), self.assertRaisesRegex(github.APIError,'read-only'):
+                    write()
         run.assert_not_called()
-        with self.assertRaisesRegex(github.APIError,'read-only'):
-            api.upload(1,Path('asset'))
     def test_binary_assets_request_octet_stream(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'PK',b'')) as run:
             self.assertEqual(github.GitHubAPI().asset({'id':2}),b'PK')

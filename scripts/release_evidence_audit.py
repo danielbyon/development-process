@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from release_evidence_records import load_readiness_index, readiness_index_binding
-from release_evidence_qualification import verify_baseline_admission, verify_coverage, verify_evidence, verify_pending_baseline_coverage
+from release_evidence_baseline import verify_baseline_admission
+from release_evidence_qualification import verify_coverage, verify_evidence, verify_pending_baseline_coverage
 from release_evidence_integrations import verify_live_integrations, verify_membership, verify_premerge_integrations
 
 def _audit_error_status(ctx, error):
