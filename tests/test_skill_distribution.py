@@ -1082,7 +1082,7 @@ class ReleasePackageTests(unittest.TestCase):
         legacy_base = self.base / "legacy"
         legacy_base.mkdir()
         root, revision = source_checkout(legacy_base)
-        context = self.context | {"source_revision": revision}
+        context = self.context | {"source_revision": revision, "builder_revision": revision}
         self.assertEqual(len(distribution_module.build_release_packages(root, self.base / "legacy-release", context)), 8)
 
     def test_rejects_self_consistent_forged_sidecar_and_archive(self):
