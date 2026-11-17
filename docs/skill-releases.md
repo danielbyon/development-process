@@ -30,6 +30,79 @@ Verify all uncovered integrations between an applicable admitted anchor and sele
 
 A verified earlier immutable release can anchor applicable ancestry. Its CalVer alone cannot prove ancestry. Source before the bootstrap baseline needs an applicable earlier anchor or complete evidence from the evidenced repository bootstrap. Legacy records may be normalized without cosmetic PR edits; retain their original provenance and do not invent retrospective structured records. Missing, contradictory or stale mandatory evidence blocks with the affected integration and gate identified.
 
+### 3.1 Ordinary evidence and chronology
+
+New ordinary records use schema version 2 and identify an `ordinary` evidence origin. Each integration names its exact repository PR, base revision, reviewed head, tested revision and actual merged revision. The provider PR record supplies the PR number, repository identities, target branch, final head, `merged_at` and merge commit. A matching head SHA on a different PR does not qualify.
+
+Each review, inspection and owner decision is an original `release-evidence-v2` provider comment. The controller checks the GitHub comment ID, owner account, complete comment record digest, parsed report digest, execution ID derived from the captured command and output, and exact reviewed range. The record's provider `created_at` and `updated_at` timestamps, together with the provider merge time, establish order. Every receipt and the selected successful CI job must be created, unchanged and completed before merge. Missing, malformed, timezone-free or equal-at-source-resolution timestamps fail closed when order cannot be established.
+
+`origin_status: owner_attested` means the authenticated repository owner preserved the supplied execution transcript. The execution ID and output hashes bind the report to those bytes; they do not cryptographically prove that Codex or Cubic produced them. Use the actual originating system and retain its output. Do not treat an arbitrary execution ID, a later summary, or the GitHub account alone as an independent signature.
+
+Review evidence preserves its history. A chain starts with a full-diff review and may continue through contiguous correction-delta reviews. Each step names the revisions it actually examined, retains its findings and records explicit dispositions. P0, P1 and P2 findings must be fixed. A full final-candidate review is also supported. A pre-commit review may cover uncommitted bytes only when its recorded digest equals the final candidate diff. Reviewer records must be separate from the author execution; giving two executions different labels does not make them independent.
+
+ChatGPT inspection names the changed source and test files and binds each name to the Git blob at the reviewed revision. CI records bind one successful attempt to the exact PR number, head and base; the required integration job and suite steps must finish successfully before merge. A retry that finishes after merge cannot qualify the already merged integration.
+
+For an ordinary PR, post-merge normalization may add only the actual merge SHA and its contiguous integrated-commit membership. It must cite the exact original pre-merge index record and digest. The verifier confirms that the original comment has not changed since before merge and that all other indexed evidence is identical. The later normalization timestamp provides no proof about when the original review, inspection, authorization or CI happened. Schema version 1 remains available for verification of already frozen signed releases; it cannot admit new evidence.
+
+### 3.2 Prospective first-release baseline
+
+A prospective baseline is a separate schema v2 origin, `prospective_baseline`. It begins at the exact corrected PR merge commit. The first release's source and builder must both equal that commit. Derive the policy revision from first-parent policy-content history and verify its bytes separately; source, policy and builder remain distinct identities.
+
+After the correction merges, qualify that exact tree with a non-authoring full-baseline review, direct ChatGPT inspection of source and tests, and successful correction-PR CI bound to its exact head, base, tested tree and required jobs. The review and inspection receipts must name the actual merged baseline and tree. The owner then records `admit-baseline` after those gates and before the original release dispatch. The readiness index is posted after admission and before that dispatch. A rerun after late admission cannot repair the original run.
+
+Admission requires zero ordinary integrations after the baseline. Before dispatch, the read-only audit also checks that protected `main` still points exactly to the baseline. This origin does not qualify earlier PRs, ancestors, unrelated branches, or commits that happen to have an equivalent tree. Every later integration and the trusted builder must satisfy ordinary evidence and complete Git coverage from the admitted root. The implementation does not itself admit the production baseline or dispatch a release.
+
+### 3.3 Capturing evidence before merge
+
+Capture the original output before posting a receipt. Keep the range and report JSON used for each command with the task evidence. `capture-execution` runs a command or imports a direct ChatGPT transcript, derives the execution ID from captured bytes, and writes a comment body. The report's `summary` must appear verbatim in that output. ChatGPT reports must list every inspected source and test path; the command checks those files against the candidate's Git blobs.
+
+For example, an ordinary review range file contains the final PR base and head:
+
+```json
+{"base_revision":"<full base SHA>","head_revision":"<full reviewed head SHA>"}
+```
+
+The independent review report contains the exact coverage step, findings and dispositions. Run the actual local Cubic or separate non-authoring review command and capture its output:
+
+```sh
+python3 scripts/skill_release.py capture-execution \
+  --gate independent_review --system local_cubic \
+  --reviewed-range review-range.json --report review-report.json \
+  --output review-receipt.txt -- cubic review
+```
+
+Use `--system separate_codex` when that is the actual reviewer. For a correction-delta review, retain the previous reviewed head as the next step's base and preserve all prior findings and dispositions. Do not relabel the author execution as the reviewer.
+
+Capture ChatGPT's direct source/test inspection transcript and report separately:
+
+```sh
+python3 scripts/skill_release.py capture-execution \
+  --gate chatgpt_inspection --system chatgpt \
+  --reviewed-range inspection-range.json --report inspection-report.json \
+  --transcript-file chatgpt-inspection.txt --output chatgpt-receipt.txt
+```
+
+Capture the actual author command the same way with `--gate author_execution` and the system that produced it. Post each generated receipt as an unchanged comment on the exact PR. The owner authorization receipt is created with `owner-receipt --gate owner_authorization --revision <full head SHA>` only after the owner has decided to authorize that merge; the command formats the decision but does not make it.
+
+After all pre-merge records exist, prepare and post the original index using a separately selected read-only credential:
+
+```sh
+python3 scripts/skill_release.py prepare-index \
+  --pr <PR number> --evidence readiness-evidence.json \
+  --token-env <READ_ONLY_TOKEN_VARIABLE> --output readiness-index.txt
+```
+
+Run the audit before merge with the same explicit read-only credential:
+
+```sh
+python3 scripts/skill_release.py audit \
+  --root . --pr <PR number> --token-env <READ_ONLY_TOKEN_VARIABLE>
+```
+
+The audit verifies that the selected credential belongs to `danielbyon` and uses a transport that refuses writes. It reports `PASS`, `FAIL`, `MISSING_EVIDENCE` or `NOT_RUN` per gate. An open ordinary PR reports merge and integrated-revision checks as `NOT_RUN`. A merged prospective baseline can pass qualification and exact-main coverage while release dispatch, runtime and publication remain `NOT_RUN`. Read the gate results; exit code zero does not mean an unrun dispatch happened.
+
+After an authorized ordinary merge, prepare a normalization that names the original readiness comment through `--normalizes-reference <repository API comment path>`. The controller fetches the actual PR merge record and can add only its merge SHA and commit membership. Preserve and link the original comment; never edit it to add retrospective claims. A prospective baseline index is created after qualification and owner admission, so it has no pre-merge normalization.
+
 ## 4. Qualification and assets
 
 The controller operations are `preflight`, `qualify`, `verify-bundle`, `publish`, `verify-release` and `resolve-task`. Use the merged controller's help for supported flags. Dispatch the workflow through GitHub Actions with the full selected source SHA; never run publication merely to test a candidate. Optional supersession context identifies a prior release and correction. Version allocation is automatic.

@@ -15,6 +15,22 @@ class AdapterTests(unittest.TestCase):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
             github.GitHubAPI().request('GET','/user')
             self.assertIn('GET',run.call_args.args[0])
+    def test_audit_uses_only_the_explicit_token(self):
+        import os
+        with patch.dict(os.environ,{'GH_TOKEN':'ambient-token','GITHUB_TOKEN':'other-token'}):
+            with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
+                api=github.GitHubAPI.for_read_only_audit('selected-token')
+                api.request('GET','/user')
+        self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],'selected-token')
+        self.assertNotIn('GITHUB_TOKEN',run.call_args.kwargs['env'])
+    def test_audit_transport_refuses_every_write(self):
+        api=github.GitHubAPI.for_read_only_audit('selected-token')
+        with patch('subprocess.run') as run:
+            with self.assertRaisesRegex(github.APIError,'read-only'):
+                api.request('POST','/repos/danielbyon/development-process/releases',{})
+        run.assert_not_called()
+        with self.assertRaisesRegex(github.APIError,'read-only'):
+            api.upload(1,Path('asset'))
     def test_binary_assets_request_octet_stream(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'PK',b'')) as run:
             self.assertEqual(github.GitHubAPI().asset({'id':2}),b'PK')

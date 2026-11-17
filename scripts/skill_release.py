@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
 from github_releases import GitHubAPI, APIError
 
@@ -78,6 +78,17 @@ def load_evidence_export(reference,fetch):
     evidence['normalization_export']={'ref':reference,'sha256':digest(canonical(record))}
     return evidence
 
+
+
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00','Z')
+
+
+
+
+
 def select_anchor(root,api,source,builder):
     """Choose nearest verified common-ancestor release by history, not CalVer."""
     applicable=[]
@@ -124,14 +135,20 @@ def execution_provenance(entry,fetch,owner_id,role,integration,normalized=False)
             'Actual execution transcript required')
     return provenance
 
-def verify_evidence(evidence,fetch):
+
+
+
+
+
+
+def _verify_frozen_release_evidence_v1(evidence,fetch):
     """Resolve record references and require exact content and candidate binding.
 
     Exported reports are accepted only through an authenticated repository record
     containing the report, execution identity and reviewed revision. Booleans and
     summaries without those records cannot satisfy a gate.
     """
-    require(isinstance(evidence,dict) and evidence.get('schema_version')==1,'Evidence schema required')
+    require(isinstance(evidence,dict) and evidence.get('schema_version')==1,'Frozen schema v1 evidence required')
     repository=fetch(BASE)
     owner_id=repository.get('owner',{}).get('id')
     require(repository.get('full_name')==REPOSITORY and owner_id==evidence.get('owner_id'),'Evidence owner differs from repository owner')
@@ -203,30 +220,20 @@ def verify_evidence(evidence,fetch):
     require(snapshots or evidence.get('anchor_release'),'No admitted evidence')
     return snapshots
 
-def verify_coverage(root,evidence,target):
-    baseline=revision(root,evidence.get('baseline_revision'))
-    require(baseline==BOOTSTRAP_BASELINE or evidence.get('anchor_release') or evidence.get('baseline_admission'),'Unadmitted bootstrap baseline')
-    revision(root,target)
-    git(root,'merge-base','--is-ancestor',baseline,target)
-    required=set(git(root,'rev-list','--first-parent',baseline+'..'+target).decode().split())
-    covered=set()
-    for integration in evidence.get('integrations',[]):
-        result=revision(root,integration.get('integrated_revision'))
-        reviewed=revision(root,integration.get('reviewed_revision'))
-        tested=revision(root,integration.get('tested_revision'))
-        require(git(root,'rev-parse',result+'^{tree}')==git(root,'rev-parse',tested+'^{tree}'),'Integration tree differs from tested tree')
-        # The tested integration must contain the reviewed candidate as a parent.
-        parents=git(root,'show','-s','--format=%P',tested).decode().split()
-        require(reviewed in parents or git(root,'rev-parse',reviewed+'^{tree}')==git(root,'rev-parse',tested+'^{tree}'),'Reviewed candidate relationship unverified')
-        covered.add(result)
-        members=integration.get('integrated_commits',[result])
-        require(isinstance(members,list) and members and len(set(members))==len(members)
-                and members[-1]==result,'Invalid integrated commit membership')
-        expected=git(root,'rev-list','--first-parent','--max-count='+str(len(members)),result).decode().split()[::-1]
-        require(members==expected,'Integration membership is not a contiguous first-parent range')
-        covered.update(members)
-    require(required<=covered,'Uncovered main integrations')
-    require(evidence.get('anchor_release') or any(x.get('integrated_revision')==baseline for x in evidence.get('integrations',[])),'Bootstrap baseline admission missing')
+def verify_frozen_release_evidence(evidence,fetch):
+    """Verify schema-v1 evidence embedded in an already-signed release only."""
+    require(isinstance(evidence,dict) and evidence.get('schema_version')==1,
+            'Frozen schema v1 evidence required')
+    return _verify_frozen_release_evidence_v1(evidence,fetch)
+
+
+
+
+
+
+
+
+
 
 def check_settings(api,context):
     settings=api.settings(); repo=settings['repository']
@@ -251,14 +258,23 @@ def check_settings(api,context):
     require(run.get('path','').split('@')[0]=='.github/workflows/skill-release.yml','Unexpected dispatch workflow')
     return settings
 
-def admit_anchor(root,api,evidence):
-    """Reuse a verified release or inspect an explicit owner baseline admission."""
+
+
+def admit_anchor(root,api,evidence,*,source=None,builder=None,dispatch_run_id=None):
+    """Verify a prospective baseline or reuse an immutable release anchor."""
+    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
+        require(source is not None and builder is not None and dispatch_run_id is not None,
+                'Prospective baseline requires exact source, builder, and dispatch identities')
+        return verify_baseline_admission(root,api,evidence,source,builder,dispatch_run_id)
     baseline=evidence['baseline_revision']
     if evidence.get('anchor_release'):
         anchor=verify_release(root,api,evidence['anchor_release'])
         require(anchor['source_revision']==baseline,'Trusted release anchor mismatch')
         return
-    if baseline==BOOTSTRAP_BASELINE: return
+    require(evidence.get('schema_version')==1,
+            'New evidence cannot use the legacy bootstrap baseline')
+    if baseline==BOOTSTRAP_BASELINE:
+        return
     entry=evidence.get('baseline_admission',{})
     record=api.record(entry.get('ref'))
     require(digest(canonical(record))==entry.get('sha256'),'Baseline admission evidence mismatch')
@@ -274,148 +290,23 @@ def admit_anchor(root,api,evidence):
     else:
         require(marker in body,'Inspectable baseline admission required')
         report=json.loads(body.split(marker,1)[1].split('\n-->',1)[0])
-    require(report.get('revision')==baseline and report.get('action')=='admit-baseline' and report.get('report') and report.get('execution_id'),'Unverified baseline admission')
+    require(report.get('revision')==baseline and report.get('action')=='admit-baseline' and
+            report.get('report') and report.get('execution_id'),
+            'Unverified baseline admission')
 
-def merged_pr_members(api,commit):
-    return [pr for pr in api.pages(BASE+'/commits/'+commit+'/pulls')
-            if pr.get('merged_at') and pr.get('base',{}).get('ref')=='main']
 
-def verify_membership(api,integration):
-    """Bind rebased commits to their actual PR instead of a broad CI interval."""
-    number=integration['pull_request']; result=integration['integrated_revision']
-    members=integration.get('integrated_commits',[result])
-    original=api.pages(BASE+f'/pulls/{number}/commits')
-    require(isinstance(original,list) and original,'PR commit membership unavailable')
-    require(len(members)==1 or len(members)==len(original),'Rebase PR commit count mismatch')
-    for commit in members:
-        matches=merged_pr_members(api,commit)
-        require(len(matches)==1 and matches[0].get('number')==number and
-                matches[0].get('merge_commit_sha')==result,'Unverified or unrelated integrated commit')
 
-def verify_ci_suites(logs,schema,steps,workflow):
-    """Bind each suite result to its committed command and successful CI step."""
-    require(schema in (1,2),'Unsupported CI source schema')
-    contract=yaml.safe_load(workflow)
-    jobs=[j for j in contract.get('jobs',{}).values()
-          if j.get('name')=='Validate committed PR integration diff']
-    require(len(jobs)==1 and not any(k in jobs[0] for k in ('if','continue-on-error','strategy')),
-            'Conditional or ambiguous mandatory CI job')
-    expected=list(SUITES if schema==2 else SUITES[:4])
-    workflow_steps=jobs[0].get('steps',[])
-    if schema==1 and any('test_issue5_workflow.py' in x.get('run','') for x in workflow_steps):
-        expected[0]='test_issue5_workflow.py'
-    text=re.sub(r'^\d{4}-\d\d-\d\dT\S+ ', '', logs, flags=re.M)
-    groups=list(re.finditer(r'^##\[group\]Run (.+)\n',text,re.M))
-    for suite in expected:
-        command='python3 -m unittest discover -s tests -p '+suite+' -v'
-        matches=[x for x in workflow_steps if x.get('run','').strip()==command]
-        require(len(matches)==1,'Missing or altered mandatory suite command: '+suite)
-        step=matches[0]
-        require(not any(k in step for k in ('if','continue-on-error','working-directory','env')),
-                'Conditional or altered suite execution: '+suite)
-        actual=[x for x in steps if x.get('name')==step.get('name')]
-        require(len(actual)==1 and actual[0].get('conclusion')=='success',
-                'Mandatory suite step not successful: '+suite)
-        executed=[(i,g) for i,g in enumerate(groups) if shlex.split(g.group(1))==shlex.split(command)]
-        require(len(executed)==1,'Missing or repeated suite command execution: '+suite)
-        i,group=executed[0]
-        section=text[group.end():groups[i+1].start() if i+1<len(groups) else len(text)]
-        require('##[endgroup]\n' in section,'Suite command boundary absent')
-        output=section.split('##[endgroup]\n',1)[1]
-        summaries=re.findall(r'^Ran ([0-9]+) tests? in [^\n]+$',output,re.M)
-        result_output=re.split(r'^-{5,}$|^Ran [0-9]+ tests?',output,maxsplit=1,flags=re.M)[0]
-        labels=list(re.finditer(r'^test\S+ \(.+\)',result_output,re.M))
-        statuses=[]
-        for index,label in enumerate(labels):
-            result=result_output[label.end():labels[index+1].start() if index+1<len(labels) else len(result_output)]
-            statuses.append(bool(re.search(r'(?:^|\n|\.\.\. )ok\s*$',result)))
-        require(len(summaries)==1 and int(summaries[0])>0 and
-                len(labels)==int(summaries[0]) and all(statuses) and
-                len(re.findall(r'^OK$',output,re.M))==1 and
-                not re.search(r'^FAILED(?: |$)|^OK \(',output,re.M),
-                'Mandatory suite execution failed, skipped or absent: '+suite)
 
-def verify_live_integrations(api,evidence,root=None):
-    """Check merged PR identity and actual required CI job execution."""
-    for integration in evidence.get('integrations',[]):
-        number=integration.get('pull_request')
-        require(type(number) is int and number>0,'Merged PR reference required')
-        pr=api.record(BASE+f'/pulls/{number}')
-        require(pr.get('merged') is True and pr.get('base',{}).get('ref')=='main','Reviewed PR not merged to main')
-        require(pr.get('head',{}).get('sha')==integration['reviewed_revision'],'Reviewed PR head mismatch')
-        require(pr.get('merge_commit_sha')==integration['integrated_revision'],'Integrated PR revision mismatch')
-        entry=integration['records']['ci']
-        ci=api.record(entry['ref'])
-        require(ci.get('repository',{}).get('full_name')==REPOSITORY,'CI repository mismatch')
-        require(ci.get('event')=='pull_request','PR integration CI required')
-        jobs=api.ci_jobs(ci['id'],entry['run_attempt'])
-        required=[j for j in jobs if j.get('name')=='Validate committed PR integration diff']
-        require(len(required)==1 and required[0].get('conclusion')=='success','Required CI job unavailable')
-        steps=required[0].get('steps',[])
-        require(steps and all(x.get('conclusion')=='success' for x in steps),'CI contains failed or skipped steps')
-        logs=api.job_log(required[0]['id'])
-        for label,key in (('PR HEAD','reviewed_revision'),('Tested integration revision','tested_revision'),('Tested base revision','base_revision')):
-            value=integration.get(key)
-            require(isinstance(value,str) and SHA.fullmatch(value),f'Missing {key}')
-            require(label+': '+value in logs,'CI synthetic merge identity not established')
-        require(root is not None,'Committed CI applicability source required')
-        manifest=json.loads(git(root,'show',integration['integrated_revision']+':skills/distribution.json'))
-        workflow=git(root,'show',integration['integrated_revision']+':.github/workflows/ci.yml').decode()
-        verify_ci_suites(logs,manifest.get('schema_version'),steps,workflow)
-        verify_membership(api,integration)
 
-def discover_evidence(root,api,source,builder):
-    """Read readiness indexes from existing merged PR comments.
 
-    Indexes only locate records. Every referenced record and the actual PR/CI
-    relationships are verified independently before admission.
-    """
-    anchor=select_anchor(root,api,source,builder)
-    baseline,tag=anchor if anchor else (BOOTSTRAP_BASELINE,None)
-    try:
-        git(root,'merge-base','--is-ancestor',baseline,source)
-        git(root,'merge-base','--is-ancestor',baseline,builder)
-    except ReleaseError as error:
-        raise ReleaseError('Historical source needs an applicable trusted release or evidenced earlier baseline export') from error
-    revisions=git(root,'rev-list','--first-parent',baseline+'..'+builder).decode().split()
-    if not tag: revisions.append(baseline)
-    integrations=[]; discovered=set()
-    for commit in revisions:
-        if commit in discovered: continue
-        prs=api.pages(BASE+f'/commits/{commit}/pulls')
-        matches=[pr for pr in prs if pr.get('merge_commit_sha')==commit and pr.get('base',{}).get('ref')=='main']
-        require(len(matches)==1,f'Unmapped integration {commit}')
-        pr=matches[0]
-        indexes=[]
-        for comment in api.pages(BASE+f'/issues/{pr["number"]}/comments'):
-            body=comment.get('body',''); marker='<!-- release-readiness\n'
-            if marker not in body: continue
-            try: index=json.loads(body.split(marker,1)[1].split('\n-->',1)[0])
-            except (ValueError,IndexError) as error: raise ReleaseError('Malformed readiness index') from error
-            if index.get('integrated_revision')==commit: indexes.append(index)
-        require(len(indexes)==1,f'Missing or contradictory readiness index for {commit}')
-        index=indexes[0]; index['pull_request']=pr['number']
-        original=api.pages(BASE+f'/pulls/{pr["number"]}/commits')
-        require(isinstance(original,list) and original,'PR commit membership unavailable')
-        members=[]
-        for candidate in git(root,'rev-list','--first-parent','--max-count='+str(len(original)),commit).decode().split():
-            associated=merged_pr_members(api,candidate)
-            if len(associated)!=1 or associated[0].get('number')!=pr['number'] or associated[0].get('merge_commit_sha')!=commit: break
-            members.append(candidate)
-        index['integrated_commits']=members[::-1]
-        verify_membership(api,index)
-        require(members and not (set(members)&discovered),'Overlapping or unavailable PR membership')
-        discovered.update(members);integrations.append(index)
-    repo=api.request('GET',BASE)
-    result={'schema_version':1,'baseline_revision':baseline,'owner_id':repo['owner']['id'],'integrations':integrations}
-    if tag: result['anchor_release']=tag
-    return result
+
+
 
 class EvidenceAuthority:
     """Freeze authenticated API reads for later signed, offline verification."""
     def __init__(self,api=None,data=None):
         self.api=api
-        self.data=data if data is not None else {'records':{},'jobs':{},'logs':{},'pages':{}}
+        self.data=data if data is not None else {'records':{},'jobs':{},'logs':{},'pages':{},'runs':{}}
     def __getattr__(self,name):
         if self.api is None: raise ReleaseError('Frozen evidence lacks '+name)
         return getattr(self.api,name)
@@ -427,10 +318,11 @@ class EvidenceAuthority:
     def record(self,ref): return self._read('records',ref,'record',ref)
     def ci_jobs(self,run,attempt): return self._read('jobs',str(run)+'/'+str(attempt),'ci_jobs',run,attempt)
     def job_log(self,job): return self._read('logs',str(job),'job_log',job)
+    def run(self,run_id): return self._read('runs',str(run_id),'run',run_id)
 
 def preflight(root,api,source,evidence,run_id,run_attempt):
     source=revision(root,source); builder=revision(root,git(root,'rev-parse','HEAD').decode().strip())
-    repo=api.request('GET',BASE); run=api.run(run_id)
+    authority=EvidenceAuthority(api); repo=authority.record(BASE); run=authority.run(run_id)
     context={'repository':REPOSITORY,'source_revision':source,'builder_revision':builder,'owner_id':repo['owner']['id'],
              'run_id':int(run_id),'run_attempt':int(run_attempt),'created_at':run['created_at'],'transform_version':1}
     check_settings(api,context)
@@ -440,11 +332,17 @@ def preflight(root,api,source,evidence,run_id,run_attempt):
     # Preflight cannot provision credentials or infer owner authorization.
     if workflows_differ:
         require(os.environ.get('RELEASE_WORKFLOW_WRITE_AUTHORIZED')=='true','Separate owner authorization for Workflows write required')
-    authority=EvidenceAuthority(api)
-    snapshots=verify_evidence(evidence,authority.record)
-    admit_anchor(root,authority,evidence)
-    verify_live_integrations(authority,evidence,root)
-    verify_coverage(root,evidence,source); verify_coverage(root,evidence,builder)
+    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
+        snapshots=admit_anchor(root,authority,evidence,source=source,builder=builder,
+                               dispatch_run_id=run_id)
+        verify_coverage(root,evidence,source,baseline_admission=snapshots)
+        verify_coverage(root,evidence,builder,baseline_admission=snapshots)
+    else:
+        snapshots=verify_evidence(evidence,authority.record,root)
+        admit_anchor(root,authority,evidence)
+        verify_live_integrations(authority,evidence,root)
+        verify_coverage(root,evidence,source,admitted=True)
+        verify_coverage(root,evidence,builder,admitted=True)
     policy=git(root,'log','--first-parent','-1','--format=%H',source,'--','docs/PROCESS.md').decode().strip()
     require(git(root,'show',policy+':docs/PROCESS.md')==git(root,'show',source+':docs/PROCESS.md'),'Policy derivation mismatch')
     original=api.original_context(run_id)
@@ -552,10 +450,21 @@ def verify_remote(api,release,context,directory,published):
 def publish(root,api,context,directory):
     import skill_distribution as package
     check_settings(api,context)
-    require(verify_evidence(context['evidence'],api.record)==context['evidence_snapshots'],'Evidence drift')
-    admit_anchor(root,api,context['evidence'])
-    verify_live_integrations(api,context['evidence'],root)
-    verify_coverage(root,context['evidence'],context['source_revision']); verify_coverage(root,context['evidence'],context['builder_revision'])
+    evidence=context['evidence']
+    baseline_proof=None
+    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
+        snapshots=verify_baseline_admission(root,api,evidence,context['source_revision'],
+                                            context['builder_revision'],context['run_id'])
+        baseline_proof=snapshots
+    else:
+        snapshots=verify_evidence(evidence,api.record,root)
+        admit_anchor(root,api,evidence)
+        verify_live_integrations(api,evidence,root)
+    require(snapshots==context['evidence_snapshots'],'Evidence drift')
+    verify_coverage(root,evidence,context['source_revision'],admitted=True,
+                    baseline_admission=baseline_proof)
+    verify_coverage(root,evidence,context['builder_revision'],admitted=True,
+                    baseline_admission=baseline_proof)
     qualification=context.get('qualification',{})
     require(qualification.get('run_attempt')==context['run_attempt'],'Fresh qualification required')
     require({x['suite'] for x in qualification.get('suites',[])}==set(SUITES) and all(x['tests']>0 for x in qualification['suites']),'Mandatory suites missing')
@@ -587,7 +496,11 @@ def publish(root,api,context,directory):
     if not tags: api.create_tag(context['release_version'],context['source_revision'])
     release=api.release(release['id']); verify_remote(api,release,context,directory,False)
     check_settings(api,context)
-    verify_evidence(context['evidence'],api.record)
+    if evidence.get('origin',{}).get('kind')=='prospective_baseline':
+        verify_baseline_admission(root,api,evidence,context['source_revision'],
+                                  context['builder_revision'],context['run_id'])
+    else:
+        verify_evidence(evidence,api.record,root)
     api.publish(release['id'])
     return verify_remote(api,api.release(release['id']),context,directory,True)
 
@@ -625,15 +538,35 @@ def _verify_release(root,api,tag):
         repository=api.record(BASE)
         require(repository.get('owner',{}).get('id')==context.get('owner_id'),
                 'Frozen publisher owner mismatch')
-        require(verify_evidence(context.get('evidence'),frozen.record)==context['evidence_snapshots'],
-                'Frozen qualification authority unverified')
-        if context['evidence'].get('anchor_release'):
-            admit_anchor(root,api,context['evidence'])
+        evidence=context.get('evidence')
+        if evidence.get('schema_version')==1:
+            snapshots=verify_frozen_release_evidence(evidence,frozen.record)
+            require(snapshots==context['evidence_snapshots'],
+                    'Frozen schema v1 qualification authority unverified')
+            if evidence.get('anchor_release'):
+                admit_anchor(root,api,evidence)
+            else:
+                admit_anchor(root,frozen,evidence)
+            verify_live_integrations(frozen,evidence,root)
+            verify_coverage(root,evidence,context['source_revision'],admitted=True)
+            verify_coverage(root,evidence,context['builder_revision'],admitted=True)
+        elif evidence.get('origin',{}).get('kind')=='prospective_baseline':
+            snapshots=verify_baseline_admission(root,frozen,evidence,context['source_revision'],
+                                                context['builder_revision'],context['run_id'])
+            require(snapshots==context['evidence_snapshots'],
+                    'Frozen prospective baseline authority unverified')
+            verify_coverage(root,evidence,context['source_revision'],
+                            baseline_admission=snapshots)
+            verify_coverage(root,evidence,context['builder_revision'],
+                            baseline_admission=snapshots)
         else:
-            admit_anchor(root,frozen,context['evidence'])
-        verify_live_integrations(frozen,context['evidence'],root)
-        verify_coverage(root,context['evidence'],context['source_revision'])
-        verify_coverage(root,context['evidence'],context['builder_revision'])
+            snapshots=verify_evidence(evidence,frozen.record,root)
+            require(snapshots==context['evidence_snapshots'],
+                    'Frozen qualification authority unverified')
+            admit_anchor(root,frozen,evidence)
+            verify_live_integrations(frozen,evidence,root)
+            verify_coverage(root,evidence,context['source_revision'],admitted=True)
+            verify_coverage(root,evidence,context['builder_revision'],admitted=True)
         suites=context.get('qualification',{}).get('suites',[])
         require({s.get('suite') for s in suites}==set(SUITES) and all(s.get('tests',0)>0 for s in suites),
                 'Release mandatory qualification absent')
@@ -727,8 +660,78 @@ def main(argv=None):
         if command=='verify-release': p.add_argument('--tag',required=True)
         if command=='resolve-task':
             p.add_argument('--existing-pin'); p.add_argument('--skill'); p.add_argument('--installed-path',type=Path); p.add_argument('--compatibility',type=Path)
-    args=parser.parse_args(argv); api=GitHubAPI()
+    audit_parser=sub.add_parser('audit')
+    audit_parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1])
+    audit_parser.add_argument('--pr',type=int,required=True)
+    audit_parser.add_argument('--token-env',required=True,
+                              help='Name of the environment variable containing the read-only GitHub token')
+    capture_parser=sub.add_parser('capture-execution')
+    capture_parser.add_argument('--root',type=Path,default=Path(__file__).resolve().parents[1])
+    capture_parser.add_argument('--gate',choices=('author_execution','independent_review',
+        'chatgpt_inspection','baseline_review'),required=True)
+    capture_parser.add_argument('--system',choices=('local_cubic','separate_codex','chatgpt'),required=True)
+    capture_parser.add_argument('--reviewed-range',type=Path,required=True)
+    capture_parser.add_argument('--report',type=Path,required=True)
+    capture_parser.add_argument('--transcript-file',type=Path)
+    capture_parser.add_argument('--output',type=Path,required=True)
+    capture_parser.add_argument('execution_command',nargs=argparse.REMAINDER)
+    owner_parser=sub.add_parser('owner-receipt')
+    owner_parser.add_argument('--gate',choices=('owner_authorization','baseline_admission'),required=True)
+    owner_parser.add_argument('--revision',required=True)
+    owner_parser.add_argument('--output',type=Path,required=True)
+    index_parser=sub.add_parser('prepare-index')
+    index_parser.add_argument('--pr',type=int,required=True)
+    index_parser.add_argument('--evidence',type=Path,required=True)
+    index_parser.add_argument('--token-env',required=True)
+    index_parser.add_argument('--normalizes-reference')
+    index_parser.add_argument('--output',type=Path,required=True)
+    args=parser.parse_args(argv)
     try:
+        if args.command=='audit':
+            require(re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}',args.token_env) is not None,
+                    'Audit credential must be selected by environment-variable name')
+            token=os.environ.get(args.token_env)
+            require(bool(token),'Selected read-only audit credential is unavailable')
+            api=GitHubAPI.for_read_only_audit(token)
+            result=audit_pull_request(args.root,api,args.pr)
+            print(json.dumps(result,sort_keys=True))
+            statuses=result['gates'].values()
+            if 'FAIL' in statuses: return 1
+            if 'MISSING_EVIDENCE' in statuses: return 2
+            return 0
+        if args.command=='capture-execution':
+            require(not (args.transcript_file and args.execution_command),
+                    'Choose a command or a transcript file')
+            command=args.execution_command
+            if command[:1]==['--']: command=command[1:]
+            transcript=args.transcript_file.read_text() if args.transcript_file else None
+            require(bool(transcript) or bool(command),'Captured command or ChatGPT transcript required')
+            result=capture_execution(args.root,args.gate,args.system,command,
+                json.loads(args.report.read_text()),json.loads(args.reviewed_range.read_text()),transcript)
+            require(len(result['body'].encode())<=60000,
+                    'Captured receipt exceeds the supported GitHub comment size')
+            args.output.write_text(result['body']+'\n')
+            print(json.dumps({'output':str(args.output),'execution_id':
+                result['event']['execution']['execution_id'],'exit_code':result['exit_code']},sort_keys=True))
+            return 0 if result['exit_code']==0 else 1
+        if args.command=='owner-receipt':
+            args.output.write_text(build_owner_receipt(args.gate,args.revision)+'\n')
+            print(json.dumps({'output':str(args.output),'gate':args.gate},sort_keys=True))
+            return 0
+        if args.command=='prepare-index':
+            require(re.fullmatch(r'[A-Z][A-Z0-9_]{0,63}',args.token_env) is not None,
+                    'Read-only credential must be selected by environment-variable name')
+            token=os.environ.get(args.token_env)
+            require(bool(token),'Selected read-only credential is unavailable')
+            api=GitHubAPI.for_read_only_audit(token)
+            evidence=json.loads(args.evidence.read_text())
+            body=prepare_readiness_index(evidence,args.pr,api,
+                                         normalizes_reference=args.normalizes_reference)
+            args.output.write_text(body+'\n')
+            print(json.dumps({'output':str(args.output),'pull_request':args.pr,
+                              'origin':evidence.get('origin',{}).get('kind')},sort_keys=True))
+            return 0
+        api=GitHubAPI()
         if args.command=='preflight':
             require(git(args.root,'rev-parse','HEAD').decode().strip()==args.builder_revision,'Dispatch builder checkout mismatch')
             require(bool(args.supersedes)==bool(args.correction_reason),'Supersession requires correction reason')
@@ -760,4 +763,31 @@ def main(argv=None):
     except (ReleaseError,APIError,OSError,ValueError,KeyError,TypeError) as error:
         print(f'ERROR: {error}',file=sys.stderr); return 1
 
+
+
+# Keep release orchestration independent of the evidence implementation.
+import release_evidence as _release_evidence
+
+def _evidence_context():
+    return _release_evidence.EvidenceContext(
+        BASE=BASE, REPOSITORY=REPOSITORY, SHA=SHA,
+        BOOTSTRAP_BASELINE=BOOTSTRAP_BASELINE, SUITES=SUITES,
+        ReleaseError=ReleaseError, APIError=APIError,
+        require=require, canonical=canonical, digest=digest, git=git,
+        revision=revision, select_anchor=select_anchor, utc_now=_utc_now)
+
+_EVIDENCE=_release_evidence.EvidenceService(_evidence_context)
+audit_pull_request=_EVIDENCE.audit_pull_request
+build_owner_receipt=_EVIDENCE.build_owner_receipt
+capture_execution=_EVIDENCE.capture_execution
+discover_evidence=_EVIDENCE.discover_evidence
+prepare_readiness_index=_EVIDENCE.prepare_readiness_index
+verify_baseline_admission=_EVIDENCE.verify_baseline_admission
+verify_coverage=_EVIDENCE.verify_coverage
+verify_evidence=_EVIDENCE.verify_evidence
+verify_live_integrations=_EVIDENCE.verify_live_integrations
+verify_pending_baseline_coverage=_EVIDENCE.verify_pending_baseline_coverage
+verify_premerge_integrations=_EVIDENCE.verify_premerge_integrations
+BaselineQualification=_release_evidence.BaselineQualification
+VerifiedBaselineAdmission=_release_evidence.VerifiedBaselineAdmission
 if __name__=='__main__': sys.exit(main())

@@ -4,6 +4,841 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
+import release_evidence as evidence
+
+def evidence_call(name,*args,**kwargs):
+    return getattr(evidence,name)(release._evidence_context(),*args,**kwargs)
+
+class EvidenceModuleBoundaryTests(unittest.TestCase):
+    def test_controller_exposes_only_evidence_service_operations(self):
+        operations={
+            'audit_pull_request','build_owner_receipt','capture_execution',
+            'discover_evidence','prepare_readiness_index',
+            'verify_baseline_admission','verify_coverage','verify_evidence',
+            'verify_live_integrations','verify_pending_baseline_coverage',
+            'verify_premerge_integrations'}
+        self.assertIsInstance(release._EVIDENCE,evidence.EvidenceService)
+        self.assertEqual(set(evidence.__all__),{
+            'EvidenceContext','EvidenceService','BaselineQualification',
+            'VerifiedBaselineAdmission'})
+        for operation in operations:
+            with self.subTest(operation=operation):
+                controller_operation=getattr(release,operation)
+                service_operation=getattr(release._EVIDENCE,operation)
+                self.assertIs(controller_operation.__self__,release._EVIDENCE)
+                self.assertIs(controller_operation.__func__,service_operation.__func__)
+        for implementation_detail in (
+                'verify_review_chain','verify_review_dispositions',
+                'verify_event_chronology','verify_ci_pull_request',
+                'verify_execution_receipt','load_readiness_index',
+                'readiness_index_binding','verify_ci_suites'):
+            with self.subTest(implementation_detail=implementation_detail):
+                self.assertFalse(hasattr(release,implementation_detail))
+
+class EvidenceV2Tests(unittest.TestCase):
+    def ordinary_fixture(self,root=None,base=None,head=None,pull_request=5,comment_offset=0):
+        import json
+        root=Path(__file__).resolve().parents[1] if root is None else Path(root)
+        owner=123
+        head=head or release.git(root,'rev-parse','HEAD').decode().strip()
+        base=base or release.git(root,'rev-parse',head+'^').decode().strip()
+        records={release.BASE:{
+            'full_name':release.REPOSITORY,'owner':{'id':owner,'login':'danielbyon'}}};counter=comment_offset
+        def post(gate,report,system,reviewed_range,created_at,transcript=None):
+            nonlocal counter
+            from unittest.mock import patch
+            times={
+                '2026-11-16T18:01:00Z':('2026-11-16T18:00:00Z','2026-11-16T18:00:30Z'),
+                '2026-11-16T18:02:00Z':('2026-11-16T18:01:30Z','2026-11-16T18:01:45Z'),
+                '2026-11-16T18:03:00Z':('2026-11-16T18:02:30Z','2026-11-16T18:02:45Z')}
+            summary=report['summary']
+            command=[sys.executable,'-c','import sys; print(sys.argv[1])',summary]
+            with patch.object(release,'_utc_now',side_effect=times[created_at]):
+                result=release.capture_execution(root,gate,system,command,report,
+                    reviewed_range,transcript)
+            counter+=1
+            ref=release.BASE+'/issues/comments/'+str(counter)
+            record={'id':counter,'user':{'id':owner},
+                'body':result['body'],'created_at':created_at,'updated_at':created_at}
+            records[ref]=record
+            return {'ref':ref,'sha256':release.digest(release.canonical(record))},result['event']
+        author,author_event=post('author_execution',
+            {'role':'author','summary':'Ran the implementation command.'},'separate_codex',
+            {'base_revision':base,'head_revision':head},'2026-11-16T18:01:00Z')
+        step={'coverage':'full-diff','base_revision':base,'head_revision':head,
+              'diff_sha256':release.digest(release.git(root,'diff','--binary',base,head)),
+              'findings':[],'dispositions':[]}
+        review,review_event=post('independent_review',{'review_step':step,
+            'summary':'Reviewed the complete implementation diff.'},'local_cubic',
+            {'base_revision':base,'head_revision':head},
+            '2026-11-16T18:02:00Z')
+        changed=release.git(root,'diff','--name-only',base,head).decode().split()
+        tracked=set(release.git(root,'ls-tree','-r','--name-only',head).decode().split())
+        changed=[name for name in changed if name in tracked]
+        source_files=sorted(name for name in changed if name.startswith('scripts/') and name.endswith('.py'))
+        test_files=sorted(name for name in changed if name.startswith('tests/') and name.endswith('.py'))
+        file_sha256={name:release.digest(release.git(root,'show',head+':'+name))
+                     for name in source_files+test_files}
+        chat_summary='Inspected changed source and tests: '+' '.join(source_files+test_files)
+        chat,chat_event=post('chatgpt_inspection',{'source_files':source_files,
+            'test_files':test_files,'file_sha256':file_sha256,
+            'summary':chat_summary},'chatgpt',
+            {'base_revision':base,'head_revision':head},'2026-11-16T18:03:00Z',
+            chat_summary+'\n'+'\n'.join(source_files+test_files))
+        owner_report={'action':'merge','verdict':'approve'}
+        owner_event={'schema_version':2,'repository':release.REPOSITORY,
+            'gate':'owner_authorization','revision':head,'report':owner_report,
+            'report_sha256':release.digest(release.canonical(owner_report))}
+        owner_ref=release.BASE+'/issues/comments/'+str(counter+1)
+        owner_record={'id':counter+1,'user':{'id':owner},
+            'body':'<!-- release-evidence-v2\n'+json.dumps(owner_event,sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T18:04:00Z','updated_at':'2026-11-16T18:04:00Z'}
+        records[owner_ref]=owner_record
+        owner_entry={'ref':owner_ref,'sha256':release.digest(release.canonical(owner_record))}
+        ci_ref=release.BASE+'/actions/runs/7'
+        ci={'id':7,'repository':{'full_name':release.REPOSITORY},'event':'pull_request',
+            'status':'completed','conclusion':'success','head_sha':head,'run_attempt':1,
+            'pull_requests':[{'number':pull_request,'head':{'sha':head},
+                'base':{'sha':base,'ref':'main'}}],
+            'created_at':'2026-11-16T17:50:00Z','updated_at':'2026-11-16T18:03:00Z',
+            'completed_at':'2026-11-16T18:03:00Z'}
+        records[ci_ref]=ci
+        integration_records={'author_execution':author,
+            'independent_reviews':[review],'chatgpt_inspection':chat,
+            'owner_authorization':owner_entry,'ci':{'ref':ci_ref,
+            'sha256':release.digest(release.canonical(ci)),'run_attempt':1}}
+        evidence={'schema_version':2,'owner_id':owner,'origin':{'kind':'ordinary'},
+            'baseline_revision':base,'integrations':[{'pull_request':pull_request,'base_revision':base,
+            'reviewed_revision':head,'tested_revision':head,'records':integration_records}]}
+        index_evidence={'schema_version':2,'owner_id':owner,'origin':{'kind':'ordinary'},
+            'baseline_revision':base,'integrations':[dict(evidence['integrations'][0])]}
+        index_ref=release.BASE+'/issues/comments/'+str(counter+2)
+        index_record={'id':counter+2,'user':{'id':owner},
+            'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                'repository':release.REPOSITORY,'pull_request':pull_request,
+                'evidence':index_evidence},sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T18:05:00Z','updated_at':'2026-11-16T18:05:00Z'}
+        records[index_ref]=index_record
+        evidence['integrations'][0]['readiness_index']={
+            'index_ref':index_ref,'index_sha256':release.digest(release.canonical(index_record)),
+            'original_ref':index_ref,'original_sha256':release.digest(release.canonical(index_record)),
+            'normalization_ref':None,'normalization_sha256':None}
+        return evidence,records,{'author':author_event,'review':review_event,'chat':chat_event},root
+
+    def test_schema_v1_is_not_accepted_for_new_qualification(self):
+        legacy=EvidenceTests().fixture()['evidence']
+        with self.assertRaisesRegex(release.ReleaseError,'schema v2'):
+            release.verify_evidence(legacy,lambda ref: {})
+
+    def test_schema_v1_remains_available_only_for_frozen_release_verification(self):
+        fixture=EvidenceTests().fixture()
+        self.assertEqual(
+            len(release.verify_frozen_release_evidence(
+                fixture['evidence'],fixture['records'].__getitem__)),4)
+
+    def test_execution_identity_is_derived_from_captured_output(self):
+        event={
+            'schema_version':2,'repository':release.REPOSITORY,'gate':'independent_review',
+            'execution':{
+                'system':'local_cubic','origin_status':'owner_attested',
+                'execution_id':'arbitrary-execution-id',
+                'command':['cubic','review','--base','a'*40,'--head','b'*40],
+                'exit_code':0,'started_at':'2026-11-16T18:00:00Z',
+                'finished_at':'2026-11-16T18:01:00Z',
+                'stdout':'Full diff reviewed; no findings.','stderr':'',
+                'stdout_sha256':release.digest(b'Full diff reviewed; no findings.'),
+                'reviewed_range':{'base_revision':'a'*40,'head_revision':'b'*40},
+            },
+            'report':{'verdict':'pass','coverage':'full-diff'},
+        }
+        with self.assertRaisesRegex(release.ReleaseError,'execution identity'):
+            evidence_call('verify_execution_receipt',event,'independent_review',
+                {'base_revision':'a'*40,'head_revision':'b'*40})
+
+    def test_ci_run_must_name_the_exact_pull_request_and_base(self):
+        ci={'pull_requests':[{'number':5,'head':{'sha':'b'*40},
+            'base':{'sha':'a'*40,'ref':'main'}}]}
+        self.assertTrue(evidence_call('verify_ci_pull_request',ci,5,'b'*40,'a'*40))
+        with self.assertRaisesRegex(release.ReleaseError,'exact pull request'):
+            evidence_call('verify_ci_pull_request',ci,6,'b'*40,'a'*40)
+        with self.assertRaisesRegex(release.ReleaseError,'head or base'):
+            evidence_call('verify_ci_pull_request',ci,5,'b'*40,'c'*40)
+
+    def test_authenticates_ordinary_author_review_chatgpt_and_ci_receipts(self):
+        evidence,records,_,root=self.ordinary_fixture()
+        self.assertEqual(len(release.verify_evidence(evidence,records.__getitem__,root)),6)
+
+    def test_reviewer_cannot_reuse_author_execution_after_rehashing_receipt(self):
+        import json
+        evidence,records,events,root=self.ordinary_fixture()
+        integration=evidence['integrations'][0]
+        entry=integration['records']['independent_reviews'][0]
+        record=records[entry['ref']]
+        event=json.loads(record['body'].split('<!-- release-evidence-v2\n',1)[1].split('\n-->',1)[0])
+        event['execution']=events['author']['execution']
+        event['report']['execution_id']=event['execution']['execution_id']
+        event['report']['summary']=event['execution']['stdout']
+        event['report_sha256']=release.digest(release.canonical(event['report']))
+        record['body']='<!-- release-evidence-v2\n'+json.dumps(event,sort_keys=True)+'\n-->'
+        entry['sha256']=release.digest(release.canonical(record))
+        binding=integration['readiness_index'];index_record=records[binding['index_ref']]
+        payload=json.loads(index_record['body'].split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        payload['evidence']['integrations'][0]['records']['independent_reviews'][0]['sha256']=entry['sha256']
+        index_record['body']='<!-- release-readiness\n'+json.dumps(payload,sort_keys=True)+'\n-->'
+        binding['index_sha256']=release.digest(release.canonical(index_record))
+        binding['original_sha256']=binding['index_sha256']
+        with self.assertRaisesRegex(release.ReleaseError,'cannot independently review'):
+            release.verify_evidence(evidence,records.__getitem__,root)
+
+    def test_review_correction_chain_is_contiguous_and_preserves_findings(self):
+        chain=[
+            {'coverage':'full-diff','base_revision':'a'*40,'head_revision':'b'*40,
+             'findings':[{'id':'R1','severity':'P1','summary':'unsafe path'}],
+             'dispositions':[]},
+            {'coverage':'correction-delta','base_revision':'b'*40,'head_revision':'c'*40,
+             'findings':[],
+             'dispositions':[{'finding_id':'R1','decision':'fixed','evidence':'changed path validation'}]},
+        ]
+        self.assertTrue(evidence_call('verify_review_chain',chain,'a'*40,'c'*40))
+        gap=[dict(chain[1],base_revision='d'*40)]
+        with self.assertRaisesRegex(release.ReleaseError,'contiguous'):
+            evidence_call('verify_review_chain',[chain[0],*gap],'a'*40,'c'*40)
+        omitted=[chain[0],dict(chain[1],dispositions=[])]
+        with self.assertRaisesRegex(release.ReleaseError,'unresolved finding'):
+            evidence_call('verify_review_chain',omitted,'a'*40,'c'*40)
+        accepted=[chain[0],dict(chain[1],dispositions=[{
+            'finding_id':'R1','decision':'accepted','evidence':'accepted risk'}])]
+        with self.assertRaisesRegex(release.ReleaseError,'Material review finding'):
+            evidence_call('verify_review_chain',accepted,'a'*40,'c'*40)
+        with self.assertRaisesRegex(release.ReleaseError,'does not cover the final candidate'):
+            evidence_call('verify_review_chain',chain[:1],'a'*40,'c'*40)
+
+    def test_full_baseline_review_requires_evidence_backed_finding_dispositions(self):
+        report={'findings':[{'id':'R3','severity':'P3','summary':'minor wording'}],
+                'dispositions':[{'finding_id':'R3','decision':'accepted',
+                                 'evidence':'documented as non-blocking'}]}
+        self.assertTrue(evidence_call('verify_review_dispositions',report))
+        unresolved={'findings':report['findings'],'dispositions':[]}
+        with self.assertRaisesRegex(release.ReleaseError,'unresolved'):
+            evidence_call('verify_review_dispositions',unresolved)
+        material={'findings':[{'id':'R1','severity':'P2','summary':'unsafe behavior'}],
+                  'dispositions':[{'finding_id':'R1','decision':'accepted',
+                                   'evidence':'owner accepted'}]}
+        with self.assertRaisesRegex(release.ReleaseError,'must be fixed'):
+            evidence_call('verify_review_dispositions',material)
+
+    def test_precommit_full_review_requires_exact_final_diff_digest(self):
+        content='d'*64
+        step={'coverage':'full-diff','base_revision':'a'*40,'head_revision':None,
+              'uncommitted_candidate':True,'diff_sha256':content,
+              'findings':[],'dispositions':[]}
+        self.assertTrue(evidence_call('verify_review_chain',[step],'a'*40,'b'*40,
+            final_diff_sha256=content))
+        with self.assertRaisesRegex(release.ReleaseError,'content hash'):
+            evidence_call('verify_review_chain',[step],'a'*40,'b'*40,
+                final_diff_sha256='e'*64)
+
+    def test_provider_record_modified_after_merge_is_not_premerge_evidence(self):
+        record={'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:03:00Z'}
+        with self.assertRaisesRegex(release.ReleaseError,'updated after'):
+            evidence_call('verify_event_chronology',[record],'2026-11-16T18:02:00Z')
+        ci={'created_at':'2026-11-16T17:50:00Z','updated_at':'2026-11-16T18:01:00Z',
+            'completed_at':'2026-11-16T18:03:00Z'}
+        with self.assertRaisesRegex(release.ReleaseError,'CI completed after'):
+            evidence_call('verify_event_chronology',[ci],'2026-11-16T18:02:00Z')
+        self.assertTrue(evidence_call('verify_event_chronology',[
+            {'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:00:00Z'}
+        ],'2026-11-16T18:02:00Z'))
+
+class ProspectiveBaselineTests(unittest.TestCase):
+    def qualified_fixture(self):
+        import json,tempfile,subprocess
+        from unittest.mock import Mock
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        root=Path(temporary.name)
+        def git(*args):
+            return subprocess.check_output(['git','-C',temporary.name,*args],stderr=subprocess.DEVNULL).decode().strip()
+        git('init');git('config','user.name','Release Evidence Test');git('config','user.email','release-evidence@example.invalid')
+        (root/'docs').mkdir();(root/'skills').mkdir();(root/'.github/workflows').mkdir(parents=True)
+        (root/'scripts').mkdir();(root/'tests').mkdir()
+        (root/'docs/PROCESS.md').write_text('Pinned process policy for baseline qualification.\n')
+        (root/'skills/distribution.json').write_text('{"schema_version":2}\n')
+        (root/'scripts/skill_release.py').write_text('# baseline source\n')
+        (root/'tests/test_skill_releases.py').write_text('# baseline tests\n')
+        suites=list(release.SUITES)
+        steps=[{'name':suite,'run':'python3 -m unittest discover -s tests -p '+suite+' -v'} for suite in suites]
+        workflow={'jobs':{'integration':{'name':'Validate committed PR integration diff','steps':steps}}}
+        import yaml
+        (root/'.github/workflows/ci.yml').write_text(yaml.safe_dump(workflow,sort_keys=False))
+        git('add','.');git('commit','-qm','base before correction');base=git('rev-parse','HEAD')
+        (root/'scripts/skill_release.py').write_text('# reviewed ordinary integration source\n')
+        (root/'tests/test_skill_releases.py').write_text('# reviewed ordinary integration tests\n')
+        git('add','.');git('commit','-qm','ordinary integration before correction');base=git('rev-parse','HEAD')
+        (root/'docs/PROCESS.md').write_text('Corrected policy source for the prospective release baseline.\n')
+        git('add','.');git('commit','-qm','corrected release evidence process');baseline=git('rev-parse','HEAD')
+        tree=git('rev-parse',baseline+'^{tree}')
+        manifest=release.digest(release.git(root,'ls-tree','-r','--full-tree','-z',baseline))
+        policy=git('log','--first-parent','-1','--format=%H',baseline,'--','docs/PROCESS.md')
+        policy_digest=release.digest(release.git(root,'show',baseline+':docs/PROCESS.md'))
+        owner=123; records={release.BASE:{'full_name':release.REPOSITORY,
+            'owner':{'id':owner,'login':'danielbyon'}}};counter=0
+        def make_receipt(gate,report,system,reviewed_range,created_at,revision):
+            nonlocal counter
+            counter+=1
+            summary=report['summary']
+            execution={'system':system,'origin_status':'owner_attested',
+                'command':[system,'inspect',baseline], 'exit_code':0,
+                'started_at':created_at,'finished_at':created_at,
+                'stdout':summary,'stderr':'','stdout_sha256':release.digest(summary.encode()),
+                'reviewed_range':reviewed_range}
+            execution['execution_id']=release.digest(release.canonical(execution))
+            report.update(execution_id=execution['execution_id'],verdict='pass')
+            event={'schema_version':2,'repository':release.REPOSITORY,'gate':gate,
+                   'revision':revision,'execution':execution,'report':report,
+                   'report_sha256':release.digest(release.canonical(report))}
+            ref=release.BASE+'/issues/comments/'+str(counter)
+            record={'id':counter,'user':{'id':owner},
+                'body':'<!-- release-evidence-v2\n'+json.dumps(event,sort_keys=True)+'\n-->',
+                'created_at':created_at,'updated_at':created_at}
+            records[ref]=record
+            return {'ref':ref,'sha256':release.digest(release.canonical(record))}
+        review_report={'coverage':'full-baseline','reviewed_revision':baseline,'tree_sha':tree,
+                       'manifest_sha256':manifest,'findings':[],'dispositions':[],
+                       'summary':'Reviewed every tracked file in the corrected baseline.'}
+        review=make_receipt('baseline_review',review_report,'local_cubic',
+            {'baseline_revision':baseline,'tree_sha':tree},'2026-11-16T20:05:00Z',baseline)
+        chat_report={'coverage':'full-baseline','reviewed_revision':baseline,'tree_sha':tree,
+                     'manifest_sha256':manifest,'source_files':['scripts/skill_release.py'],
+                     'test_files':['tests/test_skill_releases.py'],
+                     'file_sha256':{
+                         'scripts/skill_release.py':release.digest(release.git(root,'show',baseline+':scripts/skill_release.py')),
+                         'tests/test_skill_releases.py':release.digest(release.git(root,'show',baseline+':tests/test_skill_releases.py'))},
+                     'summary':'Inspected the baseline source and release tests: scripts/skill_release.py tests/test_skill_releases.py'}
+        chat=make_receipt('chatgpt_inspection',chat_report,'chatgpt',
+            {'baseline_revision':baseline,'tree_sha':tree},'2026-11-16T20:06:00Z',baseline)
+        ci_ref=release.BASE+'/actions/runs/101'
+        ci={'id':101,'repository':{'full_name':release.REPOSITORY},'event':'pull_request',
+            'head_sha':baseline,'status':'completed','conclusion':'success','run_attempt':1,
+            'pull_requests':[{'number':32,'head':{'sha':baseline},
+                'base':{'sha':base,'ref':'main'}}],
+            'created_at':'2026-11-16T19:00:00Z','updated_at':'2026-11-16T20:07:00Z',
+            'completed_at':'2026-11-16T20:07:00Z'}
+        records[ci_ref]=ci
+        ci_entry={'ref':ci_ref,'sha256':release.digest(release.canonical(ci)),
+                  'run_attempt':1,'tested_revision':baseline,'tested_base_revision':base}
+        owner_ref=release.BASE+'/issues/comments/'+str(counter+1)
+        owner_report={'action':'admit-baseline','verdict':'approve'}
+        owner_event={'schema_version':2,'repository':release.REPOSITORY,
+                     'gate':'baseline_admission','revision':baseline,'report':owner_report,
+                     'report_sha256':release.digest(release.canonical(owner_report))}
+        owner_record={'id':counter+1,'user':{'id':owner},
+            'body':'<!-- release-evidence-v2\n'+json.dumps(owner_event,sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T20:08:00Z','updated_at':'2026-11-16T20:08:00Z'}
+        records[owner_ref]=owner_record
+        owner_entry={'ref':owner_ref,'sha256':release.digest(release.canonical(owner_record))}
+        evidence={'schema_version':2,'owner_id':owner,'origin':{
+            'kind':'prospective_baseline','baseline_revision':baseline,
+            'source_revision':baseline,'builder_revision':baseline,
+            'policy_revision':policy,'policy_sha256':policy_digest},
+            'baseline_revision':baseline,'integrations':[],
+            'baseline_admission':{'correction_pull_request':32,'reviewed_revision':baseline,
+                'full_review':review,'chatgpt_inspection':chat,'ci':ci_entry,
+                'owner_admission':owner_entry}}
+        index_ref=release.BASE+'/issues/comments/'+str(counter+2)
+        index_record={'id':counter+2,'user':{'id':owner},
+            'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                'repository':release.REPOSITORY,'pull_request':32,
+                'evidence':evidence},sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T20:09:00Z','updated_at':'2026-11-16T20:09:00Z'}
+        records[index_ref]=index_record
+        evidence['readiness_index']={'index_ref':index_ref,
+            'index_sha256':release.digest(release.canonical(index_record)),
+            'original_ref':index_ref,'original_sha256':release.digest(release.canonical(index_record)),
+            'normalization_ref':None,'normalization_sha256':None}
+        pr_ref=release.BASE+'/pulls/32'
+        pr={'number':32,'merged':True,'merged_at':'2026-11-16T20:00:00Z',
+            'base':{'ref':'main','repo':{'full_name':release.REPOSITORY}},
+            'head':{'sha':baseline,'repo':{'full_name':release.REPOSITORY}},
+            'merge_commit_sha':baseline}
+        records[pr_ref]=pr
+        job={'id':201,'name':'Validate committed PR integration diff','status':'completed',
+             'conclusion':'success','started_at':'2026-11-16T19:10:00Z',
+             'completed_at':'2026-11-16T20:07:00Z',
+             'steps':[{'name':step['name'],'conclusion':'success'} for step in steps]}
+        logs=[]
+        for suite in suites:
+            command='python3 -m unittest discover -s tests -p '+suite+' -v'
+            logs.append('##[group]Run '+command+'\n##[endgroup]\ntest_valid (tests.test_baseline.Baseline) ... ok\nRan 1 test in 0.001s\nOK\n')
+        job_log='PR HEAD: '+baseline+'\nTested integration revision: '+baseline+'\nTested base revision: '+base+'\n'+''.join(logs)
+        dispatch={'id':900,'event':'workflow_dispatch','head_sha':baseline,'head_branch':'main',
+                  'actor':{'id':owner},'triggering_actor':{'id':owner},
+                  'path':'.github/workflows/skill-release.yml@refs/heads/main',
+                  'created_at':'2026-11-16T20:10:00Z'}
+        class API:
+            def record(self,ref):return records[ref] if ref in records else {'full_name':release.REPOSITORY,'owner':{'id':owner}}
+            def request(self,method,endpoint):
+                return {'login':'danielbyon'} if endpoint=='/user' else records[release.BASE]
+            def pages(self,endpoint):
+                if endpoint==release.BASE+f'/commits/{baseline}/pulls':return [pr]
+                if endpoint==release.BASE+'/issues/32/comments':return [index_record]
+                return []
+            def ci_jobs(self,run_id,attempt):return [job]
+            def job_log(self,job_id):return job_log
+            def run(self,run_id):return dispatch
+        api=API()
+        api.records=records
+        return root,api,evidence,base,baseline,dispatch,owner_record
+
+    def history(self):
+        import tempfile
+        directory=Path(tempfile.mkdtemp())
+        def run(*args):
+            return release.git(directory,*args).decode().strip()
+        run('init','-q')
+        run('config','user.name','Release Evidence Test')
+        run('config','user.email','release-evidence@example.invalid')
+        (directory/'tracked.txt').write_text('baseline\n')
+        run('add','tracked.txt');run('commit','-qm','baseline')
+        baseline=run('rev-parse','HEAD')
+        run('commit','--allow-empty','-qm','same-tree descendant')
+        descendant=run('rev-parse','HEAD')
+        return directory,baseline,descendant
+
+    def test_admitted_prospective_root_has_zero_integrations_but_no_descendants(self):
+        import subprocess
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        proof=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+        self.assertIsNone(release.verify_coverage(root,evidence,baseline,
+            baseline_admission=proof))
+        subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm','same tree descendant'],check=True)
+        descendant=release.git(root,'rev-parse','HEAD').decode().strip()
+        with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
+            release.verify_coverage(root,evidence,descendant,baseline_admission=proof)
+
+    def test_boolean_cannot_substitute_for_verified_baseline_admission(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        with self.assertRaisesRegex(release.ReleaseError,'independently verified'):
+            release.verify_coverage(root,evidence,baseline,admitted=True)
+
+    def test_full_baseline_admission_uses_authenticated_records_and_real_git_history(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        snapshots=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+        self.assertEqual({item['gate'] for item in snapshots},
+            {'baseline_review','chatgpt_inspection','ci','baseline_admission',
+             'readiness_index','corrected_merge','ci_job','ci_log','release_dispatch'})
+        self.assertIsNone(release.verify_coverage(root,evidence,baseline,
+            baseline_admission=snapshots))
+
+    def test_baseline_review_execution_must_run_after_the_corrected_merge(self):
+        import json
+        cases=(('full_review','Full-baseline review'),
+               ('chatgpt_inspection','ChatGPT inspection'))
+        for field,label in cases:
+            with self.subTest(gate=field):
+                root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+                entry=evidence['baseline_admission'][field]
+                record=api.records[entry['ref']]
+                marker='<!-- release-evidence-v2\n'
+                event=json.loads(record['body'].split(marker,1)[1].split('\n-->',1)[0])
+                execution=event['execution']
+                execution['started_at']='2026-11-16T19:50:00Z'
+                execution['finished_at']='2026-11-16T19:55:00Z'
+                execution['execution_id']=release.digest(release.canonical(
+                    {key:value for key,value in execution.items() if key!='execution_id'}))
+                event['report']['execution_id']=execution['execution_id']
+                event['report_sha256']=release.digest(release.canonical(event['report']))
+                record['body']=marker+json.dumps(event,sort_keys=True)+'\n-->'
+                entry['sha256']=release.digest(release.canonical(record))
+
+                index_ref=evidence['readiness_index']['original_ref']
+                index_record=api.records[index_ref]
+                index_marker='<!-- release-readiness\n'
+                index=json.loads(index_record['body'].split(index_marker,1)[1].split('\n-->',1)[0])
+                index['evidence']={key:value for key,value in evidence.items()
+                                   if key!='readiness_index'}
+                index_record['body']=index_marker+json.dumps(index,sort_keys=True)+'\n-->'
+                index_digest=release.digest(release.canonical(index_record))
+                evidence['readiness_index']['index_sha256']=index_digest
+                evidence['readiness_index']['original_sha256']=index_digest
+
+                with self.assertRaisesRegex(release.ReleaseError,
+                        label+' execution must start and finish after the corrected merge'):
+                    release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+
+    def test_ordinary_chronology_and_prospective_admission_share_real_git_history(self):
+        root,baseline_api,baseline_evidence,ordinary_head,baseline,dispatch,owner_record=(
+            self.qualified_fixture())
+        ordinary_base=release.git(root,'rev-parse',ordinary_head+'^').decode().strip()
+        ordinary_case=EvidenceV2Tests()
+        ordinary_fixture=ordinary_case.ordinary_fixture(root,ordinary_base,ordinary_head,
+            pull_request=31,comment_offset=100)
+        ordinary_integration=OrdinaryChronologyIntegrationTests().qualified_fixture(ordinary_fixture)
+        ordinary_root,ordinary_api,ordinary_evidence,ordinary_records,job,pr=ordinary_integration
+        self.assertEqual(ordinary_root,root)
+        class CombinedAPI:
+            def record(self,reference):
+                try:return ordinary_api.record(reference)
+                except KeyError:return baseline_api.record(reference)
+            def pages(self,reference):return ordinary_api.pages(reference)
+            def ci_jobs(self,run_id,attempt):
+                if int(run_id)==7:return ordinary_api.ci_jobs(run_id,attempt)
+                return baseline_api.ci_jobs(run_id,attempt)
+            def job_log(self,job_id):
+                if int(job_id)==81:return ordinary_api.job_log(job_id)
+                return baseline_api.job_log(job_id)
+            def run(self,run_id):return baseline_api.run(run_id)
+        api=CombinedAPI()
+        ordinary_snapshots=release.verify_evidence(ordinary_evidence,api.record,root)
+        release.verify_live_integrations(api,ordinary_evidence,root)
+        release.verify_coverage(root,ordinary_evidence,ordinary_head,admitted=True)
+        baseline_proof=release.verify_baseline_admission(root,api,baseline_evidence,
+            baseline,baseline,900)
+        release.verify_coverage(root,baseline_evidence,baseline,
+            baseline_admission=baseline_proof)
+        self.assertEqual(pr['number'],31)
+        self.assertEqual(ordinary_evidence['integrations'][0]['integrated_revision'],ordinary_head)
+        self.assertIn('readiness_normalization',{item['gate'] for item in ordinary_snapshots})
+        self.assertEqual(baseline_evidence['integrations'],[])
+        self.assertIn('baseline_admission',{item['gate'] for item in baseline_proof})
+
+    def test_verify_evidence_accepts_verified_zero_integration_baseline(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        proof=release.verify_evidence(evidence,api,root,dispatch_run_id=900)
+        self.assertEqual(proof,release.verify_baseline_admission(
+            root,api,evidence,baseline,baseline,900))
+        with self.assertRaisesRegex(release.ReleaseError,'dispatch identity'):
+            release.verify_evidence(evidence,api.record,root)
+
+    def test_baseline_index_preparation_binds_review_ci_and_owner_admission(self):
+        import json
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        body=release.prepare_readiness_index(evidence,32,api)
+        wrapper=json.loads(body.split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        self.assertEqual(wrapper['evidence']['origin']['kind'],'prospective_baseline')
+        self.assertEqual(wrapper['evidence']['integrations'],[])
+        self.assertNotIn('readiness_index',wrapper['evidence'])
+
+    def test_discovery_selects_only_the_exact_prospective_baseline_origin(self):
+        from unittest.mock import patch
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        with patch.object(release,'select_anchor',return_value=None):
+            discovered=release.discover_evidence(root,api,baseline,baseline)
+        self.assertEqual(discovered['origin']['kind'],'prospective_baseline')
+        self.assertEqual(discovered['baseline_revision'],baseline)
+        self.assertEqual(discovered['integrations'],[])
+        proof=release.verify_baseline_admission(root,api,discovered,baseline,baseline,900)
+        self.assertIsNone(release.verify_coverage(root,discovered,baseline,
+            baseline_admission=proof))
+
+    def test_admission_after_original_dispatch_is_rejected(self):
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        dispatch['created_at']='2026-11-16T20:07:30Z'
+        dispatch['run_attempt']=2
+        with self.assertRaisesRegex(release.ReleaseError,'precede the original release dispatch'):
+            release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+
+    def test_tree_equivalent_descendant_cannot_replace_baseline_identity(self):
+        import subprocess
+        root,api,evidence,base,baseline,dispatch,owner_record=self.qualified_fixture()
+        subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm','same tree later commit'],check=True)
+        descendant=release.git(root,'rev-parse','HEAD').decode().strip()
+        with self.assertRaisesRegex(release.ReleaseError,'source and builder'):
+            release.verify_baseline_admission(root,api,evidence,descendant,descendant,900)
+        proof=release.verify_baseline_admission(root,api,evidence,baseline,baseline,900)
+        with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
+            release.verify_coverage(root,evidence,base,baseline_admission=proof)
+        with self.assertRaisesRegex(release.ReleaseError,'exactly match'):
+            release.verify_coverage(root,evidence,descendant,baseline_admission=proof)
+        ordinary={'schema_version':2,'origin':{'kind':'ordinary'},
+            'baseline_revision':baseline,'anchor_release':'2026.11.16','integrations':[]}
+        with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
+            release.verify_coverage(root,ordinary,descendant,admitted=True)
+
+class AuditTests(unittest.TestCase):
+    def test_open_pull_request_audit_marks_merge_and_release_gates_not_run(self):
+        import json,yaml
+        from unittest.mock import Mock
+        evidence,records,_,root=EvidenceV2Tests().ordinary_fixture()
+        integration=evidence['integrations'][0]
+        integration['tested_revision']=integration['reviewed_revision']
+        base=integration['base_revision'];head=integration['reviewed_revision']
+        pr_ref=release.BASE+'/pulls/5'
+        records[pr_ref]={'number':5,'merged':False,'base':{'ref':'main',
+            'sha':base,'repo':{'full_name':release.REPOSITORY}},
+            'head':{'sha':head,'repo':{'full_name':release.REPOSITORY}}}
+        workflow=yaml.safe_load(release.git(root,'show',head+':.github/workflows/ci.yml').decode())
+        workflow_steps=next(job['steps'] for job in workflow['jobs'].values()
+            if job.get('name')=='Validate committed PR integration diff')
+        steps=[{'name':step['name'],'conclusion':'success'} for step in workflow_steps]
+        job={'id':700,'name':'Validate committed PR integration diff','status':'completed',
+             'conclusion':'success','started_at':'2026-11-16T18:01:00Z',
+             'completed_at':'2026-11-16T18:03:00Z','steps':steps}
+        logs=[]
+        for step in workflow_steps:
+            if 'run' in step:
+                logs.append('##[group]Run '+step['run']+'\n##[endgroup]\n'
+                            'test_valid (tests.test_candidate.Candidate) ... ok\nRan 1 test in 0.001s\nOK\n')
+        ci=records[integration['records']['ci']['ref']]
+        ci['head_sha']=head
+        integration['records']['ci']['sha256']=release.digest(release.canonical(ci))
+        job_log='PR HEAD: '+head+'\nTested integration revision: '+head+'\nTested base revision: '+base+'\n'+''.join(logs)
+        comments=[records[evidence['integrations'][0]['readiness_index']['index_ref']]]
+        records[release.BASE+'/pulls/5']={'number':5,'merged':False,
+            'base':{'ref':'main','sha':base,'repo':{'full_name':release.REPOSITORY}},
+            'head':{'sha':head,'repo':{'full_name':release.REPOSITORY}}}
+        class API:
+            def __init__(self):self.methods=[]
+            def request(self,method,endpoint):
+                self.methods.append((method,endpoint));return {'login':'danielbyon'}
+            def record(self,ref):return records[ref]
+            def pages(self,ref):return comments
+            def ci_jobs(self,run_id,attempt):return [job]
+            def job_log(self,job_id):return job_log
+        api=API()
+        result=release.audit_pull_request(root,api,5)
+        self.assertEqual(result['gates']['candidate_ci'],'PASS',result['details'])
+        self.assertEqual(result['gates']['merge'],'NOT_RUN')
+        self.assertEqual(result['gates']['integrated_revision'],'NOT_RUN')
+        self.assertEqual(result['gates']['release_dispatch'],'NOT_RUN')
+        self.assertEqual(result['gates']['release_runtime'],'NOT_RUN')
+        self.assertEqual(result['gates']['publication'],'NOT_RUN')
+        self.assertTrue(all(method=='GET' for method,_ in api.methods))
+
+    def test_audit_rejects_a_provider_record_for_a_different_pr_number(self):
+        evidence,records,_,root=EvidenceV2Tests().ordinary_fixture()
+        class API:
+            def request(self,method,endpoint):return {'login':'danielbyon'}
+            def record(self,ref):
+                if ref==release.BASE:return records[ref]
+                if ref==release.BASE+'/pulls/5':
+                    return {'number':6,'base':{'ref':'main','repo':{'full_name':release.REPOSITORY}}}
+                return records[ref]
+            def pages(self,ref):
+                return [records[evidence['integrations'][0]['readiness_index']['index_ref']]]
+        result=release.audit_pull_request(root,API(),5)
+        self.assertEqual(result['gates']['pull_request_identity'],'FAIL')
+        self.assertEqual(result['gates']['release_dispatch'],'NOT_RUN')
+
+    def test_audit_qualifies_prospective_baseline_before_dispatch(self):
+        baseline_case=ProspectiveBaselineTests()
+        self.addCleanup(baseline_case.doCleanups)
+        root,source_api,evidence,base,baseline,dispatch,owner_record=(
+            baseline_case.qualified_fixture())
+        index_record=source_api.pages(release.BASE+'/issues/32/comments')[0]
+        class API:
+            def __init__(self):self.methods=[]
+            def request(self,method,endpoint):
+                self.methods.append((method,endpoint))
+                if endpoint=='/user':return {'login':'danielbyon'}
+                return source_api.request(method,endpoint)
+            def record(self,ref):
+                self.methods.append(('GET',ref))
+                if ref==release.BASE+'/git/ref/heads/main':
+                    return {'ref':'refs/heads/main','object':{'sha':baseline}}
+                return source_api.record(ref)
+            def pages(self,ref):
+                self.methods.append(('GET',ref))
+                return [index_record] if ref==release.BASE+'/issues/32/comments' else source_api.pages(ref)
+            def ci_jobs(self,run_id,attempt):
+                self.methods.append(('GET','ci_jobs'))
+                return source_api.ci_jobs(run_id,attempt)
+            def job_log(self,job_id):
+                self.methods.append(('GET','job_log'))
+                return source_api.job_log(job_id)
+        api=API()
+        result=release.audit_pull_request(root,api,32)
+        for gate in ('account','repository_identity','pull_request_identity',
+                     'evidence_receipts','candidate_ci','merge','integrated_revision',
+                     'git_coverage','baseline_admission'):
+            self.assertEqual(result['gates'][gate],'PASS',(gate,result['details']))
+        for gate in ('release_dispatch','release_runtime','publication'):
+            self.assertEqual(result['gates'][gate],'NOT_RUN')
+        self.assertTrue(all(method=='GET' for method,_ in api.methods))
+
+    def test_audit_fails_baseline_coverage_after_a_later_main_integration(self):
+        import subprocess
+        baseline_case=ProspectiveBaselineTests()
+        self.addCleanup(baseline_case.doCleanups)
+        root,source_api,evidence,base,baseline,dispatch,owner_record=(
+            baseline_case.qualified_fixture())
+        subprocess.run(['git','-C',str(root),'commit','--allow-empty','-qm',
+                        'later main integration'],check=True)
+        current_main=release.git(root,'rev-parse','HEAD').decode().strip()
+        index_record=source_api.pages(release.BASE+'/issues/32/comments')[0]
+        class API:
+            def request(self,method,endpoint):
+                return {'login':'danielbyon'} if endpoint=='/user' else source_api.request(method,endpoint)
+            def record(self,ref):
+                if ref==release.BASE+'/git/ref/heads/main':
+                    return {'ref':'refs/heads/main','object':{'sha':current_main}}
+                return source_api.record(ref)
+            def pages(self,ref):
+                return [index_record] if ref==release.BASE+'/issues/32/comments' else source_api.pages(ref)
+            def ci_jobs(self,run_id,attempt):return source_api.ci_jobs(run_id,attempt)
+            def job_log(self,job_id):return source_api.job_log(job_id)
+        result=release.audit_pull_request(root,API(),32)
+        self.assertEqual(result['gates']['baseline_admission'],'PASS',result['details'])
+        self.assertEqual(result['gates']['git_coverage'],'FAIL')
+        self.assertEqual(result['gates']['release_dispatch'],'NOT_RUN')
+
+class CaptureTests(unittest.TestCase):
+    def test_execution_capture_derives_identity_from_real_command_output(self):
+        import json,subprocess
+        root=Path(__file__).resolve().parents[1]
+        head=release.git(root,'rev-parse','HEAD').decode().strip()
+        base=release.git(root,'rev-parse',head+'^').decode().strip()
+        result=release.capture_execution(root,'author_execution','separate_codex',
+            [sys.executable,'-c','print("Captured author command")'],
+            {'role':'author','summary':'Captured author command'},
+            {'base_revision':base,'head_revision':head})
+        event=json.loads(result['body'].split('<!-- release-evidence-v2\n',1)[1].split('\n-->',1)[0])
+        self.assertEqual(event['execution']['exit_code'],0)
+        self.assertEqual(result['exit_code'],0)
+        evidence_call('verify_execution_receipt',event,'author_execution',
+            {'base_revision':base,'head_revision':head})
+
+    def test_baseline_chatgpt_capture_binds_the_baseline_tree(self):
+        import json
+        root=Path(__file__).resolve().parents[1]
+        baseline=release.git(root,'rev-parse','HEAD').decode().strip()
+        tree=release.git(root,'rev-parse',baseline+'^{tree}').decode().strip()
+        source_files=['scripts/skill_release.py']
+        test_files=['tests/test_skill_releases.py']
+        names=source_files+test_files
+        summary='Inspected the corrected baseline source and tests.'
+        report={'coverage':'full-baseline','reviewed_revision':baseline,
+            'tree_sha':tree,'source_files':source_files,'test_files':test_files,
+            'summary':summary}
+        transcript=summary+' '+' '.join(names)
+        result=release.capture_execution(root,'chatgpt_inspection','chatgpt',[],report,
+            {'baseline_revision':baseline,'tree_sha':tree},transcript)
+        event=json.loads(result['body'].split('<!-- release-evidence-v2\n',1)[1].split('\n-->',1)[0])
+        self.assertEqual(event['revision'],baseline)
+        self.assertEqual(event['execution']['reviewed_range'],
+            {'baseline_revision':baseline,'tree_sha':tree})
+        evidence_call('verify_execution_receipt',event,'chatgpt_inspection',
+            {'baseline_revision':baseline,'tree_sha':tree})
+
+    def test_premerge_index_preparation_binds_provider_records_without_self_reference(self):
+        import json
+        from unittest.mock import Mock
+        evidence,records,_,_=EvidenceV2Tests().ordinary_fixture()
+        api=Mock();api.request.return_value={'login':'danielbyon'}
+        api.record.side_effect=records.__getitem__
+        body=release.prepare_readiness_index(evidence,5,api)
+        wrapper=json.loads(body.split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        self.assertEqual(wrapper['schema_version'],2)
+        self.assertNotIn('normalizes',wrapper)
+        self.assertNotIn('readiness_index',wrapper['evidence']['integrations'][0])
+        self.assertEqual(wrapper['evidence']['integrations'][0]['records']['ci']['sha256'],
+            release.digest(release.canonical(records[wrapper['evidence']['integrations'][0]['records']['ci']['ref']])))
+
+    def test_postmerge_index_preparation_only_adds_actual_merge_identity(self):
+        import json
+        from unittest.mock import Mock
+        evidence,records,_,_=EvidenceV2Tests().ordinary_fixture()
+        integration=evidence['integrations'][0];head=integration['reviewed_revision']
+        index_ref=integration['readiness_index']['original_ref']
+        integration['integrated_revision']=head;integration['integrated_commits']=[head]
+        records[release.BASE+'/pulls/5']={'number':5,'merged':True,
+            'merged_at':'2026-11-16T18:10:00Z'}
+        api=Mock();api.request.return_value={'login':'danielbyon'}
+        api.record.side_effect=records.__getitem__
+        body=release.prepare_readiness_index(evidence,5,api,normalizes_reference=index_ref)
+        wrapper=json.loads(body.split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        self.assertEqual(wrapper['normalizes']['ref'],index_ref)
+        self.assertEqual(wrapper['evidence']['integrations'][0]['integrated_revision'],head)
+        self.assertNotIn('readiness_index',wrapper['evidence']['integrations'][0])
+
+    def test_owner_receipt_names_the_distinct_authorized_action(self):
+        import json
+        body=release.build_owner_receipt('baseline_admission','a'*40)
+        event=json.loads(body.split('<!-- release-evidence-v2\n',1)[1].split('\n-->',1)[0])
+        self.assertEqual(event['report'],{'action':'admit-baseline','verdict':'approve'})
+
+class OrdinaryChronologyIntegrationTests(unittest.TestCase):
+    def qualified_fixture(self,fixture=None):
+        import copy,json
+        from unittest.mock import Mock
+        evidence,records,_,root=(fixture or EvidenceV2Tests().ordinary_fixture())
+        integration=evidence['integrations'][0]
+        pull_request=integration['pull_request']
+        head=integration['reviewed_revision']
+        integration.update(integrated_revision=head,integrated_commits=[head])
+        binding=integration['readiness_index']
+        original=records[binding['original_ref']]
+        payload=json.loads(original['body'].split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        normalized_evidence=copy.deepcopy(payload['evidence'])
+        normalized_evidence['integrations'][0].update(
+            integrated_revision=head,integrated_commits=[head])
+        normalized_id=original['id']+1
+        normalized_ref=release.BASE+'/issues/comments/'+str(normalized_id)
+        normalized={'id':normalized_id,'user':{'id':123},
+            'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                'repository':release.REPOSITORY,'pull_request':pull_request,
+                'normalizes':{'ref':binding['original_ref'],
+                    'sha256':release.digest(release.canonical(original))},
+                'evidence':normalized_evidence},sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T18:11:00Z','updated_at':'2026-11-16T18:11:00Z'}
+        records[normalized_ref]=normalized
+        pr={'number':pull_request,'merged':True,'merged_at':'2026-11-16T18:10:00Z',
+            'base':{'ref':'main','repo':{'full_name':release.REPOSITORY}},
+            'head':{'sha':head,'repo':{'full_name':release.REPOSITORY}},
+            'merge_commit_sha':head}
+        records[release.BASE+f'/pulls/{pull_request}']=pr
+        workflow,steps,logs=SuiteExecutionTests.fixture(head,root)
+        job={'id':81,'name':'Validate committed PR integration diff','status':'completed',
+             'conclusion':'success','started_at':'2026-11-16T18:01:00Z',
+             'completed_at':'2026-11-16T18:03:00Z','steps':steps}
+        ci_entry=integration['records']['ci'];ci=records[ci_entry['ref']]
+        log='PR HEAD: '+head+'\nTested integration revision: '+head+'\nTested base revision: '+integration['base_revision']+'\n'+logs
+        api=Mock()
+        def record(ref):return records[ref]
+        def pages(ref):
+            if ref.endswith(f'/pulls/{pull_request}/commits'):return [{'sha':head}]
+            if ref==release.BASE+'/commits/'+head+'/pulls':return [pr]
+            return []
+        api.record.side_effect=record;api.pages.side_effect=pages
+        api.ci_jobs.return_value=[job];api.job_log.return_value=log
+        loaded=evidence_call('load_readiness_index',normalized_ref,api.record,pull_request)
+        integration['readiness_index']=evidence_call('readiness_index_binding',loaded)
+        return root,api,evidence,records,job,pr
+
+    def test_authenticated_receipts_normalization_ci_and_actual_merge_chronology(self):
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        snapshots=release.verify_evidence(evidence,api.record,root)
+        self.assertTrue(any(item['gate']=='readiness_normalization' for item in snapshots))
+        release.verify_live_integrations(api,evidence,root)
+
+    def test_original_index_edit_after_merge_invalidates_normalization(self):
+        import json
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        binding=evidence['integrations'][0]['readiness_index']
+        original=records[binding['original_ref']]
+        original['updated_at']='2026-11-16T18:12:00Z'
+        normalized=records[binding['normalization_ref']]
+        wrapper=json.loads(normalized['body'].split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        wrapper['normalizes']['sha256']=release.digest(release.canonical(original))
+        normalized['body']='<!-- release-readiness\n'+json.dumps(wrapper,sort_keys=True)+'\n-->'
+        loaded=evidence_call('load_readiness_index',binding['normalization_ref'],api.record,5)
+        evidence['integrations'][0]['readiness_index']=evidence_call('readiness_index_binding',loaded)
+        with self.assertRaisesRegex(release.ReleaseError,'updated after'):
+            release.verify_live_integrations(api,evidence,root)
+
+    def test_ci_completion_after_merge_is_rejected(self):
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        job['completed_at']='2026-11-16T18:12:00Z'
+        with self.assertRaisesRegex(release.ReleaseError,'updated after|after the integration'):
+            release.verify_live_integrations(api,evidence,root)
+
+    def test_missing_merge_timestamp_and_wrong_pr_identity_are_rejected(self):
+        root,api,evidence,records,job,pr=self.qualified_fixture()
+        pr.pop('merged_at')
+        with self.assertRaisesRegex(release.ReleaseError,'merge timestamp'):
+            release.verify_live_integrations(api,evidence,root)
+        pr['merged_at']='2026-11-16T18:10:00Z';pr['number']=6
+        with self.assertRaisesRegex(release.ReleaseError,'number identity'):
+            release.verify_live_integrations(api,evidence,root)
 
 class ReleaseTests(unittest.TestCase):
     def test_pacific_original_date_and_suffix(self):
@@ -13,7 +848,7 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(release.ReleaseError): release.version_key(tag)
     def test_boolean_is_not_review_evidence(self):
         with self.assertRaises(release.ReleaseError):
-            release.verify_evidence({'independent_review': True}, lambda ref: {})
+            release.verify_frozen_release_evidence({'independent_review': True}, lambda ref: {})
     def test_existing_pin_is_not_reselected(self):
         self.assertEqual(release.resolve_task(None, existing_pin='a'*40), {'task_pin':'a'*40})
     def test_no_release_blocks(self):
@@ -32,22 +867,22 @@ class EvidenceTests(unittest.TestCase):
     def test_authenticated_reports_are_bound_to_candidate(self):
         f=self.fixture()
         records=f['records']
-        self.assertEqual(len(release.verify_evidence(f['evidence'], records.__getitem__)),4)
+        self.assertEqual(len(release.verify_frozen_release_evidence(f['evidence'], records.__getitem__)),4)
     def test_tampered_record_blocks(self):
         f=self.fixture(); first=next(iter(f['records'].values())); first['body']='summary only'
-        with self.assertRaises(release.ReleaseError): release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError): release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_self_review_blocks_even_with_recomputed_hash(self):
         f=self.fixture(); i=f['evidence']['integrations'][0]; i['author_execution_id']='review-execution'
-        with self.assertRaises(release.ReleaseError): release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError): release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_wrong_inspection_candidate_blocks(self):
         f=self.fixture(); entry=f['evidence']['integrations'][0]['records']['chatgpt_inspection']
         actual=f['records'][entry['ref']]; actual['body']=actual['body'].replace('a'*40,'b'*40)
         entry['sha256']=release.digest(release.canonical(actual))
-        with self.assertRaises(release.ReleaseError): release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError): release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_failed_ci_blocks_even_with_matching_digest(self):
         f=self.fixture(); entry=f['evidence']['integrations'][0]['records']['ci']
         actual=f['records'][entry['ref']]; actual['conclusion']='failure';entry['sha256']=release.digest(release.canonical(actual))
-        with self.assertRaises(release.ReleaseError): release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError): release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
 
 class PublicationTests(unittest.TestCase):
     def test_duplicate_remote_assets_block(self):
@@ -248,18 +1083,18 @@ class AdversarialProvenanceTests(unittest.TestCase):
         integration.pop('author_execution_id')
         entry=integration['records']['independent_review'];record=f['records'][entry['ref']]
         record['user']['id']=999999;entry['author_id']=999999;entry['sha256']=release.digest(release.canonical(record))
-        with self.assertRaises(release.ReleaseError):release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError):release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_missing_execution_export_blocks(self):
         f=self.fixture();entry=f['evidence']['integrations'][0]['records']['independent_review'];entry['execution']['sha256']='0'*64
         with self.assertRaisesRegex(release.ReleaseError,'Execution provenance'):
-            release.verify_evidence(f['evidence'],f['records'].__getitem__)
+            release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_ci_head_can_differ_from_tested_merge(self):
         f=self.fixture();f['evidence']['integrations'][0]['tested_revision']='b'*40
-        self.assertEqual(len(release.verify_evidence(f['evidence'],f['records'].__getitem__)),4)
+        self.assertEqual(len(release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)),4)
     def test_owner_is_bound_to_repository_not_export(self):
         f=self.fixture();f['evidence']['owner_id']=999
         with self.assertRaisesRegex(release.ReleaseError,'repository owner'):
-            release.verify_evidence(f['evidence'],f['records'].__getitem__)
+            release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_frozen_ownership_excludes_fresh_attempt(self):
         original={'run_id':5,'run_attempt':1,'qualification':{'run_attempt':1}}
         retried={**original,'validation_attempt':2}
@@ -317,18 +1152,18 @@ class LegacyNormalizationTests(unittest.TestCase):
     def test_legacy_reports_need_no_new_original_markers(self):
         f,ref=self.legacy()
         evidence=release.load_evidence_export(ref,f['records'].__getitem__)
-        self.assertEqual(len(release.verify_evidence(evidence,f['records'].__getitem__)),4)
+        self.assertEqual(len(release.verify_frozen_release_evidence(evidence,f['records'].__getitem__)),4)
     def test_foreign_export_author_blocks(self):
         f,ref=self.legacy();f['records'][ref]['user']['id']=999
         with self.assertRaises(release.ReleaseError):release.load_evidence_export(ref,f['records'].__getitem__)
     def test_unverified_normalization_blocks(self):
         f,_=self.legacy()
-        with self.assertRaises(release.ReleaseError):release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError):release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_normalized_claim_must_exist_in_execution(self):
         f,ref=self.legacy()
         evidence=release.load_evidence_export(ref,f['records'].__getitem__)
         evidence['integrations'][0]['records']['chatgpt_inspection']['normalized_report']['source_files']=['invented.py']
-        with self.assertRaises(release.ReleaseError):release.verify_evidence(evidence,f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError):release.verify_frozen_release_evidence(evidence,f['records'].__getitem__)
 
 class AnchorSelectionTests(unittest.TestCase):
     def test_selects_nearest_applicable_verified_source_not_newest_tag(self):
@@ -364,7 +1199,7 @@ class HistoricalAdmissionTests(unittest.TestCase):
         release.admit_anchor(Path('.'),api,normalized)
     def test_no_uncovered_integrations_can_reuse_verified_anchor(self):
         f=self.fixture();f['evidence']['integrations']=[];f['evidence']['anchor_release']='2026.11.15'
-        self.assertEqual(release.verify_evidence(f['evidence'],f['records'].__getitem__),[])
+        self.assertEqual(release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__),[])
 
 class ReleaseRecursionTests(unittest.TestCase):
     def test_anchor_cycle_blocks_without_infinite_recursion(self):
@@ -383,30 +1218,42 @@ class HistoryCoverageTests(unittest.TestCase):
             (root/'file').write_text('base');git('add','.');git('commit','-m','base');base=git('rev-parse','HEAD')
             (root/'file').write_text('first');git('commit','-am','first')
             (root/'file').write_text('final');git('commit','-am','final');result=git('rev-parse','HEAD')
-            evidence={'baseline_revision':base,'baseline_admission':{'ref':'admitted'},'integrations':[
+            evidence={'schema_version':1,'baseline_revision':base,'baseline_admission':{'ref':'admitted'},'integrations':[
                 {'integrated_revision':base,'reviewed_revision':base,'tested_revision':base},
                 {'base_revision':base,'integrated_revision':result,'reviewed_revision':result,'tested_revision':result}]}
             with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
-                release.verify_coverage(root,evidence,result)
+                release.verify_coverage(root,evidence,result,admitted=True)
             evidence['integrations'][-1]['integrated_commits']=git('rev-list','--first-parent',base+'..'+result).split()[::-1]
-            release.verify_coverage(root,evidence,result)
+            release.verify_coverage(root,evidence,result,admitted=True)
             evidence['integrations'].pop()
-            with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):release.verify_coverage(root,evidence,result)
+            with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
+                release.verify_coverage(root,evidence,result,admitted=True)
 
 class DiscoveryTests(unittest.TestCase):
     def test_discovery_reuses_verified_anchor_without_bootstrap_ancestry(self):
         from unittest.mock import Mock,patch
-        api=Mock();api.request.return_value={'owner':{'id':123}}
-        with patch.object(release,'select_anchor',return_value=('a'*40,'2026.11.15')),patch.object(release,'git',return_value=b''):
+        api=Mock();api.request.return_value={'full_name':release.REPOSITORY,'owner':{'id':123}}
+        revisions={'a'*40,'b'*40,'c'*40}
+        def git(root,*args):
+            if args[0]=='rev-parse' and args[1].endswith('^{commit}'):
+                value=args[1][:-len('^{commit}')]
+                return (value+'\n').encode() if value in revisions else b''
+            return b''
+        with patch.object(release,'select_anchor',return_value=('a'*40,'2026.11.15')),patch.object(release,'git',side_effect=git):
             evidence=release.discover_evidence(Path('.'),api,'b'*40,'c'*40)
+        self.assertEqual(evidence['schema_version'],2)
         self.assertEqual(evidence['baseline_revision'],'a'*40)
         self.assertEqual(evidence['anchor_release'],'2026.11.15')
         self.assertEqual(evidence['integrations'],[])
-    def test_prebaseline_without_anchor_requests_evidenced_export(self):
+    def test_first_release_refuses_different_source_and_builder_without_anchor(self):
         from unittest.mock import Mock,patch
-        with patch.object(release,'select_anchor',return_value=None),patch.object(release,'git',side_effect=release.ReleaseError('not ancestor')):
-            with self.assertRaisesRegex(release.ReleaseError,'earlier baseline export'):
-                release.discover_evidence(Path('.'),Mock(),'a'*40,'b'*40)
+        root=Path(__file__).resolve().parents[1]
+        source=release.git(root,'rev-parse','HEAD').decode().strip()
+        builder=release.git(root,'rev-parse','HEAD^').decode().strip()
+        api=Mock();api.request.return_value={'full_name':release.REPOSITORY,'owner':{'id':123}}
+        with patch.object(release,'select_anchor',return_value=None):
+            with self.assertRaisesRegex(release.ReleaseError,'source and builder'):
+                release.discover_evidence(root,api,source,builder)
     def test_failed_release_verification_is_not_silently_skipped(self):
         from unittest.mock import Mock,patch
         api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
@@ -425,7 +1272,60 @@ class NormalizationBoundaryTests(unittest.TestCase):
         f['records'][entry['ref']]['user']['id']=999
         entry['author_id']=999;entry['sha256']=release.digest(release.canonical(f['records'][entry['ref']]))
         f['records'][ref]['body']=json.dumps({'repository':release.REPOSITORY,'evidence':evidence})
-        self.assertEqual(len(release.verify_evidence(release.load_evidence_export(ref,f['records'].__getitem__),f['records'].__getitem__)),4)
+        self.assertEqual(len(release.verify_frozen_release_evidence(release.load_evidence_export(ref,f['records'].__getitem__),f['records'].__getitem__)),4)
+
+class ReadinessNormalizationTests(unittest.TestCase):
+    def fixture(self):
+        import copy,json
+        owner=123;number=32
+        original_evidence={'schema_version':2,'owner_id':owner,
+            'origin':{'kind':'ordinary'},'baseline_revision':'a'*40,
+            'integrations':[{'pull_request':number,'base_revision':'a'*40,
+                'reviewed_revision':'b'*40,'records':{'author_execution':{'ref':'author','sha256':'1'*64}}}]}
+        original={'id':10,'user':{'id':owner},
+            'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                'repository':release.REPOSITORY,'pull_request':number,
+                'evidence':original_evidence},sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:00:00Z'}
+        normalized_evidence=copy.deepcopy(original_evidence)
+        normalized_evidence['integrations'][0]['integrated_revision']='c'*40
+        normalized_evidence['integrations'][0]['integrated_commits']=['c'*40]
+        normalized={'id':11,'user':{'id':owner},
+            'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                'repository':release.REPOSITORY,'pull_request':number,
+                'normalizes':{'ref':release.BASE+'/issues/comments/10',
+                    'sha256':release.digest(release.canonical(original))},
+                'evidence':normalized_evidence},sort_keys=True)+'\n-->',
+            'created_at':'2026-11-16T20:00:00Z','updated_at':'2026-11-16T20:00:00Z'}
+        records={release.BASE+'/issues/comments/10':original,
+                 release.BASE+'/issues/comments/11':normalized,
+                 release.BASE:{'full_name':release.REPOSITORY,'owner':{'id':owner}}}
+        return records,normalized_evidence
+
+    def test_late_normalization_binds_unchanged_premerge_index(self):
+        records,expected=self.fixture()
+        loaded=evidence_call('load_readiness_index',release.BASE+'/issues/comments/11',
+            records.__getitem__,32)
+        self.assertEqual(loaded['evidence'],expected)
+        self.assertEqual(loaded['original_record']['id'],10)
+        self.assertEqual(loaded['normalization_record']['id'],11)
+
+    def test_normalization_cannot_change_reviewed_evidence(self):
+        import json
+        records,_=self.fixture();record=records[release.BASE+'/issues/comments/11']
+        wrapper=json.loads(record['body'].split('<!-- release-readiness\n',1)[1].split('\n-->',1)[0])
+        wrapper['evidence']['integrations'][0]['reviewed_revision']='d'*40
+        record['body']='<!-- release-readiness\n'+json.dumps(wrapper,sort_keys=True)+'\n-->'
+        with self.assertRaisesRegex(release.ReleaseError,'normalization changed'):
+            evidence_call('load_readiness_index',release.BASE+'/issues/comments/11',
+                records.__getitem__,32)
+
+    def test_normalization_rejects_mutated_original_provider_record(self):
+        records,_=self.fixture()
+        records[release.BASE+'/issues/comments/10']['updated_at']='2026-11-16T20:01:00Z'
+        with self.assertRaisesRegex(release.ReleaseError,'Original readiness record'):
+            evidence_call('load_readiness_index',release.BASE+'/issues/comments/11',
+                records.__getitem__,32)
 
 class ExactExecutionTests(unittest.TestCase):
     fixture=EvidenceTests.fixture
@@ -433,14 +1333,14 @@ class ExactExecutionTests(unittest.TestCase):
         f=self.fixture();integration=f['evidence']['integrations'][0]
         integration['author_execution']=dict(integration['records']['independent_review']['execution'])
         integration['author_execution_id']='review'
-        with self.assertRaises(release.ReleaseError):release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError):release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_review_range_mismatch_rejected(self):
         import json
         f=self.fixture();entry=f['evidence']['integrations'][0]['records']['independent_review']['execution']
         record=f['records'][entry['ref']];envelope=json.loads(record['body'])
         envelope['reviewed_range']['base_revision']='c'*40;record['body']=json.dumps(envelope)
         entry['sha256']=release.digest(release.canonical(record))
-        with self.assertRaises(release.ReleaseError):release.verify_evidence(f['evidence'],f['records'].__getitem__)
+        with self.assertRaises(release.ReleaseError):release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
 
 class DurableResolutionTests(unittest.TestCase):
     def test_verified_release_survives_missing_actions_artifacts_and_logs(self):
@@ -463,7 +1363,7 @@ class DurableResolutionTests(unittest.TestCase):
         api.job_log.return_value='\n'.join(['PR HEAD: '+revision,'Tested integration revision: '+revision,'Tested base revision: '+revision,logs])
         api.pages.side_effect=lambda path: ([{'sha':revision}] if path.endswith('/commits') else [{'number':27,'merged_at':'date','base':{'ref':'main'},'merge_commit_sha':revision}])
         authority=release.EvidenceAuthority(api)
-        snapshots=release.verify_evidence(f['evidence'],authority.record)
+        snapshots=release.verify_frozen_release_evidence(f['evidence'],authority.record)
         release.verify_live_integrations(authority,f['evidence'],root)
         context={'repository':release.REPOSITORY,'release_version':'2026.11.16','source_revision':revision,
             'builder_revision':revision,'policy_revision':'e2afa055d1126763c69f0e0392d25b86bab98014',
@@ -502,7 +1402,7 @@ class IntegrationMembershipTests(unittest.TestCase):
             number=1 if '/commits/'+('b'*40) in path else 2
             return [{'number':number,'merged_at':'date','base':{'ref':'main'},'merge_commit_sha':('b' if number==1 else 'c')*40}]
         api.pages.side_effect=pages
-        with self.assertRaises(release.ReleaseError):release.verify_membership(api,integration)
+        with self.assertRaises(release.ReleaseError):evidence_call('verify_membership',api,integration)
 
 class RebaseDiscoveryTests(unittest.TestCase):
     def test_normal_dispatch_groups_all_rebased_commits(self):
@@ -516,19 +1416,45 @@ class RebaseDiscoveryTests(unittest.TestCase):
             for content in ('baseline','first rebased change','second rebased change'):
                 (root/'file').write_text(content);git('add','.');git('commit','-m',content);commits.append(git('rev-parse','HEAD'))
             base,first,result=commits
-            pr={'number':9,'merge_commit_sha':result,'merged_at':'date','base':{'ref':'main'}}
-            index={'integrated_revision':result,'reviewed_revision':result,'tested_revision':result,'base_revision':base}
+            pr={'number':9,'merged':True,'merge_commit_sha':result,
+                'merged_at':'2026-11-16T19:00:00Z','base':{'ref':'main'}}
+            integration={'pull_request':9,'integrated_revision':result,
+                'integrated_commits':[first,result],'reviewed_revision':result,
+                'tested_revision':result,'base_revision':base,'records':{}}
+            original_evidence={'schema_version':2,'owner_id':123,
+                'origin':{'kind':'ordinary'},'baseline_revision':base,
+                'integrations':[{'pull_request':9,'reviewed_revision':result,
+                    'tested_revision':result,'base_revision':base,'records':{}}]}
+            normalized_evidence={'schema_version':2,'owner_id':123,
+                'origin':{'kind':'ordinary'},'baseline_revision':base,
+                'integrations':[integration]}
+            original={'id':90,'user':{'id':123},
+                'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                    'repository':release.REPOSITORY,'pull_request':9,
+                    'evidence':original_evidence},sort_keys=True)+'\n-->',
+                'created_at':'2026-11-16T18:00:00Z','updated_at':'2026-11-16T18:00:00Z'}
+            normalized={'id':91,'user':{'id':123},
+                'body':'<!-- release-readiness\n'+json.dumps({'schema_version':2,
+                    'repository':release.REPOSITORY,'pull_request':9,
+                    'normalizes':{'ref':release.BASE+'/issues/comments/90',
+                        'sha256':release.digest(release.canonical(original))},
+                    'evidence':normalized_evidence},sort_keys=True)+'\n-->',
+                'created_at':'2026-11-16T19:01:00Z','updated_at':'2026-11-16T19:01:00Z'}
+            records={release.BASE:{'full_name':release.REPOSITORY,'owner':{'id':123}},
+                release.BASE+'/issues/comments/90':original,
+                release.BASE+'/issues/comments/91':normalized}
             def pages(path):
                 if path.endswith('/pulls/9/commits'):return [{'sha':'original-first'},{'sha':'original-second'}]
-                if path.endswith('/issues/9/comments'):return [{'body':'<!-- release-readiness\n'+json.dumps(index)+'\n-->'}]
+                if path.endswith('/issues/9/comments'):return [original,normalized]
                 if any('/commits/'+commit+'/pulls' in path for commit in (first,result)):return [pr]
                 return []
-            api=Mock();api.pages.side_effect=pages;api.request.return_value={'owner':{'id':123}}
+            api=Mock();api.pages.side_effect=pages;api.record.side_effect=records.__getitem__
+            api.request.return_value=records[release.BASE]
             with patch.object(release,'select_anchor',return_value=(base,'2026.11.15')):
                 evidence=release.discover_evidence(root,api,result,result)
             self.assertEqual(len(evidence['integrations']),1)
             self.assertEqual(evidence['integrations'][0]['integrated_commits'],[first,result])
-            release.verify_coverage(root,evidence,result)
+            release.verify_coverage(root,evidence,result,admitted=True)
 
 
 class SigningContextTests(unittest.TestCase):
@@ -569,9 +1495,9 @@ class SigningContextTests(unittest.TestCase):
 
 class SuiteExecutionTests(unittest.TestCase):
     @staticmethod
-    def fixture(revision='HEAD'):
+    def fixture(revision='HEAD',root=None):
         import yaml
-        root=Path(__file__).resolve().parents[1]
+        root=Path(__file__).resolve().parents[1] if root is None else Path(root)
         workflow=release.git(root,'show',revision+':.github/workflows/ci.yml').decode()
         data=yaml.safe_load(workflow)
         job=next(j for j in data['jobs'].values() if j.get('name')=='Validate committed PR integration diff')
@@ -582,7 +1508,7 @@ class SuiteExecutionTests(unittest.TestCase):
     def test_committed_contract_accepts_six_and_historical_four(self):
         for revision,schema in [('HEAD',2),(release.BOOTSTRAP_BASELINE,1)]:
             workflow,steps,logs=self.fixture(revision)
-            release.verify_ci_suites(logs,schema,steps,workflow)
+            evidence_call('verify_ci_suites',logs,schema,steps,workflow)
     def test_unbound_or_unsuccessful_suite_execution_blocks(self):
         import copy
         workflow,steps,logs=self.fixture()
@@ -599,25 +1525,25 @@ class SuiteExecutionTests(unittest.TestCase):
         variants.append(('step failed',logs,failed))
         for label,text,records in variants:
             with self.subTest(label=label),self.assertRaises(release.ReleaseError):
-                release.verify_ci_suites(text,2,records,workflow)
+                evidence_call('verify_ci_suites',text,2,records,workflow)
     def test_warning_interleaving_and_skip_words_are_successful_results(self):
         workflow,steps,logs=self.fixture()
         logs=logs.replace('test_example (tests.Contract) ... ok',
             "test_skipped_qualification_blocks (tests.Contract) ... /python/zipfile.py: UserWarning: Duplicate name: 'Skill.md'\n  return self._open_to_write(zinfo)\nok")
-        release.verify_ci_suites(logs,2,steps,workflow)
+        evidence_call('verify_ci_suites',logs,2,steps,workflow)
     def test_diagnostic_does_not_hide_skipped_or_failed_status(self):
         workflow,steps,logs=self.fixture()
         for status in ["skipped 'unavailable'",'FAIL','ERROR','expected failure','unexpected success']:
             changed=logs.replace('test_example (tests.Contract) ... ok',
                 'test_example (tests.Contract) ... warning: diagnostic\n'+status,1)
             with self.subTest(status=status),self.assertRaises(release.ReleaseError):
-                release.verify_ci_suites(changed,2,steps,workflow)
+                evidence_call('verify_ci_suites',changed,2,steps,workflow)
     def test_workflow_command_drift_blocks(self):
         workflow,steps,logs=self.fixture()
         for changed in [workflow.replace('-p test_skill_distribution.py','-p unrelated.py'),
                         workflow.replace('run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v',
                                          'if: false\n        run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v')]:
-            with self.assertRaises(release.ReleaseError):release.verify_ci_suites(logs,2,steps,changed)
+            with self.assertRaises(release.ReleaseError):evidence_call('verify_ci_suites',logs,2,steps,changed)
 
 class InstalledSkillTests(unittest.TestCase):
     def test_inspected_skill_bytes_and_compatibility(self):
