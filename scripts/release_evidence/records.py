@@ -396,10 +396,44 @@ def verify_ci_job_identity(ci_record: JSON, job: JSON, attempt: int,
             'Required CI revision-check step did not complete successfully')
     return True
 
+def _ci_workflow_for_safe_path_comparison(workflow_bytes,require_safe_path):
+    """Compare workflows after removing their approved safe-path settings."""
+    workflow=yaml.safe_load(workflow_bytes)
+    require(isinstance(workflow,dict) and isinstance(workflow.get('jobs'),dict),
+            'CI tested-commit workflow is malformed')
+    jobs=[job for job in workflow['jobs'].values()
+          if job.get('name')==CI_REQUIRED_JOB_NAME]
+    require(len(jobs)==1,'CI tested-commit job is missing or ambiguous')
+    steps=jobs[0].get('steps',[])
+    require(isinstance(steps,list) and all(isinstance(step,dict) for step in steps),
+            'CI tested-commit steps are malformed')
+    expected={f'python3 -m unittest discover -s tests -p {suite} -v'
+              for suite in SUITES}
+    found=[]
+    for step in steps:
+        if step.get('run','').strip() not in expected:
+            continue
+        found.append(step['run'].strip())
+        environment=step.get('env')
+        if require_safe_path:
+            require(environment=={'PYTHONSAFEPATH':'1'},
+                    'CI suite steps must enable PYTHONSAFEPATH')
+        else:
+            require(environment in (None,{}, {'PYTHONSAFEPATH':'1'}),
+                    'PR base CI suite environment is unsupported')
+        step.pop('env',None)
+    require(sorted(found)==sorted(expected),
+            'CI workflow does not contain each required suite exactly once')
+    return workflow
+
 def _ci_test_strategy(root,workflow_revision,base_revision):
     workflow_bytes=git(root,'show',workflow_revision+':.github/workflows/ci.yml')
     base_workflow=git(root,'show',base_revision+':.github/workflows/ci.yml')
-    require(workflow_bytes==base_workflow,
+    workflow_for_comparison=_ci_workflow_for_safe_path_comparison(
+        workflow_bytes,require_safe_path=True)
+    base_for_comparison=_ci_workflow_for_safe_path_comparison(
+        base_workflow,require_safe_path=False)
+    require(workflow_for_comparison==base_for_comparison,
             'CI workflow differs from the PR base')
     workflow=yaml.safe_load(workflow_bytes.decode())
     require(isinstance(workflow,dict) and isinstance(workflow.get('jobs'),dict),
@@ -512,8 +546,14 @@ def verify_ci_suites(logs,schema,steps,workflow):
         matches=[x for x in workflow_steps if x.get('run','').strip()==command]
         require(len(matches)==1,'Missing or altered mandatory suite command: '+suite)
         step=matches[0]
-        require(not any(k in step for k in ('if','continue-on-error','working-directory','env')),
+        require(not any(k in step for k in ('if','continue-on-error','working-directory')),
                 'Conditional or altered suite execution: '+suite)
+        if schema==2:
+            require(step.get('env')=={'PYTHONSAFEPATH':'1'},
+                    'Mandatory suite execution must enable PYTHONSAFEPATH: '+suite)
+        else:
+            require('env' not in step,
+                    'Historical suite execution has an unexpected environment: '+suite)
         actual=[x for x in steps if x.get('name')==step.get('name')]
         require(len(actual)==1 and actual[0].get('conclusion')=='success',
                 'Mandatory suite step not successful: '+suite)

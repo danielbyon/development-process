@@ -27,6 +27,9 @@ def isolated_repository(test_case):
     root=Path(temporary.name)/'repository'
     subprocess.run(['git','clone','--quiet','--shared',str(source),str(root)],
         check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    subprocess.run(['git','-C',str(root),'config','user.name','Release Evidence Test'],check=True)
+    subprocess.run(['git','-C',str(root),'config','user.email',
+                    'release-evidence@example.invalid'],check=True)
     return root
 
 class EvidenceModuleBoundaryTests(unittest.TestCase):
@@ -99,7 +102,7 @@ class EvidenceModuleBoundaryTests(unittest.TestCase):
 class EvidenceV2Tests(unittest.TestCase):
     def ordinary_fixture(self,root=None,base=None,head=None,pull_request=5,comment_offset=0,
                          tested_parents=None):
-        import json,os,subprocess
+        import json,os,subprocess,yaml
         root=isolated_repository(self) if root is None else Path(root)
         owner=123
         default_head=head is None
@@ -107,6 +110,26 @@ class EvidenceV2Tests(unittest.TestCase):
         default_base=release.git(root,'rev-parse',head+'^').decode().strip() if default_head else \
             release.git(root,'rev-parse',head+'^').decode().strip()
         base=base or default_base
+        subprocess.run(['git','-C',str(root),'config','user.name','Release Evidence Test'],check=True)
+        subprocess.run(['git','-C',str(root),'config','user.email',
+                        'release-evidence@example.invalid'],check=True)
+        workflow_path=root/'.github/workflows/ci.yml'
+        workflow=yaml.safe_load(release.git(root,'show',head+':.github/workflows/ci.yml'))
+        job=next(job for job in workflow['jobs'].values()
+            if job.get('name')=='Validate committed PR integration diff')
+        suite_steps=[step for step in job['steps']
+            if step.get('run','').strip().startswith(
+                'python3 -m unittest discover -s tests -p ')]
+        if len(suite_steps)==len(release.SUITES) and any(
+                step.get('env')!={'PYTHONSAFEPATH':'1'} for step in suite_steps):
+            subprocess.run(['git','-C',str(root),'checkout','--quiet',head],check=True)
+            for step in suite_steps:
+                step['env']={'PYTHONSAFEPATH':'1'}
+            workflow_path.write_text(yaml.safe_dump(workflow,sort_keys=False))
+            subprocess.run(['git','-C',str(root),'add','.github/workflows/ci.yml'],check=True)
+            subprocess.run(['git','-C',str(root),'commit','-qm',
+                            'isolate Python imports for CI suites'],check=True)
+            head=release.git(root,'rev-parse','HEAD').decode().strip()
         tree=release.git(root,'rev-parse',head+'^{tree}').decode().strip()
         if tested_parents=='unrelated':
             parents=[base]
@@ -296,6 +319,50 @@ class EvidenceV2Tests(unittest.TestCase):
                 ci[field]={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
                            'name':'CI','event':'pull_request'}[field]
 
+    def test_ci_workflow_accepts_only_python_safe_path_suite_changes(self):
+        import subprocess,tempfile,yaml
+        from release_evidence.records import verify_ci_test_commit
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        root=Path(temporary.name)
+        def git(*args):
+            return subprocess.check_output(['git','-C',str(root),*args],
+                stderr=subprocess.DEVNULL).decode().strip()
+        git('init');git('config','user.name','Release Evidence Test')
+        git('config','user.email','release-evidence@example.invalid')
+        workflow_path=root/'.github/workflows/ci.yml';workflow_path.parent.mkdir(parents=True)
+        workflow=yaml.safe_load((Path(__file__).resolve().parents[1]/
+            '.github/workflows/ci.yml').read_text())
+        job=next(job for job in workflow['jobs'].values()
+            if job.get('name')=='Validate committed PR integration diff')
+        suite_steps=[step for step in job['steps']
+            if step.get('run','').strip().startswith('python3 -m unittest discover -s tests -p ')]
+        self.assertEqual(len(suite_steps),6)
+        for step in suite_steps:
+            step.pop('env',None)
+        workflow_path.write_text(yaml.safe_dump(workflow,sort_keys=False))
+        (root/'candidate.txt').write_text('base\n')
+        git('add','.');git('commit','-qm','base workflow')
+        base=git('rev-parse','HEAD')
+        for step in suite_steps:
+            step['env']={'PYTHONSAFEPATH':'1'}
+        workflow_path.write_text(yaml.safe_dump(workflow,sort_keys=False))
+        (root/'candidate.txt').write_text('reviewed\n')
+        git('add','.');git('commit','-qm','safe-path workflow correction')
+        head=git('rev-parse','HEAD')
+        tree=git('rev-parse',head+'^{tree}')
+        tested=subprocess.check_output(['git','-C',str(root),'commit-tree',tree,
+            '-p',base,'-p',head,'-m','synthetic test merge']).decode().strip()
+        tested_record={'sha':tested,'tree':{'sha':tree},
+            'parents':[{'sha':base},{'sha':head}]}
+        ci={'workflow_id':413585893,'path':'.github/workflows/ci.yml',
+            'name':'CI','event':'pull_request','head_sha':head,
+            'pull_requests':[{'number':17,'head':{'sha':head},
+                'base':{'ref':'main','sha':base}}]}
+        record,strategy=verify_ci_test_commit(lambda _:tested_record,root,ci,17,
+            tested,head,base,head)
+        self.assertEqual(record,tested_record)
+        self.assertEqual(strategy,'synthetic_merge')
+
     def test_ci_workflow_change_cannot_comment_out_checks_then_switch_before_tests(self):
         import subprocess,tempfile,yaml
         from release_evidence.records import verify_ci_test_commit
@@ -394,6 +461,10 @@ class EvidenceV2Tests(unittest.TestCase):
         workflow=yaml.safe_load(workflow_path.read_text())
         job=next(job for job in workflow['jobs'].values()
                  if job.get('name')=='Validate committed PR integration diff')
+        for step in job['steps']:
+            if step.get('run','').strip().startswith(
+                    'python3 -m unittest discover -s tests -p '):
+                step['env']={'PYTHONSAFEPATH':'1'}
         check=next(step for step in job['steps']
                    if step.get('name')=='Verify revision and check committed diff')
         check['continue-on-error']=True

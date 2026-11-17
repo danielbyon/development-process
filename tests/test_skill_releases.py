@@ -744,7 +744,8 @@ class SuiteExecutionTests(unittest.TestCase):
     def fixture(revision='HEAD',root=None):
         import yaml
         root=Path(__file__).resolve().parents[1] if root is None else Path(root)
-        workflow=release.git(root,'show',revision+':.github/workflows/ci.yml').decode()
+        workflow=(root/'.github/workflows/ci.yml').read_text() if revision=='HEAD' else \
+            release.git(root,'show',revision+':.github/workflows/ci.yml').decode()
         data=yaml.safe_load(workflow)
         job=next(j for j in data['jobs'].values() if j.get('name')=='Validate committed PR integration diff')
         suite_steps=[s for s in job['steps'] if 'unittest discover' in s.get('run','')]
@@ -753,6 +754,47 @@ class SuiteExecutionTests(unittest.TestCase):
         records=[{'name':s['name'],'status':'completed','conclusion':'success'} for s in steps]
         logs=''.join('##[group]Run '+s['run'].strip()+'\n##[endgroup]\ntest_example (tests.Contract) ... ok\ntest_other (tests.Contract) ... ok\nRan 2 tests in 0.01s\n\nOK\n' for s in suite_steps)
         return workflow,records,logs
+    def test_python_safe_path_prevents_a_root_unittest_shadow(self):
+        import os,subprocess,tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            (root/'unittest.py').write_text(
+                "print('test_forged (tests.Contract) ... ok')\n"
+                "print('Ran 1 test in 0.01s')\nprint('OK')\n")
+            tests=root/'tests';tests.mkdir()
+            (tests/'test_probe.py').write_text(
+                'import unittest\nclass Probe(unittest.TestCase):\n'
+                ' def test_real_runner(self): self.fail("real test executed")\n')
+            command=[sys.executable,'-m','unittest','discover','-s','tests',
+                     '-p','test_probe.py','-v']
+            environment=os.environ.copy();environment.pop('PYTHONPATH',None)
+            environment.pop('PYTHONSAFEPATH',None)
+            forged=subprocess.run(command,cwd=root,env=environment,
+                capture_output=True,text=True)
+            self.assertEqual(forged.returncode,0)
+            self.assertIn('test_forged',forged.stdout+forged.stderr)
+            safe_environment=dict(environment,PYTHONSAFEPATH='1')
+            actual=subprocess.run(command,cwd=root,env=safe_environment,
+                capture_output=True,text=True)
+            self.assertNotEqual(actual.returncode,0)
+            self.assertNotIn('test_forged',actual.stdout+actual.stderr)
+            self.assertIn('real test executed',actual.stdout+actual.stderr)
+    def test_schema_v2_requires_python_safe_path_for_each_suite(self):
+        import yaml
+        workflow,steps,logs=self.fixture()
+        data=yaml.safe_load(workflow)
+        job=next(j for j in data['jobs'].values()
+            if j.get('name')=='Validate committed PR integration diff')
+        suite_steps=[s for s in job['steps'] if 'unittest discover' in s.get('run','')]
+        for step in suite_steps:
+            step['env']={'PYTHONSAFEPATH':'1'}
+        safe_workflow=yaml.safe_dump(data,sort_keys=False)
+        evidence_call('verify_ci_suites',logs,2,steps,safe_workflow)
+        for step in suite_steps:
+            step.pop('env')
+        unsafe_workflow=yaml.safe_dump(data,sort_keys=False)
+        with self.assertRaisesRegex(release.ReleaseError,'PYTHONSAFEPATH'):
+            evidence_call('verify_ci_suites',logs,2,steps,unsafe_workflow)
     def test_committed_contract_accepts_six_and_historical_four(self):
         for revision,schema in [('HEAD',2),(release.BOOTSTRAP_BASELINE,1)]:
             workflow,steps,logs=self.fixture(revision)
