@@ -75,6 +75,12 @@ class GitHubBoundary(github_releases.GitHubAPI):
                 merge_base = git(self.root, "merge-base", base_sha, head_sha).decode().strip()
             except subprocess.CalledProcessError:
                 merge_base = None
+            ahead_commits = git(
+                self.root, "rev-list", "--reverse", f"{base_sha}..{head_sha}"
+            ).decode().splitlines()
+            behind_commits = git(
+                self.root, "rev-list", "--reverse", f"{head_sha}..{base_sha}"
+            ).decode().splitlines()
             if base_sha == head_sha:
                 status = "identical"
             elif merge_base == base_sha:
@@ -83,11 +89,22 @@ class GitHubBoundary(github_releases.GitHubAPI):
                 status = "behind"
             else:
                 status = "diverged"
+
+            def commit_record(sha):
+                tree_sha = git(
+                    self.root, "rev-parse", f"{sha}^{{tree}}"
+                ).decode().strip()
+                return {"sha": sha, "commit": {"tree": {"sha": tree_sha}}}
+
             return {
+                "url": self.base + f"/compare/{base_sha}...{head_sha}",
+                "base_commit": commit_record(base_sha),
+                "merge_base_commit": commit_record(merge_base) if merge_base else None,
                 "status": status,
-                "base_commit": {"sha": base_sha},
-                "head_commit": {"sha": head_sha},
-                "merge_base_commit": {"sha": merge_base} if merge_base else None,
+                "ahead_by": len(ahead_commits),
+                "behind_by": len(behind_commits),
+                "total_commits": len(ahead_commits),
+                "commits": [{"sha": sha} for sha in ahead_commits],
             }
         if "/actions/runs/41/artifacts?" in endpoint:
             return {"artifacts": self.action_artifacts}
