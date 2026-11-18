@@ -57,31 +57,80 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual([call.args[1] for call in request.call_args_list],
             [api.base,api.base+'/immutable-releases'])
 
-    def test_verify_main_ancestry_uses_authenticated_commit_comparison(self):
+    @staticmethod
+    def _main_ref(sha):
+        return {'ref':'refs/heads/main','object':{'type':'commit','sha':sha}}
+
+    @staticmethod
+    def _comparison(base_sha, merge_base_sha, status, ahead_by, behind_by, tree_sha='d'*40):
+        head_sha='b'*40
+        return {
+            'base_commit':{'sha':base_sha,'commit':{'tree':{'sha':tree_sha}}},
+            'merge_base_commit':{'sha':merge_base_sha,'commit':{'tree':{'sha':tree_sha}}},
+            'status':status,'ahead_by':ahead_by,'behind_by':behind_by,
+            'total_commits':ahead_by,'commits':[] if ahead_by==0 else [{'sha':head_sha}],
+        }
+
+    def test_verify_main_ancestry_accepts_github_identical_comparison_response(self):
+        api=github.GitHubAPI(); source='a'*40
+        comparison=self._comparison(source,source,'identical',0,0)
+        with patch.object(api,'request',side_effect=[self._main_ref(source),comparison]) as request:
+            self.assertEqual(api.verify_main_ancestry(source),source)
+        self.assertEqual(request.call_args_list[0].args[1],api.base+'/git/ref/heads/main')
+        self.assertEqual(request.call_args_list[1].args[1],api.base+f'/compare/{source}...{source}')
+        self.assertNotIn('head_commit',comparison)
+
+    def test_verify_main_ancestry_accepts_github_ahead_comparison_response(self):
         api=github.GitHubAPI(); source='a'*40; main='b'*40
-        ref={'ref':'refs/heads/main','object':{'type':'commit','sha':main}}
-        comparison={'status':'ahead','base_commit':{'sha':source},
-                    'head_commit':{'sha':main},'merge_base_commit':{'sha':source}}
-        with patch.object(api,'request',side_effect=[ref,comparison]) as request:
+        comparison=self._comparison(source,source,'ahead',1,0)
+        with patch.object(api,'request',side_effect=[self._main_ref(main),comparison]) as request:
             self.assertEqual(api.verify_main_ancestry(source),main)
         self.assertEqual(request.call_args_list[0].args[1],api.base+'/git/ref/heads/main')
         self.assertEqual(request.call_args_list[1].args[1],api.base+f'/compare/{source}...{main}')
+        self.assertNotIn('head_commit',comparison)
 
     def test_verify_main_ancestry_rejects_unrelated_equal_tree_and_bad_provider_shapes(self):
-        api=github.GitHubAPI(); source='a'*40; main='b'*40
+        api=github.GitHubAPI(); source='a'*40; main='b'*40; other='c'*40
+        bad_equal_tree=self._comparison(source,other,'ahead',1,0,tree_sha='d'*40)
         cases=(
-            ({'ref':'refs/heads/main','object':{'type':'commit','sha':main}},
-             {'status':'diverged','base_commit':{'sha':source},'head_commit':{'sha':main},
-              'merge_base_commit':{'sha':'c'*40}}),
-            ({'ref':'refs/heads/main','object':{'type':'commit','sha':main}},
-             {'status':'ahead','base_commit':{'sha':source},'head_commit':{'sha':main},
-              'merge_base_commit':{'sha':'c'*40}}),
-            ({'ref':'refs/heads/other','object':{'type':'commit','sha':main}},{}),
-            ({'ref':'refs/heads/main','object':{'type':'tree','sha':main}},{}),
-            ({'ref':'refs/heads/main','object':{'type':'commit','sha':'bad'}},{}),
+            (source,main,self._comparison(source,source,'behind',0,1)),
+            (source,main,self._comparison(source,other,'diverged',1,1)),
+            (source,main,self._comparison(other,source,'ahead',1,0)),
+            (source,main,self._comparison(source,other,'ahead',1,0)),
+            (source,main,self._comparison(source,source,'ahead',0,0)),
+            (source,main,self._comparison(source,source,'ahead',1,1)),
+            (source,main,self._comparison(source,source,'ahead',-1,0)),
+            (source,main,self._comparison(source,source,'ahead',True,0)),
+            (source,main,self._comparison(source,source,'ahead',1,'0')),
+            (source,main,{'status':'ahead','base_commit':{'sha':source},
+                          'merge_base_commit':{'sha':source},'behind_by':0}),
+            (source,source,self._comparison(source,source,'ahead',1,0)),
+            (source,main,self._comparison(source,source,'identical',0,0)),
+            (source,main,bad_equal_tree),
+            (source,main,[]),
+            (source,main,{'status':'ahead','base_commit':[],'merge_base_commit':{'sha':source},
+                          'ahead_by':1,'behind_by':0}),
+            (source,main,{'status':'ahead','base_commit':{'sha':source},
+                          'merge_base_commit':{'sha':'invalid'},'ahead_by':1,'behind_by':0}),
         )
-        for ref,comparison in cases:
-            with self.subTest(ref=ref,comparison=comparison), patch.object(api,'request',side_effect=[ref,comparison]):
+        for base,head,comparison in cases:
+            ref=self._main_ref(head)
+            with self.subTest(base=base,head=head,comparison=comparison), \
+                    patch.object(api,'request',side_effect=[ref,comparison]):
+                with self.assertRaises(github.APIError): api.verify_main_ancestry(base)
+
+    def test_verify_main_ancestry_rejects_untrusted_main_refs_and_identities(self):
+        api=github.GitHubAPI(); source='a'*40; main='b'*40
+        comparison=self._comparison(source,source,'ahead',1,0)
+        refs=(
+            {'ref':'refs/heads/other','object':{'type':'commit','sha':main}},
+            {'ref':'refs/heads/main','object':{'type':'tree','sha':main}},
+            {'ref':'refs/heads/main','object':{'type':'commit','sha':'bad'}},
+            {'ref':'refs/heads/main','object':None},
+            None,
+        )
+        for ref in refs:
+            with self.subTest(ref=ref), patch.object(api,'request',side_effect=[ref,comparison]):
                 with self.assertRaises(github.APIError): api.verify_main_ancestry(source)
 
     def test_verify_main_ancestry_rejects_non_full_source_sha_before_request(self):

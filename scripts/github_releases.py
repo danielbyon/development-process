@@ -100,14 +100,19 @@ class GitHubAPI:
             raise APIError('Authenticated main ancestry comparison is malformed')
         merge_base=comparison.get('merge_base_commit',{})
         base_commit=comparison.get('base_commit',{})
-        head_commit=comparison.get('head_commit',{})
-        if not all(isinstance(value,dict) for value in (merge_base,base_commit,head_commit)):
+        if not all(isinstance(value,dict) for value in (merge_base,base_commit)):
+            raise APIError('Authenticated main ancestry comparison is malformed')
+        ahead_by=comparison.get('ahead_by')
+        behind_by=comparison.get('behind_by')
+        if (type(ahead_by) is not int or type(behind_by) is not int or
+                ahead_by<0 or behind_by<0):
             raise APIError('Authenticated main ancestry comparison is malformed')
         expected_status='identical' if source_revision==main_revision else 'ahead'
         if (comparison.get('status')!=expected_status or
                 merge_base.get('sha')!=source_revision or
                 base_commit.get('sha')!=source_revision or
-                head_commit.get('sha')!=main_revision):
+                (source_revision==main_revision and (ahead_by!=0 or behind_by!=0)) or
+                (source_revision!=main_revision and (ahead_by==0 or behind_by!=0))):
             raise APIError('Frozen source is not in authenticated main history')
         return main_revision
     def run(self, run_id): return self.request('GET',self.base+f'/actions/runs/{int(run_id)}')
