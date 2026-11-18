@@ -3,14 +3,6 @@ name: Skill release
 on:
   workflow_dispatch:
     inputs:
-      source_revision:
-        description: Full reviewed source commit on main
-        required: true
-        type: string
-      evidence_reference:
-        description: Repository-scoped API endpoint for an authenticated historical evidence export
-        required: false
-        type: string
       supersedes:
         description: Earlier CalVer corrected by this release
         required: false
@@ -52,21 +44,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
-          RELEASE_WORKFLOW_WRITE_AUTHORIZED: ${{ vars.RELEASE_WORKFLOW_WRITE_AUTHORIZED }}
-          SOURCE_REVISION: ${{ inputs.source_revision }}
-          RELEASE_EVIDENCE_REFERENCE: ${{ inputs.evidence_reference }}
-          BUILDER_REVISION: ${{ github.sha }}
-          RELEASE_RUN_ID: ${{ github.run_id }}
-          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
           RELEASE_SUPERSEDES: ${{ inputs.supersedes }}
           RELEASE_CORRECTION_REASON: ${{ inputs.correction_reason }}
         run: >-
           python3 scripts/skill_release.py preflight
           --root "$GITHUB_WORKSPACE"
-          --source-revision "$SOURCE_REVISION"
-          --builder-revision "$BUILDER_REVISION"
-          --run-id "$RELEASE_RUN_ID"
-          --run-attempt "$RELEASE_RUN_ATTEMPT"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"
           --supersedes "$RELEASE_SUPERSEDES"
           --correction-reason "$RELEASE_CORRECTION_REASON"
           --context "$RUNNER_TEMP/release-context.json"
@@ -171,14 +155,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
-          RELEASE_WORKFLOW_WRITE_AUTHORIZED: ${{ vars.RELEASE_WORKFLOW_WRITE_AUTHORIZED }}
-          RELEASE_WORKFLOW_WRITE_TOKEN: ${{ secrets.RELEASE_WORKFLOW_WRITE_TOKEN }}
-          RELEASE_RUN_ID: ${{ github.run_id }}
-          RELEASE_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: >-
           python3 scripts/skill_release.py publish
           --root "$GITHUB_WORKSPACE"
           --context "$RUNNER_TEMP/release-bundle/release-context.json"
           --artifact-dir "$RUNNER_TEMP/release-bundle"
-          --run-id "$RELEASE_RUN_ID"
-          --run-attempt "$RELEASE_RUN_ATTEMPT"
+          --run-id "$GITHUB_RUN_ID"
+          --run-attempt "$GITHUB_RUN_ATTEMPT"

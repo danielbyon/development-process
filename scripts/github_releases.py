@@ -16,12 +16,6 @@ class GitHubAPI:
             raise APIError('Unexpected repository')
         self.repository = repository
         self.base = '/repos/' + repository
-        self.historical_publication = False
-
-    def authorize_historical_publication(self):
-        if os.environ.get('RELEASE_WORKFLOW_WRITE_AUTHORIZED')!='true' or not os.environ.get('RELEASE_WORKFLOW_WRITE_TOKEN'):
-            raise APIError('Separate owner-authorized Workflows-write capability required')
-        self.historical_publication=True
 
     def request(self, method, endpoint, data=None, raw=False):
         command = ['gh','api','--method',method,endpoint,'-H','X-GitHub-Api-Version: 2022-11-28']
@@ -31,12 +25,10 @@ class GitHubAPI:
             command += ['--input','-']; payload=json.dumps(data).encode()
         try:
             environment=os.environ.copy()
-            if method=='GET' and (endpoint.endswith('/immutable-releases') or '/rules/' in endpoint or '/rulesets' in endpoint or '/collaborators' in endpoint):
+            if method=='GET' and endpoint==self.base+'/immutable-releases':
                 token=environment.get('RELEASE_ADMIN_READ_TOKEN')
                 if not token: raise APIError('Owner-provisioned Administration-read credential required')
                 environment['GH_TOKEN']=token
-            if method!='GET' and self.historical_publication:
-                environment['GH_TOKEN']=environment['RELEASE_WORKFLOW_WRITE_TOKEN']
             result=subprocess.run(command,input=payload,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=True,env=environment)
             return result.stdout if raw else json.loads(result.stdout or b'null')
         except (subprocess.CalledProcessError, ValueError) as error:
@@ -62,9 +54,11 @@ class GitHubAPI:
         import hashlib
         artifacts=self.pages(self.base+f'/actions/runs/{int(run_id)}/artifacts')
         bundles=[a for a in artifacts if re.fullmatch(r'release-bundle-[1-9][0-9]*',a.get('name',''))]
-        if not bundles: return None
-        selected=min(bundles,key=lambda a:int(a['name'].rsplit('-',1)[1]))
-        if selected.get('expired'): raise APIError('Original frozen bundle expired; preserve and block')
+        contexts=[a for a in artifacts if re.fullmatch(r'release-context-[1-9][0-9]*',a.get('name',''))]
+        candidates=bundles or contexts
+        if not candidates: return None
+        selected=min(candidates,key=lambda a:int(a['name'].rsplit('-',1)[1]))
+        if selected.get('expired'): raise APIError('Original frozen release context expired; preserve and block')
         payload=self.request('GET',self.base+f'/actions/artifacts/{selected["id"]}/zip',raw=True)
         if selected.get('digest')!='sha256:'+hashlib.sha256(payload).hexdigest():
             raise APIError('Original-run artifact digest unavailable or mismatched')
@@ -73,25 +67,49 @@ class GitHubAPI:
             if len(names)!=len(set(names)) or 'release-context.json' not in names:
                 raise APIError('Original context missing or duplicated')
             context=json.loads(archive.read('release-context.json'))
+            if not isinstance(context,dict):
+                raise APIError('Original release context is malformed')
             expected=context.get('qualified_artifacts',{})
-            if set(names)!=set(expected)|{'release-context.json'}: raise APIError('Original bundle asset set mismatch')
+            if not isinstance(expected,dict):
+                raise APIError('Original release context is malformed')
+            if set(names)!=set(expected)|{'release-context.json'}:
+                raise APIError('Original bundle asset set mismatch')
             for name,sha in expected.items():
                 if hashlib.sha256(archive.read(name)).hexdigest()!=sha: raise APIError('Original asset hash mismatch')
             return context
 
     def settings(self):
-        rules=self.request('GET',self.base+'/rules/branches/main')
-        source_ids={r.get('ruleset_id',r.get('rule_source_id')) for r in rules}
-        source_ids.discard(None)
         return {'repository':self.request('GET',self.base),
-                'immutability':self.request('GET',self.base+'/immutable-releases'),
-                'rules':rules,
-                'rulesets':[self.request('GET',self.base+f'/rulesets/{int(value)}') for value in source_ids],
-                'collaborators':self.pages(self.base+'/collaborators?affiliation=all')}
-    def ci_jobs(self, run_id, attempt):
-        return self.pages(self.base+f'/actions/runs/{int(run_id)}/attempts/{int(attempt)}/jobs')
-    def job_log(self, job_id):
-        return self.request('GET',self.base+f'/actions/jobs/{int(job_id)}/logs',raw=True).decode('utf-8')
+                'immutability':self.request('GET',self.base+'/immutable-releases')}
+    def verify_main_ancestry(self, source_revision):
+        """Confirm the frozen commit is an ancestor of authenticated main."""
+        if not isinstance(source_revision,str) or not re.fullmatch(r'[0-9a-f]{40}',source_revision):
+            raise APIError('Main ancestry requires a full commit SHA')
+        reference=self.request('GET',self.base+'/git/ref/heads/main')
+        if not isinstance(reference,dict):
+            raise APIError('Authenticated main commit reference is malformed')
+        object_record=reference.get('object',{})
+        if not isinstance(object_record,dict):
+            raise APIError('Authenticated main commit object is malformed')
+        main_revision=object_record.get('sha')
+        if (reference.get('ref')!='refs/heads/main' or object_record.get('type')!='commit' or
+                not isinstance(main_revision,str) or not re.fullmatch(r'[0-9a-f]{40}',main_revision)):
+            raise APIError('Authenticated main commit reference is malformed')
+        comparison=self.request('GET',self.base+f'/compare/{source_revision}...{main_revision}')
+        if not isinstance(comparison,dict):
+            raise APIError('Authenticated main ancestry comparison is malformed')
+        merge_base=comparison.get('merge_base_commit',{})
+        base_commit=comparison.get('base_commit',{})
+        head_commit=comparison.get('head_commit',{})
+        if not all(isinstance(value,dict) for value in (merge_base,base_commit,head_commit)):
+            raise APIError('Authenticated main ancestry comparison is malformed')
+        expected_status='identical' if source_revision==main_revision else 'ahead'
+        if (comparison.get('status')!=expected_status or
+                merge_base.get('sha')!=source_revision or
+                base_commit.get('sha')!=source_revision or
+                head_commit.get('sha')!=main_revision):
+            raise APIError('Frozen source is not in authenticated main history')
+        return main_revision
     def run(self, run_id): return self.request('GET',self.base+f'/actions/runs/{int(run_id)}')
     def record(self, reference):
         # References are repository-scoped API paths, never arbitrary URLs.
@@ -112,8 +130,7 @@ class GitHubAPI:
         endpoint='https://uploads.github.com'+self.base+f'/releases/{int(release_id)}/assets?name='+quote(path.name,safe='')
         try:
             subprocess.run(['gh','api','--method','POST',endpoint,'-H','Content-Type: application/octet-stream',
-                            '--input',str(path)],check=True,capture_output=True,
-                           env={**os.environ,**({'GH_TOKEN':os.environ['RELEASE_WORKFLOW_WRITE_TOKEN']} if self.historical_publication else {})})
+                            '--input',str(path)],check=True,capture_output=True)
         except subprocess.CalledProcessError as error: raise APIError('Upload failed; reconcile assets') from error
     def asset(self, asset):
         return self.request('GET',self.base+f'/releases/assets/{int(asset["id"])}',raw=True)
@@ -132,7 +149,12 @@ class GitHubAPI:
             def valid_invocation(statement):
                 invocation=statement.get('predicate',{}).get('runDetails',{}).get('metadata',{}).get('invocationId')
                 match=re.fullmatch(invocation_pattern,invocation) if isinstance(invocation,str) else None
-                return bool(match and int(match[1])>=context['qualification']['run_attempt'])
+                if not match:
+                    return False
+                expected_attempt=context.get('validation_attempt')
+                if expected_attempt is not None:
+                    return type(expected_attempt) is int and int(match[1])==expected_attempt
+                return int(match[1])>=context['qualification']['run_attempt']
             manifest_digest=hashlib.sha256((Path(directory)/'release-manifest.json').read_bytes()).hexdigest()
             statements=[item.get('verificationResult',{}).get('statement',{}) for item in results]
             if not any(

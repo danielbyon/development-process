@@ -70,6 +70,20 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("gh release", command)
         subprocess.run(["bash", "-n"], input=command, text=True, check=True)
 
+    def test_trusted_main_git_integration_runs_in_pull_request_ci(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())
+        steps = workflow["jobs"]["committed-pr-diff"]["steps"]
+        integration = next(
+            (step for step in steps if step.get("name") == "Run trusted-main release integration tests"),
+            None,
+        )
+        self.assertIsNotNone(integration)
+        self.assertEqual(integration["env"], {"PYTHONSAFEPATH": "1"})
+        self.assertEqual(
+            integration["run"],
+            "python3 -m unittest discover -s tests -p trusted_main_integration_tests.py -v",
+        )
+
     def test_ci_candidate_context_is_unpublished_and_binds_distinct_revisions(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
         step = next(s for s in workflow["jobs"]["committed-pr-diff"]["steps"]
@@ -193,7 +207,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
     def test_only_owner_manual_main_dispatch_can_enter_preflight(self) -> None:
         triggers = self.workflow.get("on", self.workflow.get(True))
         self.assertEqual(set(triggers), {"workflow_dispatch"})
-        self.assertTrue(triggers["workflow_dispatch"]["inputs"]["source_revision"]["required"])
+        self.assertEqual(set(triggers["workflow_dispatch"]["inputs"]),
+                         {"supersedes", "correction_reason"})
         guard = self.workflow["jobs"]["preflight"]["if"]
         for predicate in (
             "github.repository == 'danielbyon/development-process'",
@@ -203,6 +218,24 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         ):
             self.assertIn(predicate, guard)
         self.assertFalse(self.workflow["concurrency"]["cancel-in-progress"])
+
+    def test_release_source_and_builder_are_the_dispatch_sha(self) -> None:
+        triggers = self.workflow.get("on", self.workflow.get(True))
+        self.assertEqual(set(triggers["workflow_dispatch"].get("inputs", {})),
+                         {"supersedes", "correction_reason"})
+        for job in self.workflow["jobs"].values():
+            checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@"))
+            self.assertEqual(checkout["with"]["ref"], "${{ github.sha }}")
+        preflight = next(s for s in self.workflow["jobs"]["preflight"]["steps"]
+                         if "skill_release.py preflight" in s.get("run", ""))
+        self.assertNotIn("--source-revision", preflight["run"])
+        self.assertNotIn("--builder-revision", preflight["run"])
+        self.assertNotIn("SOURCE_REVISION", preflight.get("env", {}))
+        self.assertNotIn("BUILDER_REVISION", preflight.get("env", {}))
+        self.assertNotIn("RELEASE_EVIDENCE_REFERENCE", preflight.get("env", {}))
+        encoded = json.dumps(self.workflow)
+        self.assertNotIn("RELEASE_WORKFLOW_WRITE_AUTHORIZED", encoded)
+        self.assertNotIn("RELEASE_WORKFLOW_WRITE_TOKEN", encoded)
 
     def test_credentials_are_isolated_from_qualification(self) -> None:
         self.assertEqual(self.workflow["permissions"], {"contents": "read"})
@@ -237,24 +270,17 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertEqual(steps[sign]["with"], {"subject-path": "${{ runner.temp }}/release-bundle/release-manifest.json", "push-to-registry": False, "create-storage-record": False})
         self.assertNotIn("continue-on-error", json.dumps(job))
 
-    def test_workflow_write_requires_explicit_owner_variable(self) -> None:
+    def test_immutable_release_read_uses_admin_credential_without_workflow_write(self) -> None:
         jobs = self.workflow["jobs"]
         for job_name, operation in (("preflight", "preflight"), ("publication", "publish")):
             step = next(s for s in jobs[job_name]["steps"]
                         if f"skill_release.py {operation}" in s.get("run", ""))
-            self.assertEqual(step["env"]["RELEASE_WORKFLOW_WRITE_AUTHORIZED"],
-                             "${{ vars.RELEASE_WORKFLOW_WRITE_AUTHORIZED }}")
-        publication = next(s for s in jobs["publication"]["steps"]
-                           if "skill_release.py publish" in s.get("run", ""))
-        self.assertEqual(publication["env"]["RELEASE_WORKFLOW_WRITE_TOKEN"],
-                         "${{ secrets.RELEASE_WORKFLOW_WRITE_TOKEN }}")
-        triggers = self.workflow.get("on", self.workflow.get(True))
-        reference = triggers["workflow_dispatch"]["inputs"]["evidence_reference"]
-        self.assertFalse(reference["required"])
-        preflight = next(s for s in jobs["preflight"]["steps"]
-                         if "skill_release.py preflight" in s.get("run", ""))
-        self.assertEqual(preflight["env"]["RELEASE_EVIDENCE_REFERENCE"],
-                         "${{ inputs.evidence_reference }}")
+            self.assertEqual(step["env"]["RELEASE_ADMIN_READ_TOKEN"],
+                             "${{ secrets.RELEASE_ADMIN_READ_TOKEN }}")
+        encoded = json.dumps(self.workflow)
+        self.assertNotIn("RELEASE_WORKFLOW_WRITE_AUTHORIZED", encoded)
+        self.assertNotIn("RELEASE_WORKFLOW_WRITE_TOKEN", encoded)
+        self.assertNotIn("evidence_reference", encoded)
 
     def test_attempt_bound_artifacts_and_original_run_lookup(self) -> None:
         for job in self.workflow["jobs"].values():
@@ -262,9 +288,38 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
                 if "artifact@" in step.get("uses", ""):
                     self.assertIn("github.run_attempt", step["with"]["name"])
         preflight = next(s for s in self.workflow["jobs"]["preflight"]["steps"] if "preflight" in s.get("run", ""))
-        self.assertEqual(preflight["env"]["RELEASE_RUN_ID"], "${{ github.run_id }}")
-        self.assertIn('--run-attempt "$RELEASE_RUN_ATTEMPT"', preflight["run"])
+        self.assertIn('--run-id "$GITHUB_RUN_ID"', preflight["run"])
+        self.assertIn('--run-attempt "$GITHUB_RUN_ATTEMPT"', preflight["run"])
         self.assertNotIn("date ", preflight["run"])
+
+    def test_review_and_merge_authorization_remain_premerge_requirements(self) -> None:
+        process = (ROOT / "docs/PROCESS.md").read_text()
+        review_and_ci = process.split("## 6. Independent review", 1)[1].split("## 9.", 1)[0]
+        self.assertIn("independent review", review_and_ci.lower())
+        self.assertIn("chatgpt inspection", review_and_ci.lower())
+        self.assertIn("required ci", review_and_ci.lower())
+        self.assertIn("owner explicitly authorizes merging", review_and_ci.lower())
+
+    def test_release_docs_use_trusted_main_without_receipt_or_baseline_gates(self) -> None:
+        guide = (ROOT / "docs/skill-releases.md").read_text().casefold()
+        policy = (ROOT / "docs/PROCESS.md").read_text().casefold()
+        decisions = (ROOT / "docs/DECISIONS.md").read_text().casefold()
+        adr = (ROOT / "docs/adr/0001-immutable-skill-releases.md").read_text().casefold()
+        for required in (
+            "github.sha", "source and builder", "authenticated `main` ref", "ancestor",
+            "policy revision", "all six required test suites",
+            "eight assets", "immutable-release capability endpoint",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, guide)
+        self.assertIn("does not reconstruct pr review receipts", policy)
+        self.assertIn("no baseline-admission step", policy)
+        self.assertIn("release evidence chronology and prospective baseline — superseded", decisions)
+        self.assertIn("current owner decision (2026-11-17)", decisions)
+        self.assertIn("superseded by the owner-approved issue #32 decision", adr)
+        for obsolete in ("capture-execution", "prepare-index", "admit-baseline"):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, guide)
 
     def test_optional_tag_hardening_allows_creation(self) -> None:
         ruleset = json.loads((ROOT / ".github/rulesets/calver-tags.json").read_text())

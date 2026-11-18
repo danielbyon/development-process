@@ -86,22 +86,39 @@ jobs:
         run: python -m pip install -r requirements-ci.txt
 
       - name: Run shipped Skill workflow contract checks
+        env:
+          PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_workflow_contract.py -v
 
       - name: Run distribution and staging behavior tests
+        env:
+          PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v
 
       - name: Run Codex-compatible temporary staging smoke test
+        env:
+          PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_distribution_smoke.py -v
 
       - name: Run primary-main fast-forward safety tests
+        env:
+          PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_primary_main_fast_forward.py -v
 
       - name: Run release controller tests
+        env:
+          PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_skill_releases.py -v
 
       - name: Run GitHub release adapter tests
+        env:
+          PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_github_releases.py -v
+
+      - name: Run trusted-main release integration tests
+        env:
+          PYTHONSAFEPATH: "1"
+        run: python3 -m unittest discover -s tests -p trusted_main_integration_tests.py -v
 
       - name: Check out the exact PR source for package provenance
         uses: actions/checkout@v4

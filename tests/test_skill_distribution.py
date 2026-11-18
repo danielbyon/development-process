@@ -8,12 +8,15 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 import scripts.skill_distribution as distribution_module
 from scripts.skill_distribution import (
@@ -1041,6 +1044,19 @@ class ReleasePackageTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(DistributionError):
                 distribution_module.build_release_packages(self.root, self.base / "out", self.context | changes)
 
+    def test_release_policy_revision_must_match_source_bytes(self):
+        policy_path = self.root / "docs/PROCESS.md"
+        policy_path.write_text(policy_path.read_text() + "\nPolicy identity regression fixture.\n")
+        git(self.root, "add", "docs/PROCESS.md")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "-qm",
+            "Changed policy content")
+        wrong_policy = git(self.root, "rev-parse", "HEAD")
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(
+                self.root, self.base / "bad-policy", self.context | {"policy_revision": wrong_policy},
+            )
+
     def test_candidate_staging_is_idempotent_and_rejects_drift(self):
         output, staging = self.base / "packages", self.base / "staging"
         distribution_module.build_release_packages(self.root, output, self.context)
@@ -1082,7 +1098,7 @@ class ReleasePackageTests(unittest.TestCase):
         legacy_base = self.base / "legacy"
         legacy_base.mkdir()
         root, revision = source_checkout(legacy_base)
-        context = self.context | {"source_revision": revision}
+        context = self.context | {"source_revision": revision, "builder_revision": revision}
         self.assertEqual(len(distribution_module.build_release_packages(root, self.base / "legacy-release", context)), 8)
 
     def test_rejects_self_consistent_forged_sidecar_and_archive(self):
