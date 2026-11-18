@@ -149,7 +149,12 @@ class GitHubAPI:
             def valid_invocation(statement):
                 invocation=statement.get('predicate',{}).get('runDetails',{}).get('metadata',{}).get('invocationId')
                 match=re.fullmatch(invocation_pattern,invocation) if isinstance(invocation,str) else None
-                return bool(match and int(match[1])>=context['qualification']['run_attempt'])
+                if not match:
+                    return False
+                expected_attempt=context.get('validation_attempt')
+                if expected_attempt is not None:
+                    return type(expected_attempt) is int and int(match[1])==expected_attempt
+                return int(match[1])>=context['qualification']['run_attempt']
             manifest_digest=hashlib.sha256((Path(directory)/'release-manifest.json').read_bytes()).hexdigest()
             statements=[item.get('verificationResult',{}).get('statement',{}) for item in results]
             if not any(

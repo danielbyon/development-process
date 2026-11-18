@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import io
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import sys
@@ -36,6 +40,13 @@ class GitHubBoundary(github_releases.GitHubAPI):
         self.root = root
         self.source = source
         self.main = main
+        self.attempt = 1
+        self.action_artifacts = []
+        self.artifact_payloads = {}
+        self.remote_releases = []
+        self.remote_tags = []
+        self.remote_assets = {}
+        self.remote_events = []
 
     def request(self, method, endpoint, data=None, raw=False):
         if method != "GET" or data is not None:
@@ -51,7 +62,7 @@ class GitHubBoundary(github_releases.GitHubAPI):
                 "head_sha": self.source,
                 "actor": {"id": 123, "login": "danielbyon"},
                 "triggering_actor": {"id": 123, "login": "danielbyon"},
-                "run_attempt": 1, "created_at": CREATED_AT,
+                "run_attempt": self.attempt, "created_at": CREATED_AT,
                 "path": ".github/workflows/skill-release.yml@refs/heads/main",
             }
         if endpoint == self.base + "/git/ref/heads/main":
@@ -79,16 +90,66 @@ class GitHubBoundary(github_releases.GitHubAPI):
                 "merge_base_commit": {"sha": merge_base} if merge_base else None,
             }
         if "/actions/runs/41/artifacts?" in endpoint:
-            return {"artifacts": []}
+            return {"artifacts": self.action_artifacts}
+        if "/actions/artifacts/" in endpoint and endpoint.endswith("/zip"):
+            artifact_id = endpoint.rsplit("/", 2)[1]
+            return self.artifact_payloads[artifact_id]
         if endpoint.startswith(self.base + "/releases?"):
-            return []
+            return self.remote_releases
         if endpoint.startswith(self.base + "/git/matching-refs/tags/?"):
-            return []
+            return self.remote_tags
         raise AssertionError(f"Unexpected GitHub endpoint: {endpoint}")
+
+    def save_action_artifact(self, name: str, artifact_id: int, files: dict[str, bytes]):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path, payload in sorted(files.items()):
+                archive.writestr(path, payload)
+        payload = buffer.getvalue()
+        self.action_artifacts = [{
+            "name": name, "id": artifact_id, "expired": False,
+            "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+        }]
+        self.artifact_payloads[str(artifact_id)] = payload
+
+    def releases(self):
+        return self.remote_releases
+
+    def tags(self):
+        return self.remote_tags
+
+    def asset(self, asset):
+        return self.remote_assets[asset["name"]]
+
+    def create_draft(self, context, body):
+        self.remote_events.append("create_draft")
+        raise AssertionError("The retry should recover its matching draft")
+
+    def upload(self, release_id, path):
+        self.remote_events.append("upload")
+        self.remote_assets[path.name] = path.read_bytes()
+
+    def create_tag(self, tag, revision):
+        self.remote_events.append("create_tag")
+        self.remote_tags.append({"ref": "refs/tags/" + tag,
+                                 "object": {"sha": revision, "type": "commit"}})
+
+    def release(self, release_id):
+        return self.remote_releases[0]
+
+    def publish(self, release_id):
+        self.remote_events.append("publish")
+        self.remote_releases[0]["draft"] = False
+        self.remote_releases[0]["immutable"] = True
+
+    def verify_attestation(self, tag, directory):
+        self.remote_events.append("verify_release_attestation")
 
 
 class TrustedMainIntegrationTests(unittest.TestCase):
     def setUp(self):
+        for pattern in skill_release.SUITES:
+            sys.modules.pop(Path(pattern).stem, None)
         self.temporary = tempfile.TemporaryDirectory(prefix="trusted-main-release-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "repo"
@@ -173,6 +234,115 @@ class TrustedMainIntegrationTests(unittest.TestCase):
         for key in ("evidence", "evidence_snapshots", "evidence_digest",
                     "authenticated_evidence", "baseline_admission"):
             self.assertNotIn(key, context)
+
+    def test_completed_qualification_retry_reuses_assets_and_current_attempt_attestation(self):
+        api = GitHubBoundary(self.root, self.source, self.main)
+        artifacts1 = self.root.parent / "attempt-1"
+        artifacts2 = self.root.parent / "attempt-2"
+        with patch.dict(os.environ, self.dispatch_environment(), clear=False):
+            context1 = skill_release.preflight(self.root, api, 41, 1)
+            context1 = skill_release.qualify(self.root, context1, artifacts1)
+            skill_release.verify_bundle(self.root, artifacts1, context1)
+
+        (artifacts1 / "release-context.json").write_bytes(
+            skill_release.canonical(context1) + b"\n"
+        )
+        hashes1 = skill_release.artifact_hashes(artifacts1)
+        bytes1 = {name: (artifacts1 / name).read_bytes() for name in hashes1}
+        frozen1 = {key: value for key, value in context1.items()
+                   if key not in ("qualified_artifacts", "validation_attempt", "current_validation")}
+        api.save_action_artifact("release-bundle-1", 301, {
+            **bytes1,
+            "release-context.json": (artifacts1 / "release-context.json").read_bytes(),
+        })
+        api.attempt = 2
+        environment2 = self.dispatch_environment()
+        environment2["GITHUB_RUN_ATTEMPT"] = "2"
+        with patch.dict(os.environ, environment2, clear=False):
+            context2 = skill_release.preflight(self.root, api, 41, 2)
+            self.assertNotIn("current_validation", context2)
+            context2 = skill_release.qualify(self.root, context2, artifacts2)
+            skill_release.verify_signing_context(self.root, context2)
+            skill_release.verify_bundle(self.root, artifacts2, context2)
+
+            hashes2 = skill_release.artifact_hashes(artifacts2)
+            bytes2 = {name: (artifacts2 / name).read_bytes() for name in hashes2}
+            frozen2 = {key: value for key, value in context2.items()
+                       if key not in ("qualified_artifacts", "validation_attempt", "current_validation")}
+            self.assertEqual(frozen2, frozen1)
+            self.assertEqual(context1["qualification"]["run_attempt"], 1)
+            self.assertEqual(context2["qualification"]["run_attempt"], 1)
+            self.assertEqual(context2["current_validation"]["run_attempt"], 2)
+            self.assertEqual(context2["current_validation"]["suites"], context2["qualification"]["suites"])
+            self.assertEqual(hashes2, hashes1)
+            self.assertEqual(bytes2, bytes1)
+            self.assertEqual(context2["qualified_artifacts"], context1["qualified_artifacts"])
+
+            identity = skill_release.digest(skill_release.canonical(frozen2))
+            body = "Release context: " + identity
+            api.remote_releases = [{
+                "id": 900, "tag_name": context1["release_version"],
+                "name": context1["release_version"], "body": body,
+                "draft": True, "prerelease": False,
+                "assets": [{"name": name, "id": index}
+                           for index, name in enumerate(sorted(bytes1), 1)],
+            }]
+            api.remote_assets = dict(bytes1)
+
+            real_run = subprocess.run
+            attested_attempt = {"value": 1}
+
+            def attestation_run(command, *args, **kwargs):
+                if command[:3] == ["gh", "attestation", "verify"]:
+                    manifest = Path(command[3]).read_bytes()
+                    statement = {
+                        "predicateType": "https://slsa.dev/provenance/v1",
+                        "subject": [{"name": "release-manifest.json", "digest": {
+                            "sha256": hashlib.sha256(manifest).hexdigest()}}],
+                        "predicate": {"runDetails": {
+                            "builder": {"id": "https://github.com/" + skill_release.REPOSITORY +
+                                "/.github/workflows/skill-release.yml@refs/heads/main"},
+                            "metadata": {"invocationId": "https://github.com/" +
+                                skill_release.REPOSITORY + "/actions/runs/41/attempts/" +
+                                str(attested_attempt["value"])},
+                        }},
+                    }
+                    result = [{"verificationResult": {"statement": statement}}]
+                    return subprocess.CompletedProcess(command, 0, json.dumps(result).encode(), b"")
+                return real_run(command, *args, **kwargs)
+
+            with patch.object(github_releases.subprocess, "run", side_effect=attestation_run):
+                with self.assertRaisesRegex(github_releases.APIError, "invocation"):
+                    api.verify_qualification_attestation(artifacts2, context2)
+                attested_attempt["value"] = 2
+                api.verify_qualification_attestation(artifacts2, context2)
+                published = skill_release.publish(self.root, api, context2, artifacts2)
+
+        self.assertEqual(published["draft"], False)
+        self.assertEqual(published["immutable"], True)
+        self.assertNotIn("create_draft", api.remote_events)
+        self.assertNotIn("upload", api.remote_events)
+        self.assertEqual(api.remote_events, ["create_tag", "publish", "verify_release_attestation"])
+
+    def test_preflight_only_context_can_be_recovered_and_qualified_on_retry(self):
+        api = GitHubBoundary(self.root, self.source, self.main)
+        environment1 = self.dispatch_environment()
+        with patch.dict(os.environ, environment1, clear=False):
+            context1 = skill_release.preflight(self.root, api, 41, 1)
+        api.save_action_artifact("release-context-1", 302, {
+            "release-context.json": skill_release.canonical(context1) + b"\n",
+        })
+        api.attempt = 2
+        environment2 = self.dispatch_environment()
+        environment2["GITHUB_RUN_ATTEMPT"] = "2"
+        with patch.dict(os.environ, environment2, clear=False):
+            context2 = skill_release.preflight(self.root, api, 41, 2)
+            self.assertNotIn("qualification", context2)
+            self.assertNotIn("qualified_artifacts", context2)
+            context2 = skill_release.qualify(self.root, context2, self.root.parent / "retry")
+        self.assertEqual(context2["run_attempt"], 1)
+        self.assertEqual(context2["qualification"]["run_attempt"], 2)
+        self.assertEqual(context2["current_validation"]["run_attempt"], 2)
 
     def test_equal_tree_commit_outside_main_ancestry_is_rejected(self):
         self.assertEqual(

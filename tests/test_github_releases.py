@@ -109,6 +109,19 @@ class AdapterTests(unittest.TestCase):
         artifact['digest']='sha256:wrong'
         with patch.object(api,'pages',return_value=[artifact]),patch.object(api,'request',return_value=payload):
             with self.assertRaises(github.APIError):api.original_context(3)
+    def test_original_context_rejects_changed_asset_when_archive_digest_matches(self):
+        import io,json,zipfile,hashlib
+        context={'run_id':3,'qualified_artifacts':{'payload':hashlib.sha256(b'original').hexdigest()}}
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:
+            archive.writestr('release-context.json',json.dumps(context))
+            archive.writestr('payload',b'changed')
+        payload=buffer.getvalue();api=github.GitHubAPI()
+        artifact={'name':'release-bundle-1','id':4,'expired':False,
+                  'digest':'sha256:'+hashlib.sha256(payload).hexdigest()}
+        with patch.object(api,'pages',return_value=[artifact]),patch.object(api,'request',return_value=payload):
+            with self.assertRaisesRegex(github.APIError,'asset hash mismatch'):
+                api.original_context(3)
     def test_original_context_recovers_preflight_before_qualification(self):
         import io,json,zipfile,hashlib
         context={'repository':'danielbyon/development-process','release_version':'2026.11.17'}
@@ -126,6 +139,29 @@ class AdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(github.APIError,'expired'):api.original_context(3)
 
 class QualificationAttestationTests(unittest.TestCase):
+    def test_retry_attestation_must_match_current_validation_attempt(self):
+        import json,tempfile,hashlib
+        with tempfile.TemporaryDirectory() as temporary:
+            directory=Path(temporary); manifest=b'frozen manifest'
+            (directory/'release-manifest.json').write_bytes(manifest)
+            context={'builder_revision':'b'*40,'run_id':7,
+                     'run_attempt':1,'validation_attempt':2,
+                     'qualification':{'run_attempt':1}}
+            statement={'subject':[{'name':'release-manifest.json','digest':{
+                'sha256':hashlib.sha256(manifest).hexdigest()}}],
+                'predicateType':'https://slsa.dev/provenance/v1',
+                'predicate':{'runDetails':{
+                    'builder':{'id':'https://github.com/danielbyon/development-process/.github/workflows/skill-release.yml@refs/heads/main'},
+                    'metadata':{'invocationId':'https://github.com/danielbyon/development-process/actions/runs/7/attempts/1'}}}}
+            result=[{'verificationResult':{'statement':statement}}]
+            with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,json.dumps(result).encode(),b'')):
+                with self.assertRaisesRegex(github.APIError,'invocation'):
+                    github.GitHubAPI().verify_qualification_attestation(directory,context)
+            statement['predicate']['runDetails']['metadata']['invocationId']=(
+                'https://github.com/danielbyon/development-process/actions/runs/7/attempts/2')
+            with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,json.dumps(result).encode(),b'')):
+                github.GitHubAPI().verify_qualification_attestation(directory,context)
+
     def test_attestation_pins_builder_workflow_and_run(self):
         import json, tempfile, hashlib
         temporary=tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)

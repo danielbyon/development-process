@@ -32,7 +32,7 @@ The merge process owns independent review, direct ChatGPT source/test inspection
 
 ## 4. Qualification and assets
 
-The controller operations are `preflight`, `qualify`, `verify-bundle`, `publish`, `verify-release` and `resolve-task`. Use the merged controller's help for supported flags. Dispatch the workflow through GitHub Actions with the full selected source SHA; never run publication merely to test a candidate. Optional supersession context identifies a prior release and correction. Version allocation is automatic.
+The controller operations are `preflight`, `qualify`, `verify-bundle`, `publish`, `verify-release` and `resolve-task`. Use the merged controller's help for supported flags. Dispatch the workflow on `main` through GitHub Actions. The authenticated dispatch event's `github.sha` selects the source and builder; the workflow accepts no source SHA input. Never run publication merely to test a candidate. Optional supersession context identifies a prior release and correction. Version allocation is automatic.
 
 Preflight freezes repository and run identity, original creation time, Pacific date/version, source/policy/builder and transformation identity. A repository-wide concurrency lock serializes publication. Derive `YYYY.MM.DD` from original run creation in `America/Los_Angeles`; additional releases use `.2`, `.3`, and so on. Queue delay, midnight, DST and retry do not change the frozen date/version. Check occupied drafts and tags before allocation; a frozen collision blocks rather than silently renumbering.
 
@@ -66,7 +66,7 @@ Verify title/tag equality, tag target, `draft=false`, `prerelease=false`, `immut
 | Exact release already published | Complete verification only |
 | Published with unavailable/failed verification | Report published, verification pending/blocked; never republish or repair in place |
 
-For recovery, rerun the complete workflow so qualification and both builds run again. Keep the original run ID, source, policy, builder, date and version. The new attempt must match the frozen suite results and asset hashes before it can publish. Draft notes alone cannot establish ownership. The concurrency lock does not exclude manual/API writers, so reconcile remote state before every retry.
+For recovery, rerun the complete workflow so all six suites and both builds run again. Keep the original run ID, source, policy, builder, date and version. The first completed qualification fixes the suite results and package hashes. Later attempts preserve the manifest contents and must produce an attestation for the current attempt. A preflight-only context can be resumed by a later attempt, which records the first completed qualification. Draft notes alone cannot establish ownership. The concurrency lock does not exclude manual/API writers, so reconcile remote state before every retry.
 
 Correct published content with a new CalVer and supersession context. Never delete assets, retag or rewrite published history.
 

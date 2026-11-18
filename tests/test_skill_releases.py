@@ -144,6 +144,7 @@ class StateMachineTests(unittest.TestCase):
             'owner_id':123,'run_id':7,'run_attempt':1,'validation_attempt':1,
             'created_at':'2026-11-16T01:00:00Z',
             'qualification':{'run_attempt':1,'suites':[{'suite':s,'tests':1} for s in release.SUITES]},
+            'current_validation':{'run_attempt':1,'suites':[{'suite':s,'tests':1} for s in release.SUITES]},
             'qualified_artifacts':release.artifact_hashes(self.directory)}
         self.patches=[patch.object(release,'verify_dispatch_environment'),
             patch.object(release,'check_settings'),patch.object(release,'verify_bundle'),
@@ -155,7 +156,7 @@ class StateMachineTests(unittest.TestCase):
     def tearDown(self):
         for p in self.patches: p.stop()
         self.tmp.cleanup()
-    def body(self): return 'Release context: '+release.digest(release.canonical({k:v for k,v in self.context.items() if k not in ('qualified_artifacts','validation_attempt')}))
+    def body(self): return 'Release context: '+release.digest(release.canonical({k:v for k,v in self.context.items() if k not in ('qualified_artifacts','validation_attempt','current_validation')}))
     def test_orphan_tag_is_preserved_without_mutation(self):
         self.api.tags.return_value=[{'ref':'refs/tags/2026.11.16'}]
         with self.assertRaisesRegex(release.ReleaseError,'Orphaned tag'):
@@ -182,9 +183,30 @@ class StateMachineTests(unittest.TestCase):
 
     def test_wrong_attempt_prevents_draft(self):
         self.context['qualification']['run_attempt']=0
-        with self.assertRaisesRegex(release.ReleaseError,'Fresh qualification'):
+        with self.assertRaisesRegex(release.ReleaseError,'current-attempt validation'):
             release.publish(Path('.'),self.api,self.context,self.directory)
         self.api.create_draft.assert_not_called()
+    def test_missing_current_attempt_validation_blocks_publication(self):
+        del self.context['current_validation']
+        with self.assertRaisesRegex(release.ReleaseError,'current-attempt validation'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.verify_qualification_attestation.assert_not_called()
+        self.api.create_draft.assert_not_called()
+    def test_stale_or_failed_current_attempt_validation_blocks_publication(self):
+        from copy import deepcopy
+        valid=self.context['current_validation']
+        failures=(
+            {**valid,'run_attempt':0},
+            {**valid,'suites':[{'suite':s,'tests':0} for s in release.SUITES]},
+        )
+        for evidence in failures:
+            with self.subTest(evidence=evidence):
+                self.context['current_validation']=deepcopy(evidence)
+                with self.assertRaisesRegex(release.ReleaseError,'current-attempt validation'):
+                    release.publish(Path('.'),self.api,self.context,self.directory)
+                self.api.verify_qualification_attestation.assert_not_called()
+                self.api.create_draft.assert_not_called()
+        self.context['current_validation']=valid
     def test_published_release_only_verifies(self):
         from unittest.mock import patch
         published={'tag_name':'2026.11.16','body':self.body(),'draft':False}
@@ -489,9 +511,11 @@ class AdversarialProvenanceTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError,'repository owner'):
             release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__)
     def test_frozen_ownership_excludes_fresh_attempt(self):
-        original={'run_id':5,'run_attempt':1,'qualification':{'run_attempt':1}}
-        retried={**original,'validation_attempt':2}
-        def identity(c):return release.digest(release.canonical({k:v for k,v in c.items() if k not in ('qualified_artifacts','validation_attempt')}))
+        original={'run_id':5,'run_attempt':1,'qualification':{'run_attempt':1},
+                  'current_validation':{'run_attempt':1}}
+        retried={**original,'validation_attempt':2,
+                 'current_validation':{'run_attempt':2}}
+        def identity(c):return release.digest(release.canonical({k:v for k,v in c.items() if k not in ('qualified_artifacts','validation_attempt','current_validation')}))
         self.assertEqual(identity(original),identity(retried))
     def test_reconstructed_but_unqualified_release_is_rejected(self):
         import tempfile
@@ -757,10 +781,12 @@ class IntegrationMembershipTests(unittest.TestCase):
 class SigningContextTests(unittest.TestCase):
     def test_signing_requires_exact_trusted_dispatch(self):
         from unittest.mock import patch
+        suites=[{'suite':name,'tests':1} for name in release.SUITES]
         context={'release_context_schema_version':1,'repository':release.REPOSITORY,
                  'source_revision':'b'*40,'builder_revision':'b'*40,'owner_id':123,
                  'run_id':7,'run_attempt':2,'created_at':'2026-11-16T01:00:00Z',
-                 'qualification':{'run_attempt':2}}
+                 'qualification':{'run_attempt':2,'suites':suites},
+                 'current_validation':{'run_attempt':2,'suites':suites}}
         environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':'b'*40,
             'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'7','GITHUB_RUN_ATTEMPT':'2',
             'GITHUB_WORKFLOW_REF':release.REPOSITORY+'/.github/workflows/skill-release.yml@refs/heads/main'}
@@ -776,10 +802,12 @@ class SigningContextTests(unittest.TestCase):
     def test_rerun_signs_same_frozen_context_after_current_validation(self):
         from unittest.mock import patch
         import copy
+        suites=[{'suite':name,'tests':1} for name in release.SUITES]
         context={'release_context_schema_version':1,'repository':release.REPOSITORY,
                  'source_revision':'b'*40,'builder_revision':'b'*40,'owner_id':123,
                  'run_id':7,'created_at':'2026-11-16T01:00:00Z',
-                 'run_attempt':2,'qualification':{'run_attempt':3},'validation_attempt':3}
+                 'run_attempt':1,'qualification':{'run_attempt':1,'suites':suites},
+                 'current_validation':{'run_attempt':3,'suites':suites},'validation_attempt':3}
         frozen=copy.deepcopy(context)
         environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':'b'*40,
             'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'7','GITHUB_RUN_ATTEMPT':'3',

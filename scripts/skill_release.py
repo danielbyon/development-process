@@ -246,6 +246,7 @@ def preflight(root,api,run_id,run_attempt,*,supersedes='',correction_reason=''):
         require(type(original.get('run_attempt')) is int and
                 1<=original['run_attempt']<=run_attempt,
                 'Original run attempt identity mismatch')
+        original.pop('current_validation',None)
         original['validation_attempt']=run_attempt
         check_settings(api,original,settings=settings,run=run)
         return original
@@ -257,6 +258,36 @@ def preflight(root,api,run_id,run_attempt,*,supersedes='',correction_reason=''):
 
 def require_tests(result):
     require(result.testsRun>0 and not result.failures and not result.errors and not result.skipped and not result.unexpectedSuccesses,'Mandatory qualification failed, skipped or empty')
+
+_ATTEMPT_LOCAL_CONTEXT_FIELDS=frozenset((
+    'qualified_artifacts','validation_attempt','current_validation'))
+
+def frozen_release_context(context):
+    """Return the context fields that define the immutable package identity."""
+    return {key:value for key,value in context.items()
+            if key not in _ATTEMPT_LOCAL_CONTEXT_FIELDS}
+
+def _valid_suite_results(suites):
+    return (isinstance(suites,list) and len(suites)==len(SUITES) and
+        {item.get('suite') for item in suites if isinstance(item,dict)}==set(SUITES) and
+        all(isinstance(item,dict) and type(item.get('tests')) is int and item['tests']>0
+            for item in suites))
+
+def require_current_validation(context,attempt):
+    """Require successful suite results from this exact workflow attempt."""
+    current=context.get('current_validation')
+    require(isinstance(current,dict) and type(current.get('run_attempt')) is int and
+            current['run_attempt']==attempt,
+            'Fresh current-attempt validation required')
+    qualification=context.get('qualification')
+    require(isinstance(qualification,dict) and
+            type(qualification.get('run_attempt')) is int and
+            context['run_attempt']<=qualification['run_attempt']<=attempt and
+            _valid_suite_results(qualification.get('suites')) and
+            _valid_suite_results(current.get('suites')),
+            'Mandatory current-attempt validation missing or failed')
+    require(current['suites']==qualification['suites'],
+            'Current-attempt validation differs from frozen qualification')
 
 def independent_build(root,destination,context):
     """Run the trusted builder in a fresh interpreter with frozen inputs."""
@@ -283,10 +314,14 @@ def qualify(root,context,artifacts):
     require(not artifacts.exists() or not list(artifacts.iterdir()),'Artifact destination must be empty')
     attempt=context.get('validation_attempt',context['run_attempt'])
     if 'qualification' in context:
-        require(context['qualification']['suites']==results,
+        require(isinstance(context['qualification'],dict) and
+                context['qualification'].get('suites')==results,
                 'Fresh qualification differs from frozen results')
-    context['qualification']={'run_attempt':attempt,'suites':results}
-    frozen={k:v for k,v in context.items() if k not in ('qualified_artifacts','validation_attempt')}
+    else:
+        context['qualification']={'run_attempt':attempt,'suites':results}
+    context['current_validation']={'run_attempt':attempt,'suites':results}
+    require_current_validation(context,attempt)
+    frozen=frozen_release_context(context)
     with tempfile.TemporaryDirectory() as first_root, tempfile.TemporaryDirectory() as second_root:
         first=Path(first_root)/'bundle'; second=Path(second_root)/'bundle'
         independent_build(root,Path(first),frozen)
@@ -313,9 +348,9 @@ def verify_signing_context(root,context):
     """Bind signing to this trusted main-workflow checkout and qualification attempt."""
     attempt=context.get('validation_attempt',context['run_attempt'])
     verify_trusted_main_context(context)
-    require(type(attempt) is int and attempt>=context['run_attempt'] and
-            context['qualification']['run_attempt']==attempt,
-            'Signing requires qualification from the current run attempt')
+    require(type(attempt) is int and attempt>=context['run_attempt'],
+            'Signing attempt identity mismatch')
+    require_current_validation(context,attempt)
     expected={
         'GITHUB_REPOSITORY':REPOSITORY,
         'GITHUB_SHA':context['builder_revision'],
@@ -335,7 +370,7 @@ def verify_bundle(root,directory,context):
     verify_trusted_main_context(context)
     require(git(root,'rev-parse','HEAD').decode().strip()==context['builder_revision'],
             'Bundle verifier checkout differs from the frozen builder')
-    frozen={k:v for k,v in context.items() if k not in ('qualified_artifacts','validation_attempt')}
+    frozen=frozen_release_context(context)
     require(artifact_hashes(directory)==context.get('qualified_artifacts'),'Qualified artifact mismatch')
     with tempfile.TemporaryDirectory() as temporary:
         clean=Path(temporary)
@@ -363,13 +398,11 @@ def publish(root,api,context,directory):
     verify_trusted_main_context(context)
     require(git(root,'rev-parse','HEAD').decode().strip()==context['source_revision'],
             'Publication checkout differs from the frozen source')
-    qualification=context.get('qualification',{})
-    require(qualification.get('run_attempt')==attempt,'Fresh qualification required')
-    require({x['suite'] for x in qualification.get('suites',[])}==set(SUITES) and all(x['tests']>0 for x in qualification['suites']),'Mandatory suites missing')
+    require_current_validation(context,attempt)
     require(artifact_hashes(directory)==context.get('qualified_artifacts'),'Qualified artifact mismatch')
     verify_bundle(root,directory,context)
     api.verify_qualification_attestation(directory,context)
-    identity=digest(canonical({k:v for k,v in context.items() if k not in ('qualified_artifacts','validation_attempt')}))
+    identity=digest(canonical(frozen_release_context(context)))
     body='Release context: '+identity
     releases=[r for r in api.releases() if r['tag_name']==context['release_version']]
     require(len(releases)<=1,'Ambiguous release ownership')
