@@ -257,7 +257,7 @@ def preflight(root,api,run_id,run_attempt,*,supersedes='',correction_reason=''):
     return context
 
 def require_tests(result):
-    require(result.testsRun>0 and not result.failures and not result.errors and not result.skipped and not result.unexpectedSuccesses,'Mandatory qualification failed, skipped or empty')
+    require(result.testsRun>0 and not result.failures and not result.errors and not result.skipped and not result.expectedFailures and not result.unexpectedSuccesses,'Mandatory qualification failed, skipped or empty')
 
 _ATTEMPT_LOCAL_CONTEXT_FIELDS=frozenset((
     'qualified_artifacts','validation_attempt','current_validation'))
@@ -425,10 +425,18 @@ def publish(root,api,context,directory):
     if not tags:
         check_settings(api,context)
         api.create_tag(context['release_version'],context['source_revision'])
-    release=api.release(release['id']); verify_remote(api,release,context,directory,False)
+    release_id=release.get('id')
+    require(type(release_id) is int and release_id>0,'Release ID unavailable for final verification')
+    current=api.release(release_id)
+    require(isinstance(current,dict),'Final release state unavailable')
+    require(type(current.get('id')) is int and current['id']==release_id,
+            'Final release ID mismatch')
+    require(current.get('body')==body,'Unknown draft ownership at publication')
+    require(current.get('draft') is True,'Expected owned draft before publication')
+    verify_remote(api,current,context,directory,False)
     check_settings(api,context)
-    api.publish(release['id'])
-    return verify_remote(api,api.release(release['id']),context,directory,True)
+    api.publish(release_id)
+    return verify_remote(api,api.release(release_id),context,directory,True)
 
 _VERIFYING_RELEASES=set()
 

@@ -41,6 +41,15 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(release.ReleaseError): release.require_tests(failed)
         empty=unittest.TestResult()
         with self.assertRaises(release.ReleaseError): release.require_tests(empty)
+    def test_successful_qualification_passes(self):
+        result=unittest.TestResult();result.testsRun=1
+        self.assertIsNone(release.require_tests(result))
+    def test_all_nonpassing_result_categories_block_qualification(self):
+        for category in ('failures','errors','skipped','expectedFailures','unexpectedSuccesses'):
+            with self.subTest(category=category):
+                result=unittest.TestResult();result.testsRun=1
+                setattr(result,category,[('test','not successful')])
+                with self.assertRaises(release.ReleaseError): release.require_tests(result)
 
 class EvidenceTests(unittest.TestCase):
     def fixture(self):
@@ -157,6 +166,19 @@ class StateMachineTests(unittest.TestCase):
         for p in self.patches: p.stop()
         self.tmp.cleanup()
     def body(self): return 'Release context: '+release.digest(release.canonical({k:v for k,v in self.context.items() if k not in ('qualified_artifacts','validation_attempt','current_validation')}))
+    def stable_draft(self):
+        return {'id':1,'tag_name':self.context['release_version'],
+                'name':self.context['release_version'],'body':self.body(),
+                'draft':True,'prerelease':False,
+                'assets':[{'id':i+1,'name':name} for i,name in enumerate(sorted(self.context['qualified_artifacts']))]}
+    def configure_stable_draft(self):
+        draft=self.stable_draft()
+        self.api.releases.return_value=[draft]
+        self.api.asset.side_effect=lambda asset:(self.directory/asset['name']).read_bytes()
+        self.api.tags.return_value=[{'ref':'refs/tags/'+self.context['release_version'],
+            'object':{'sha':self.context['source_revision'],'type':'commit'}}]
+        self.api.release.return_value=draft
+        return draft
     def test_orphan_tag_is_preserved_without_mutation(self):
         self.api.tags.return_value=[{'ref':'refs/tags/2026.11.16'}]
         with self.assertRaisesRegex(release.ReleaseError,'Orphaned tag'):
@@ -167,6 +189,103 @@ class StateMachineTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError,'ownership'):
             release.publish(Path('.'),self.api,self.context,self.directory)
         self.api.upload.assert_not_called();self.api.publish.assert_not_called()
+    def test_changed_final_draft_ownership_blocks_publication(self):
+        self.configure_stable_draft()
+        changed=self.stable_draft();changed['body']='foreign owner body'
+        self.api.release.return_value=changed
+        with self.assertRaisesRegex(release.ReleaseError,'ownership'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+    def test_final_draft_published_early_blocks_publication(self):
+        self.configure_stable_draft()
+        changed=self.stable_draft();changed['draft']=False
+        self.api.release.return_value=changed
+        with self.assertRaisesRegex(release.ReleaseError,'draft'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+    def test_changed_final_asset_bytes_block_publication(self):
+        self.configure_stable_draft()
+        calls=0
+        def asset_bytes(asset):
+            nonlocal calls
+            calls+=1
+            if calls==9: return b'changed after upload verification'
+            return (self.directory/asset['name']).read_bytes()
+        self.api.asset.side_effect=asset_bytes
+        with self.assertRaisesRegex(release.ReleaseError,'asset bytes'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+    def test_changed_final_tag_target_blocks_publication(self):
+        self.configure_stable_draft()
+        valid={'ref':'refs/tags/'+self.context['release_version'],
+               'object':{'sha':self.context['source_revision'],'type':'commit'}}
+        changed={'ref':valid['ref'],'object':{'sha':'b'*40,'type':'commit'}}
+        self.api.tags.side_effect=[[valid],[changed]]
+        with self.assertRaisesRegex(release.ReleaseError,'Tag target'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+    def test_final_release_identity_and_asset_set_must_match(self):
+        changes=(('tag_name','2026.11.17'),('name','unexpected release'),
+                 ('prerelease',True),('assets','missing'),('assets','extra'))
+        for field,value in changes:
+            with self.subTest(field=field):
+                self.api.reset_mock()
+                self.configure_stable_draft()
+                changed=self.stable_draft()
+                if field=='assets':
+                    if value=='missing': changed['assets']=changed['assets'][:-1]
+                    else: changed['assets'].append({'id':99,'name':'unexpected.zip'})
+                else: changed[field]=value
+                self.api.release.return_value=changed
+                with self.assertRaises(release.ReleaseError):
+                    release.publish(Path('.'),self.api,self.context,self.directory)
+                self.api.publish.assert_not_called()
+    def test_missing_final_release_state_blocks_publication(self):
+        self.configure_stable_draft()
+        self.api.release.return_value=None
+        with self.assertRaises(release.ReleaseError):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+    def test_final_release_id_must_match_fetched_draft(self):
+        self.configure_stable_draft()
+        changed=self.stable_draft();changed['id']=2
+        self.api.release.return_value=changed
+        with self.assertRaisesRegex(release.ReleaseError,'release ID'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.publish.assert_not_called()
+    def test_stable_owned_draft_is_published_and_verified(self):
+        from unittest.mock import patch
+        draft=self.configure_stable_draft()
+        published={**draft,'draft':False,'immutable':True}
+        self.api.release.side_effect=[draft,published]
+        self.api.settings.return_value={
+            'repository':{'full_name':release.REPOSITORY,'default_branch':'main',
+                          'owner':{'login':'danielbyon','id':self.context['owner_id']}},
+            'immutability':{'enabled':True}}
+        self.api.run.return_value={
+            'id':self.context['run_id'],'event':'workflow_dispatch','head_branch':'main',
+            'head_sha':self.context['source_revision'],
+            'actor':{'id':self.context['owner_id']},
+            'triggering_actor':{'id':self.context['owner_id']},
+            'run_attempt':self.context['run_attempt'],'created_at':self.context['created_at'],
+            'path':'.github/workflows/skill-release.yml'}
+        self.api.verify_main_ancestry.return_value=self.context['source_revision']
+        self.patches[1].stop()
+        settings=patch.object(release,'check_settings',wraps=release.check_settings)
+        settings.start();self.patches[1]=settings
+        result=release.publish(Path('.'),self.api,self.context,self.directory)
+        self.assertEqual(result,published)
+        self.api.release.assert_any_call(1)
+        self.api.publish.assert_called_once_with(1)
+        self.assertEqual(self.api.settings.call_count,2)
+        self.assertEqual(self.api.verify_main_ancestry.call_count,2)
+        calls=[call[0] for call in self.api.mock_calls]
+        publication=calls.index('publish')
+        main_checks=[i for i,name in enumerate(calls) if name=='verify_main_ancestry']
+        release_reads=[i for i,name in enumerate(calls) if name=='release']
+        self.assertLess(release_reads[0],main_checks[-1])
+        self.assertLess(main_checks[-1],publication)
+        self.assertEqual(calls[publication-1],'verify_main_ancestry')
     def test_modified_qualified_bytes_prevent_draft(self):
         (self.directory/'0').write_bytes(b'modified')
         with self.assertRaisesRegex(release.ReleaseError,'artifact mismatch'):
@@ -238,7 +357,8 @@ class StateMachineTests(unittest.TestCase):
     def test_successful_draft_upload_tag_publish_order(self):
         from unittest.mock import patch
         events=[]
-        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
+        draft={'id':1,'tag_name':'2026.11.16','name':'2026.11.16',
+               'body':self.body(),'draft':True,'prerelease':False,'assets':[]}
         self.api.verify_qualification_attestation.side_effect=lambda *args: events.append('attestation')
         self.api.create_draft.side_effect=lambda *args: events.append('draft') or draft
         self.api.upload.side_effect=lambda *args:events.append('upload')
@@ -260,7 +380,8 @@ class StateMachineTests(unittest.TestCase):
 
     def test_main_membership_is_rechecked_before_final_publication(self):
         from unittest.mock import patch
-        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
+        draft={'id':1,'tag_name':'2026.11.16','name':'2026.11.16',
+               'body':self.body(),'draft':True,'prerelease':False,'assets':[]}
         self.api.create_draft.return_value=draft
         self.api.release.return_value=draft
         self.patches[1].stop()
@@ -270,6 +391,7 @@ class StateMachineTests(unittest.TestCase):
         with patch.object(release,'verify_remote',return_value=draft):
             with self.assertRaisesRegex(release.APIError,'removed from main'):
                 release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.release.assert_called_once_with(1)
         self.api.publish.assert_not_called()
 
 class DispatchTests(unittest.TestCase):
