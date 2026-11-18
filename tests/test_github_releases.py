@@ -15,36 +15,6 @@ class AdapterTests(unittest.TestCase):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
             github.GitHubAPI().request('GET','/user')
             self.assertIn('GET',run.call_args.args[0])
-    def test_audit_uses_only_the_explicit_token(self):
-        import os
-        with patch.dict(os.environ,{'GH_TOKEN':'ambient-token','GITHUB_TOKEN':'other-token',
-                                   'RELEASE_WORKFLOW_WRITE_TOKEN':'write-token',
-                                   'RELEASE_ADMIN_READ_TOKEN':'admin-token'}):
-            with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
-                api=github.GitHubAPI.for_read_only_audit('selected-token')
-                api.request('GET','/user')
-        self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],'selected-token')
-        self.assertNotIn('GITHUB_TOKEN',run.call_args.kwargs['env'])
-        self.assertNotIn('RELEASE_WORKFLOW_WRITE_TOKEN',run.call_args.kwargs['env'])
-        self.assertNotIn('RELEASE_ADMIN_READ_TOKEN',run.call_args.kwargs['env'])
-        self.assertIsInstance(api,github.ReadOnlyAuditAPI)
-        self.assertFalse(hasattr(api,'read_only'))
-        self.assertFalse(hasattr(api,'historical_publication'))
-    def test_audit_transport_refuses_every_write(self):
-        api=github.GitHubAPI.for_read_only_audit('selected-token')
-        with patch('subprocess.run') as run:
-            writes=(
-                ('request',lambda: api.request('POST','/repos/danielbyon/development-process/releases',{})),
-                ('create_draft',lambda: api.create_draft(
-                    {'release_version':'2026.11.16','source_revision':'a'*40},'draft')),
-                ('create_tag',lambda: api.create_tag('2026.11.16','a'*40)),
-                ('publish',lambda: api.publish(1)),
-                ('authorize',lambda: api.authorize_historical_publication()),
-                ('upload',lambda: api.upload(1,Path('asset'))))
-            for name,write in writes:
-                with self.subTest(write=name), self.assertRaisesRegex(github.APIError,'read-only'):
-                    write()
-        run.assert_not_called()
     def test_binary_assets_request_octet_stream(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'PK',b'')) as run:
             self.assertEqual(github.GitHubAPI().asset({'id':2}),b'PK')
@@ -63,35 +33,67 @@ class AdapterTests(unittest.TestCase):
             with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
                 api.request('GET',api.base+'/immutable-releases')
                 self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],'admin-secret')
+    def test_admin_token_is_not_used_for_development_governance_reads(self):
+        import os
+        api=github.GitHubAPI()
+        with patch.dict(os.environ,{'RELEASE_ADMIN_READ_TOKEN':'admin-secret','GH_TOKEN':'release-token'}):
+            with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,b'[]',b'')) as run:
+                api.request('GET',api.base+'/rules/branches/main')
+        self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],'release-token')
     def test_admin_token_not_used_for_publication(self):
         import os
         with patch.dict(os.environ,{'RELEASE_ADMIN_READ_TOKEN':'admin-secret','GH_TOKEN':'contents-token'}):
             with patch('subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
                 github.GitHubAPI().request('POST','/repos/danielbyon/development-process/releases',{})
                 self.assertEqual(run.call_args.kwargs['env']['GH_TOKEN'],'contents-token')
+
+    def test_settings_reads_only_repository_and_immutable_release_capability(self):
+        api=github.GitHubAPI()
+        repository={'full_name':'danielbyon/development-process','default_branch':'main',
+                    'owner':{'login':'danielbyon','id':123}}
+        immutability={'enabled':True}
+        with patch.object(api,'request',side_effect=[repository,immutability]) as request:
+            self.assertEqual(api.settings(),{'repository':repository,'immutability':immutability})
+        self.assertEqual([call.args[1] for call in request.call_args_list],
+            [api.base,api.base+'/immutable-releases'])
+
+    def test_verify_main_ancestry_uses_authenticated_commit_comparison(self):
+        api=github.GitHubAPI(); source='a'*40; main='b'*40
+        ref={'ref':'refs/heads/main','object':{'type':'commit','sha':main}}
+        comparison={'status':'ahead','base_commit':{'sha':source},
+                    'head_commit':{'sha':main},'merge_base_commit':{'sha':source}}
+        with patch.object(api,'request',side_effect=[ref,comparison]) as request:
+            self.assertEqual(api.verify_main_ancestry(source),main)
+        self.assertEqual(request.call_args_list[0].args[1],api.base+'/git/ref/heads/main')
+        self.assertEqual(request.call_args_list[1].args[1],api.base+f'/compare/{source}...{main}')
+
+    def test_verify_main_ancestry_rejects_unrelated_equal_tree_and_bad_provider_shapes(self):
+        api=github.GitHubAPI(); source='a'*40; main='b'*40
+        cases=(
+            ({'ref':'refs/heads/main','object':{'type':'commit','sha':main}},
+             {'status':'diverged','base_commit':{'sha':source},'head_commit':{'sha':main},
+              'merge_base_commit':{'sha':'c'*40}}),
+            ({'ref':'refs/heads/main','object':{'type':'commit','sha':main}},
+             {'status':'ahead','base_commit':{'sha':source},'head_commit':{'sha':main},
+              'merge_base_commit':{'sha':'c'*40}}),
+            ({'ref':'refs/heads/other','object':{'type':'commit','sha':main}},{}),
+            ({'ref':'refs/heads/main','object':{'type':'tree','sha':main}},{}),
+            ({'ref':'refs/heads/main','object':{'type':'commit','sha':'bad'}},{}),
+        )
+        for ref,comparison in cases:
+            with self.subTest(ref=ref,comparison=comparison), patch.object(api,'request',side_effect=[ref,comparison]):
+                with self.assertRaises(github.APIError): api.verify_main_ancestry(source)
+
+    def test_verify_main_ancestry_rejects_non_full_source_sha_before_request(self):
+        api=github.GitHubAPI()
+        with patch.object(api,'request') as request:
+            with self.assertRaises(github.APIError): api.verify_main_ancestry('a'*39)
+        request.assert_not_called()
     def test_artifact_object_pagination(self):
         api=github.GitHubAPI()
         with patch.object(api,'request',return_value={'artifacts':[{'id':1}]}):
             self.assertEqual(api.pages('/artifacts'),[{'id':1}])
 
-    def test_attempt_jobs_use_the_provider_jobs_wrapper_and_exact_attempt_url(self):
-        api=github.GitHubAPI()
-        job={'id':134308404673,'run_id':44159278451,'run_attempt':1,
-             'status':'completed','conclusion':'success',
-             'started_at':'2026-11-17T19:30:22Z',
-             'completed_at':'2026-11-17T19:31:02Z','steps':[]}
-        with patch.object(api,'request',return_value={'total_count':1,'jobs':[job]}) as request:
-            self.assertEqual(api.ci_jobs(44159278451,1),[job])
-        self.assertEqual(request.call_args.args[1],
-            api.base+'/actions/runs/44159278451/attempts/1/jobs?per_page=100&page=1')
-    def test_raw_logs_allow_escape_sequences(self):
-        with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'log',b'')) as run:
-            github.GitHubAPI().job_log(4)
-            self.assertIn('--allow-escape-sequences',run.call_args.args[0])
-    def test_historical_token_requires_separate_authorization(self):
-        import os
-        with patch.dict(os.environ,{'RELEASE_WORKFLOW_WRITE_TOKEN':'token','RELEASE_WORKFLOW_WRITE_AUTHORIZED':'false'}):
-            with self.assertRaises(github.APIError): github.GitHubAPI().authorize_historical_publication()
     def test_original_context_verifies_artifact_archive_and_assets(self):
         import io,json,zipfile,hashlib
         context={'run_id':3,'qualified_artifacts':{'payload':hashlib.sha256(b'payload').hexdigest()}}
@@ -100,14 +102,27 @@ class AdapterTests(unittest.TestCase):
             archive.writestr('release-context.json',json.dumps(context));archive.writestr('payload',b'payload')
         payload=buffer.getvalue();api=github.GitHubAPI()
         artifact={'name':'release-bundle-1','id':4,'expired':False,'digest':'sha256:'+hashlib.sha256(payload).hexdigest()}
-        with patch.object(api,'pages',return_value=[artifact]),patch.object(api,'request',return_value=payload):
+        context_artifact={'name':'release-context-1','id':3,'expired':False,
+                          'digest':'sha256:'+hashlib.sha256(b'preflight').hexdigest()}
+        with patch.object(api,'pages',return_value=[context_artifact,artifact]),patch.object(api,'request',return_value=payload):
             self.assertEqual(api.original_context(3),context)
         artifact['digest']='sha256:wrong'
         with patch.object(api,'pages',return_value=[artifact]),patch.object(api,'request',return_value=payload):
             with self.assertRaises(github.APIError):api.original_context(3)
+    def test_original_context_recovers_preflight_before_qualification(self):
+        import io,json,zipfile,hashlib
+        context={'repository':'danielbyon/development-process','release_version':'2026.11.17'}
+        buffer=io.BytesIO()
+        with zipfile.ZipFile(buffer,'w') as archive:
+            archive.writestr('release-context.json',json.dumps(context))
+        payload=buffer.getvalue();api=github.GitHubAPI()
+        artifact={'name':'release-context-1','id':5,'expired':False,
+                  'digest':'sha256:'+hashlib.sha256(payload).hexdigest()}
+        with patch.object(api,'pages',return_value=[artifact]),patch.object(api,'request',return_value=payload):
+            self.assertEqual(api.original_context(3),context)
     def test_expired_frozen_context_blocks_instead_of_renumbering(self):
         api=github.GitHubAPI()
-        with patch.object(api,'pages',return_value=[{'name':'release-bundle-1','expired':True}]):
+        with patch.object(api,'pages',return_value=[{'name':'release-context-1','expired':True}]):
             with self.assertRaisesRegex(github.APIError,'expired'):api.original_context(3)
 
 class QualificationAttestationTests(unittest.TestCase):

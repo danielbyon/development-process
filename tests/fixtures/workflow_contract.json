@@ -69,10 +69,10 @@
         "no substantive effect on policy, security boundaries, workflow behavior, or executable instructions",
         "inspect accessible task records for known local artifacts",
         "Determine cleanup eligibility from verified provenance and available task-specific artifacts",
-        "MERGED \u2014 CLEANUP PENDING",
+        "MERGED — CLEANUP PENDING",
         "intentionally retained for future work",
-        "report `MERGED \u2014 CLEANUP PENDING` with the missing evidence",
-        "MCP RESTART REQUIRED \u2014 OWNER ACTION"
+        "report `MERGED — CLEANUP PENDING` with the missing evidence",
+        "MCP RESTART REQUIRED — OWNER ACTION"
       ],
       "forbidden": [
         "policy or Skill edits qualify solely because they are Markdown"
@@ -86,14 +86,23 @@
       "required": [
         "newest verified immutable published CalVer",
         "Existing tasks retain their recorded SHA or CalVer",
-        "source and builder integrations",
-        "independent full-diff/correction review",
+        "release source, policy revision and builder separately",
+        "Independent review",
         "ChatGPT source/test inspection",
+        "required CI",
         "owner merge authorization",
+            "release controller trusts code after it enters authenticated",
+            "all six mandatory qualification suites",
+        "all eight assets",
         "Temporary staging preserves unrelated Skills",
         "Publication and activation are separate"
       ],
-      "forbidden": []
+      "forbidden": [
+        "readiness records locate actual evidence",
+        "prospective first-release baseline",
+        "ordinary chronology and coverage",
+        "baseline admission"
+      ]
     }
   ],
   "policy_scenarios": [

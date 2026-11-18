@@ -4,10 +4,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import skill_release as release
-import release_evidence as evidence
-from release_evidence import audit, baseline, common, discovery, integrations, legacy, qualification, records
-EVIDENCE_MODULES=(audit,baseline,discovery,integrations,legacy,qualification,records)
-evidence_module=discovery
+from release_evidence import baseline, common, integrations, legacy, qualification, records
+EVIDENCE_MODULES=(baseline,integrations,legacy,qualification,records)
 
 def evidence_operation(name):
     for module in EVIDENCE_MODULES:
@@ -15,8 +13,6 @@ def evidence_operation(name):
     raise AttributeError(f'No evidence operation named {name}')
 
 def evidence_call(name,*args,**kwargs):
-    if name=='discover_evidence':
-        kwargs.setdefault('select_anchor',release.select_anchor)
     return evidence_operation(name)(*args,**kwargs)
 
 
@@ -30,9 +26,6 @@ class ReleaseTests(unittest.TestCase):
     def test_invalid_calendar_and_suffix(self):
         for tag in ['2026.02.30', '2026.11.15.1', '2026.11.15.0', 'v2026.11.15']:
             with self.assertRaises(release.ReleaseError): release.version_key(tag)
-    def test_boolean_is_not_review_evidence(self):
-        with self.assertRaises(release.ReleaseError):
-            release.verify_frozen_release_evidence({'independent_review': True}, lambda ref: {})
     def test_existing_pin_is_not_reselected(self):
         self.assertEqual(release.resolve_task(None, existing_pin='a'*40), {'task_pin':'a'*40})
     def test_no_release_blocks(self):
@@ -43,6 +36,11 @@ class ReleaseTests(unittest.TestCase):
     def test_skipped_qualification_blocks(self):
         result = unittest.TestResult(); result.testsRun=1; result.skipped=[('test','reason')]
         with self.assertRaises(release.ReleaseError): release.require_tests(result)
+    def test_failed_and_empty_qualification_block(self):
+        failed=unittest.TestResult();failed.testsRun=1;failed.failures=[('test','failure')]
+        with self.assertRaises(release.ReleaseError): release.require_tests(failed)
+        empty=unittest.TestResult()
+        with self.assertRaises(release.ReleaseError): release.require_tests(empty)
 
 class EvidenceTests(unittest.TestCase):
     def fixture(self):
@@ -103,7 +101,6 @@ class LiveEvidenceTests(unittest.TestCase):
                 steps_error='Candidate CI contains failed or skipped steps')
 
     def test_ambiguous_required_ci_jobs_are_failures_not_absence(self):
-        from release_evidence.audit import _audit_error_status
         from release_evidence.integrations import _required_ci_job
         job={'name':'Validate committed PR integration diff',
              'status':'completed','conclusion':'success','steps':[{'conclusion':'success'}]}
@@ -113,10 +110,8 @@ class LiveEvidenceTests(unittest.TestCase):
             _required_ci_job(API(),{'id':1},1,completion_required=True,
                 job_error='Required completed candidate CI job unavailable',
                 steps_error='Candidate CI contains failed or skipped steps')
-        self.assertEqual(_audit_error_status(result.exception),'FAIL')
 
     def test_cancelled_ci_job_is_a_failure_not_missing_evidence(self):
-        from release_evidence.audit import _audit_error_status
         from release_evidence.integrations import _required_ci_job
         job={'name':'Validate committed PR integration diff','status':'cancelled',
              'conclusion':'cancelled','steps':[]}
@@ -126,7 +121,6 @@ class LiveEvidenceTests(unittest.TestCase):
             _required_ci_job(API(),{'id':1},1,completion_required=True,
                 job_error='Required completed candidate CI job unavailable',
                 steps_error='Candidate CI contains failed or skipped steps')
-        self.assertEqual(_audit_error_status(result.exception),'FAIL')
 
     def test_ci_summary_success_without_jobs_does_not_pass(self):
         integration={'pull_request':1,'reviewed_revision':'a'*40,'integrated_revision':'b'*40,
@@ -145,23 +139,23 @@ class StateMachineTests(unittest.TestCase):
         from unittest.mock import patch
         self.tmp=tempfile.TemporaryDirectory(); self.directory=Path(self.tmp.name)
         for n in range(8): (self.directory/str(n)).write_bytes(str(n).encode())
-        self.context={'release_version':'2026.11.16','source_revision':'a'*40,'builder_revision':'b'*40,
-            'run_attempt':1,'evidence':{},'evidence_snapshots':[],
+        self.context={'release_context_schema_version':1,'repository':release.REPOSITORY,
+            'release_version':'2026.11.16','source_revision':'a'*40,'builder_revision':'a'*40,
+            'owner_id':123,'run_id':7,'run_attempt':1,'validation_attempt':1,
+            'created_at':'2026-11-16T01:00:00Z',
             'qualification':{'run_attempt':1,'suites':[{'suite':s,'tests':1} for s in release.SUITES]},
             'qualified_artifacts':release.artifact_hashes(self.directory)}
-        self.patches=[patch.object(release,'check_settings'),patch.object(release.evidence_qualification,'verify_evidence',return_value=[]),
-            patch.object(release.evidence_integrations,'verify_live_integrations'),patch.object(release,'admit_anchor'),patch.object(release.evidence_qualification,'verify_coverage'),
-            patch.object(release,'verify_bundle')]
+        self.patches=[patch.object(release,'verify_dispatch_environment'),
+            patch.object(release,'check_settings'),patch.object(release,'verify_bundle'),
+            patch.object(release,'git',return_value=b'a'*40)]
         for p in self.patches: p.start()
-        release.evidence_qualification.verify_coverage.side_effect=lambda root,evidence,target,**kwargs: {
-            'target_revision':target,'required_integrations':[],'covered_integrations':[]}
         from unittest.mock import Mock
         self.api=Mock()
         self.api.releases.return_value=[];self.api.tags.return_value=[]
     def tearDown(self):
         for p in self.patches: p.stop()
         self.tmp.cleanup()
-    def body(self): return 'Release context: '+release.digest(release.canonical({k:v for k,v in self.context.items() if k!='qualified_artifacts'}))
+    def body(self): return 'Release context: '+release.digest(release.canonical({k:v for k,v in self.context.items() if k not in ('qualified_artifacts','validation_attempt')}))
     def test_orphan_tag_is_preserved_without_mutation(self):
         self.api.tags.return_value=[{'ref':'refs/tags/2026.11.16'}]
         with self.assertRaisesRegex(release.ReleaseError,'Orphaned tag'):
@@ -204,6 +198,21 @@ class StateMachineTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError,'Conflicting draft asset'):
             release.publish(Path('.'),self.api,self.context,self.directory)
         self.api.upload.assert_not_called();self.api.publish.assert_not_called()
+    def test_matching_partial_draft_uploads_only_missing_assets(self):
+        from unittest.mock import patch
+        existing={'name':'0','id':0}
+        draft={'id':1,'tag_name':'2026.11.16','body':self.body(),
+               'draft':True,'assets':[existing]}
+        self.api.releases.return_value=[draft]
+        self.api.asset.side_effect=lambda asset:(self.directory/asset['name']).read_bytes()
+        self.api.release.return_value=draft
+        with patch.object(release,'verify_remote',return_value=draft):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.create_draft.assert_not_called()
+        self.assertEqual(self.api.upload.call_count,7)
+        self.assertEqual([call.args[1].name for call in self.api.upload.call_args_list],
+                         [str(value) for value in range(1,8)])
+        self.api.publish.assert_called_once_with(1)
     def test_successful_draft_upload_tag_publish_order(self):
         from unittest.mock import patch
         events=[]
@@ -218,59 +227,43 @@ class StateMachineTests(unittest.TestCase):
             release.publish(Path('.'),self.api,self.context,self.directory)
         self.assertEqual(events,['attestation','draft']+['upload']*8+['tag','publish'])
 
-    def test_evidence_change_during_publication_blocks_release(self):
+    def test_main_membership_failure_before_first_mutation_blocks_release(self):
         from unittest.mock import patch
-        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
-        self.api.create_draft.return_value=draft
-        self.api.release.return_value=draft
-        release.evidence_qualification.verify_evidence.side_effect=[[],[{'gate':'changed'}]]
-        with patch.object(release,'verify_remote',return_value=draft):
-            with self.assertRaisesRegex(release.ReleaseError,'Evidence drift before publication'):
-                release.publish(Path('.'),self.api,self.context,self.directory)
-        self.api.publish.assert_not_called()
+        self.patches[1].stop()
+        settings=patch.object(release,'check_settings',side_effect=release.APIError('source removed from main'))
+        settings.start();self.patches[1]=settings
+        with self.assertRaisesRegex(release.APIError,'removed from main'):
+            release.publish(Path('.'),self.api,self.context,self.directory)
+        self.api.create_draft.assert_not_called();self.api.publish.assert_not_called()
 
-    def test_coverage_change_during_publication_blocks_release(self):
+    def test_main_membership_is_rechecked_before_final_publication(self):
         from unittest.mock import patch
         draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
         self.api.create_draft.return_value=draft
         self.api.release.return_value=draft
-        release.evidence_qualification.verify_coverage.side_effect=[
-            {'target':'source','covered':['a']},
-            {'target':'builder','covered':['b']},
-            {'target':'source','covered':['changed']},
-            {'target':'builder','covered':['b']}]
+        self.patches[1].stop()
+        settings=patch.object(release,'check_settings',side_effect=[None,None,None,
+            release.APIError('source removed from main')])
+        settings.start();self.patches[1]=settings
         with patch.object(release,'verify_remote',return_value=draft):
-            with self.assertRaisesRegex(release.ReleaseError,'Coverage changed before publication'):
+            with self.assertRaisesRegex(release.APIError,'removed from main'):
                 release.publish(Path('.'),self.api,self.context,self.directory)
-        self.api.publish.assert_not_called()
-
-    def test_ordinary_integration_change_during_publication_blocks_release(self):
-        from unittest.mock import patch
-        draft={'id':1,'tag_name':'2026.11.16','draft':True,'assets':[]}
-        self.api.create_draft.return_value=draft
-        self.api.release.return_value=draft
-        release.evidence_integrations.verify_live_integrations.side_effect=[
-            None,release.ReleaseError('CI state changed')]
-        with patch.object(release,'verify_remote',return_value=draft):
-            with self.assertRaisesRegex(release.ReleaseError,'CI state changed'):
-                release.publish(Path('.'),self.api,self.context,self.directory)
-        self.assertEqual(
-            release.evidence_integrations.verify_live_integrations.call_count,2)
         self.api.publish.assert_not_called()
 
 class DispatchTests(unittest.TestCase):
     def setUp(self):
         from unittest.mock import Mock
         self.api=Mock()
-        self.context={'owner_id':123,'builder_revision':'b'*40,'run_id':4,'run_attempt':1,'created_at':'2026-11-16T01:00:00Z'}
+        self.context={'release_context_schema_version':1,'repository':release.REPOSITORY,
+            'owner_id':123,
+            'source_revision':'b'*40,'builder_revision':'b'*40,
+            'run_id':4,'run_attempt':1,'created_at':'2026-11-16T01:00:00Z'}
         self.settings={'repository':{'full_name':release.REPOSITORY,'default_branch':'main','owner':{'login':'danielbyon','id':123}},
-            'immutability':{'enabled':True},'rules':[{'type':name} for name in ('pull_request','non_fast_forward','deletion')]+[
-                {'type':'required_status_checks','parameters':{'required_status_checks':[{'context':'Validate committed PR integration diff','integration_id':15368}]}}]}
-        self.run={'event':'workflow_dispatch','head_branch':'main','head_sha':'b'*40,'actor':{'id':123},'triggering_actor':{'id':123},
+            'immutability':{'enabled':True}}
+        self.run={'id':4,'event':'workflow_dispatch','head_branch':'main','head_sha':'b'*40,'actor':{'id':123},'triggering_actor':{'id':123},
             'run_attempt':1,'created_at':self.context['created_at'],'path':'.github/workflows/skill-release.yml'}
-        self.settings['rulesets']=[{'enforcement':'active','bypass_actors':[]}]
-        self.settings['collaborators']=[{'id':123,'permissions':{'admin':True}}]
         self.api.settings.return_value=self.settings;self.api.run.return_value=self.run
+        self.api.verify_main_ancestry.return_value='c'*40
     def test_valid_dispatch(self):
         self.assertEqual(release.check_settings(self.api,self.context),self.settings)
     def test_foreign_rerun_actor_blocks(self):
@@ -279,12 +272,142 @@ class DispatchTests(unittest.TestCase):
     def test_immutability_disabled_blocks(self):
         self.settings['immutability']['enabled']=False
         with self.assertRaisesRegex(release.ReleaseError,'Immutable'): release.check_settings(self.api,self.context)
+    def test_wrong_repository_or_default_branch_blocks(self):
+        self.settings['repository']['full_name']='danielbyon/other'
+        with self.assertRaisesRegex(release.ReleaseError,'Repository/default branch'):
+            release.check_settings(self.api,self.context)
+        self.settings['repository']['full_name']=release.REPOSITORY
+        self.settings['repository']['default_branch']='trunk'
+        with self.assertRaisesRegex(release.ReleaseError,'Repository/default branch'):
+            release.check_settings(self.api,self.context)
+    def test_non_dispatch_event_or_wrong_branch_blocks(self):
+        self.run['event']='push'
+        with self.assertRaisesRegex(release.ReleaseError,'Trusted main dispatch'):
+            release.check_settings(self.api,self.context)
+        self.run['event']='workflow_dispatch'
+        self.run['head_branch']='feature'
+        with self.assertRaisesRegex(release.ReleaseError,'Trusted main dispatch'):
+            release.check_settings(self.api,self.context)
     def test_untrusted_workflow_blocks(self):
         self.run['path']='.github/workflows/ci.yml'
         with self.assertRaisesRegex(release.ReleaseError,'Unexpected dispatch'): release.check_settings(self.api,self.context)
-    def test_missing_main_protection_blocks(self):
-        self.settings['rules']=[]
-        with self.assertRaisesRegex(release.ReleaseError,'Main protections'): release.check_settings(self.api,self.context)
+    def test_workflow_run_path_must_be_the_main_release_workflow(self):
+        self.run['path']='.github/workflows/skill-release.yml@refs/heads/attacker'
+        with self.assertRaisesRegex(release.ReleaseError,'Unexpected dispatch'): release.check_settings(self.api,self.context)
+    def test_wrong_workflow_run_id_blocks(self):
+        self.run['id']=5
+        with self.assertRaisesRegex(release.ReleaseError,'Trusted main dispatch'): release.check_settings(self.api,self.context)
+    def test_wrong_run_head_blocks_even_when_source_tree_could_match(self):
+        self.run['head_sha']='d'*40
+        with self.assertRaisesRegex(release.ReleaseError,'source|builder|revision'):
+            release.check_settings(self.api,self.context)
+    def test_source_and_builder_must_be_the_same_dispatch_commit(self):
+        self.context['source_revision']='a'*40
+        with self.assertRaisesRegex(release.ReleaseError,'source|builder|revision'):
+            release.check_settings(self.api,self.context)
+    def test_commit_must_remain_in_authenticated_main_history(self):
+        self.api.verify_main_ancestry.side_effect=release.APIError('source is not in main history')
+        with self.assertRaisesRegex(release.APIError,'main history'):
+            release.check_settings(self.api,self.context)
+    def test_release_settings_do_not_require_development_governance_inventory(self):
+        self.assertEqual(release.check_settings(self.api,self.context),self.settings)
+        self.api.settings.assert_called_once()
+
+
+class PreflightRetryTests(unittest.TestCase):
+    def test_full_rerun_reuses_frozen_source_and_release_identity(self):
+        from copy import deepcopy
+        from unittest.mock import Mock, patch
+        root=Path(__file__).resolve().parents[1]
+        source=release.git(root,'rev-parse','HEAD').decode().strip()
+        policy=release.git(root,'log','--first-parent','-1','--format=%H',source,
+                           '--','docs/PROCESS.md').decode().strip()
+        created='2026-11-17T09:00:00Z'
+        original={'release_context_schema_version':1,'repository':release.REPOSITORY,
+            'source_revision':source,'builder_revision':source,'policy_revision':policy,
+            'owner_id':123,'run_id':41,'run_attempt':1,'validation_attempt':1,
+            'created_at':created,'transform_version':1,'supersedes':'',
+            'correction_reason':'','release_version':'2026.11.17'}
+        api=Mock()
+        api.run.return_value={'id':41,'event':'workflow_dispatch','head_branch':'main',
+            'head_sha':source,'actor':{'id':123},'triggering_actor':{'id':123},
+            'run_attempt':2,'created_at':created,
+            'path':'.github/workflows/skill-release.yml@refs/heads/main'}
+        api.settings.return_value={'repository':{'full_name':release.REPOSITORY,
+            'default_branch':'main','owner':{'login':'danielbyon','id':123}},
+            'immutability':{'enabled':True}}
+        api.original_context.return_value=deepcopy(original)
+        environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':source,
+            'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'41','GITHUB_RUN_ATTEMPT':'2',
+            'GITHUB_ACTOR':'danielbyon','GITHUB_TRIGGERING_ACTOR':'danielbyon',
+            'GITHUB_WORKFLOW_REF':release.REPOSITORY+
+                '/.github/workflows/skill-release.yml@refs/heads/main'}
+        with patch.dict(release.os.environ,environment,clear=True):
+            context=release.preflight(root,api,41,2)
+        self.assertEqual(context['source_revision'],source)
+        self.assertEqual(context['builder_revision'],source)
+        self.assertEqual(context['release_version'],'2026.11.17')
+        self.assertEqual(context['run_attempt'],1)
+        self.assertEqual(context['validation_attempt'],2)
+        api.releases.assert_not_called()
+        api.tags.assert_not_called()
+
+    def test_retry_without_original_context_blocks_existing_remote_state(self):
+        from unittest.mock import Mock, patch
+        root=Path(__file__).resolve().parents[1]
+        source=release.git(root,'rev-parse','HEAD').decode().strip()
+        api=Mock()
+        api.run.return_value={'id':41,'event':'workflow_dispatch','head_branch':'main',
+            'head_sha':source,'actor':{'id':123},'triggering_actor':{'id':123},
+            'run_attempt':2,'created_at':'2026-11-17T09:00:00Z',
+            'path':'.github/workflows/skill-release.yml@refs/heads/main'}
+        api.settings.return_value={'repository':{'full_name':release.REPOSITORY,
+            'default_branch':'main','owner':{'login':'danielbyon','id':123}},
+            'immutability':{'enabled':True}}
+        api.original_context.return_value=None
+        api.releases.return_value=[{'tag_name':'2026.11.17','draft':True}]
+        api.tags.return_value=[{'ref':'refs/tags/2026.11.17'}]
+        environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':source,
+            'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'41','GITHUB_RUN_ATTEMPT':'2',
+            'GITHUB_ACTOR':'danielbyon','GITHUB_TRIGGERING_ACTOR':'danielbyon',
+            'GITHUB_WORKFLOW_REF':release.REPOSITORY+
+                '/.github/workflows/skill-release.yml@refs/heads/main'}
+        with patch.dict(release.os.environ,environment,clear=True):
+            with self.assertRaisesRegex(release.ReleaseError,'(?i)retry.*context|context.*retry'):
+                release.preflight(root,api,41,2)
+        api.releases.assert_not_called()
+        api.tags.assert_not_called()
+
+    def test_retry_rejects_frozen_legacy_evidence_fields(self):
+        from copy import deepcopy
+        from unittest.mock import Mock, patch
+        root=Path(__file__).resolve().parents[1]
+        source=release.git(root,'rev-parse','HEAD').decode().strip()
+        policy=release.git(root,'log','--first-parent','-1','--format=%H',source,
+                           '--','docs/PROCESS.md').decode().strip()
+        created='2026-11-17T09:00:00Z'
+        original={'release_context_schema_version':1,'repository':release.REPOSITORY,
+            'source_revision':source,'builder_revision':source,'policy_revision':policy,
+            'owner_id':123,'run_id':41,'run_attempt':1,'validation_attempt':1,
+            'created_at':created,'transform_version':1,'supersedes':'',
+            'correction_reason':'','release_version':'2026.11.17','evidence':{}}
+        api=Mock()
+        api.run.return_value={'id':41,'event':'workflow_dispatch','head_branch':'main',
+            'head_sha':source,'actor':{'id':123},'triggering_actor':{'id':123},
+            'run_attempt':2,'created_at':created,
+            'path':'.github/workflows/skill-release.yml@refs/heads/main'}
+        api.settings.return_value={'repository':{'full_name':release.REPOSITORY,
+            'default_branch':'main','owner':{'login':'danielbyon','id':123}},
+            'immutability':{'enabled':True}}
+        api.original_context.return_value=deepcopy(original)
+        environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':source,
+            'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'41','GITHUB_RUN_ATTEMPT':'2',
+            'GITHUB_ACTOR':'danielbyon','GITHUB_TRIGGERING_ACTOR':'danielbyon',
+            'GITHUB_WORKFLOW_REF':release.REPOSITORY+
+                '/.github/workflows/skill-release.yml@refs/heads/main'}
+        with patch.dict(release.os.environ,environment,clear=True):
+            with self.assertRaisesRegex(release.ReleaseError,'Legacy evidence fields'):
+                release.preflight(root,api,41,2)
 
 class RemoteVerificationTests(unittest.TestCase):
     def setUp(self):
@@ -325,9 +448,14 @@ class PackagingIntegrationTests(unittest.TestCase):
         import json
         import skill_distribution as packaging
         root=Path(__file__).resolve().parents[1]
-        context={'repository':release.REPOSITORY,'release_version':'2026.11.16',
-            'source_revision':release.BOOTSTRAP_BASELINE,'builder_revision':release.BOOTSTRAP_BASELINE,
-            'policy_revision':'e2afa055d1126763c69f0e0392d25b86bab98014','transform_version':1}
+        source=release.git(root,'rev-parse','HEAD').decode().strip()
+        policy=release.git(root,'log','--first-parent','-1','--format=%H',source,
+                           '--','docs/PROCESS.md').decode().strip()
+        context={'release_context_schema_version':1,'repository':release.REPOSITORY,
+            'release_version':'2026.11.16','source_revision':source,
+            'builder_revision':source,'policy_revision':policy,'owner_id':123,
+            'run_id':7,'run_attempt':1,'created_at':'2026-11-16T01:00:00Z',
+            'transform_version':1}
         with tempfile.TemporaryDirectory() as tmp:
             directory=Path(tmp)/'bundle'
             packaging.build_release_packages(root,directory,context)
@@ -370,15 +498,19 @@ class AdversarialProvenanceTests(unittest.TestCase):
         import skill_distribution as packaging
         from unittest.mock import Mock
         root=Path(__file__).resolve().parents[1]
+        source=release.git(root,'rev-parse','HEAD').decode().strip()
+        policy=release.git(root,'log','--first-parent','-1','--format=%H',source,
+                           '--','docs/PROCESS.md').decode().strip()
         context={'repository':release.REPOSITORY,'release_version':'2026.11.16',
-            'source_revision':release.BOOTSTRAP_BASELINE,'builder_revision':release.BOOTSTRAP_BASELINE,
-            'policy_revision':'e2afa055d1126763c69f0e0392d25b86bab98014','transform_version':1}
+            'source_revision':source,'builder_revision':source,
+            'policy_revision':policy,'owner_id':123,'transform_version':1}
         with tempfile.TemporaryDirectory() as tmp:
             directory=Path(tmp)/'bundle';packaging.build_release_packages(root,directory,context)
             assets=[{'name':p.name,'id':n} for n,p in enumerate(directory.iterdir())]
             payload={a['id']:(directory/a['name']).read_bytes() for a in assets}
             api=Mock();api.releases.return_value=[{'tag_name':context['release_version'],'assets':assets}]
             api.asset.side_effect=lambda a:payload[a['id']]
+            api.record.return_value={'owner':{'id':123}}
             with self.assertRaisesRegex(release.ReleaseError,'Qualification evidence'):
                 release.verify_release(root,api,context['release_version'])
 
@@ -430,21 +562,6 @@ class LegacyNormalizationTests(unittest.TestCase):
         evidence['integrations'][0]['records']['chatgpt_inspection']['normalized_report']['source_files']=['invented.py']
         with self.assertRaises(release.ReleaseError):release.verify_frozen_release_evidence(evidence,f['records'].__getitem__)
 
-class AnchorSelectionTests(unittest.TestCase):
-    def test_selects_nearest_applicable_verified_source_not_newest_tag(self):
-        from unittest.mock import Mock,patch
-        api=Mock();api.releases.return_value=[{'tag_name':v,'draft':False,'prerelease':False} for v in ('2026.11.16','2026.11.17')]
-        def history(root,*args):
-            if args[0]=='rev-list': return b'x\ny\n' if args[-1].startswith('a') else b'x\n'
-            return b''
-        with patch.object(release,'git',side_effect=history),patch.object(release,'verify_release',side_effect=[{'source_revision':'a'*40},{'source_revision':'b'*40}]):
-            self.assertEqual(release.select_anchor(Path('.'),api,'c'*40,'d'*40),('b'*40,'2026.11.16'))
-    def test_nonancestor_release_is_not_anchor(self):
-        from unittest.mock import Mock,patch
-        api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
-        with patch.object(release,'git',side_effect=release.ReleaseError('not ancestor')),patch.object(release,'verify_release',return_value={'source_revision':'a'*40}):
-            self.assertEqual(release.select_anchor(Path('.'),api,'c'*40,'d'*40),None)
-
 class HistoricalAdmissionTests(unittest.TestCase):
     fixture=EvidenceTests.fixture
     legacy=LegacyNormalizationTests.legacy
@@ -461,7 +578,7 @@ class HistoricalAdmissionTests(unittest.TestCase):
         f['records'][ref]['body']=json.dumps({'repository':release.REPOSITORY,'evidence':evidence})
         normalized=release.load_evidence_export(ref,f['records'].__getitem__)
         api=Mock();api.record.side_effect=f['records'].__getitem__
-        release.admit_anchor(Path('.'),api,normalized)
+        release.verify_historical_anchor(Path('.'),api,normalized)
     def test_no_uncovered_integrations_can_reuse_verified_anchor(self):
         f=self.fixture();f['evidence']['integrations']=[];f['evidence']['anchor_release']='2026.11.15'
         self.assertEqual(release.verify_frozen_release_evidence(f['evidence'],f['records'].__getitem__),[])
@@ -493,38 +610,6 @@ class HistoryCoverageTests(unittest.TestCase):
             evidence['integrations'].pop()
             with self.assertRaisesRegex(release.ReleaseError,'Uncovered'):
                 evidence_call('verify_coverage',root,evidence,result,admitted=True)
-
-class DiscoveryTests(unittest.TestCase):
-    def test_discovery_reuses_verified_anchor_without_bootstrap_ancestry(self):
-        from unittest.mock import Mock,patch
-        api=Mock();api.request.return_value={'full_name':release.REPOSITORY,'owner':{'id':123}}
-        revisions={'a'*40,'b'*40,'c'*40}
-        def git(root,*args):
-            if args[0]=='rev-parse' and args[1].endswith('^{commit}'):
-                value=args[1][:-len('^{commit}')]
-                return (value+'\n').encode() if value in revisions else b''
-            return b''
-        with patch.object(release,'select_anchor',return_value=('a'*40,'2026.11.15')),patch.object(evidence_module,'git',side_effect=git),patch.object(common,'git',side_effect=git):
-            evidence=evidence_call('discover_evidence',Path('.'),api,'b'*40,'c'*40)
-        self.assertEqual(evidence['schema_version'],2)
-        self.assertEqual(evidence['baseline_revision'],'a'*40)
-        self.assertEqual(evidence['anchor_release'],'2026.11.15')
-        self.assertEqual(evidence['integrations'],[])
-    def test_first_release_refuses_different_source_and_builder_without_anchor(self):
-        from unittest.mock import Mock,patch
-        root=Path(__file__).resolve().parents[1]
-        source=release.git(root,'rev-parse','HEAD').decode().strip()
-        builder=release.git(root,'rev-parse','HEAD^').decode().strip()
-        api=Mock();api.request.return_value={'full_name':release.REPOSITORY,'owner':{'id':123}}
-        with patch.object(release,'select_anchor',return_value=None):
-            with self.assertRaisesRegex(release.ReleaseError,'source and builder'):
-                evidence_call('discover_evidence',root,api,source,builder)
-    def test_failed_release_verification_is_not_silently_skipped(self):
-        from unittest.mock import Mock,patch
-        api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
-        with patch.object(release,'verify_release',side_effect=release.APIError('expired evidence')):
-            with self.assertRaisesRegex(release.APIError,'expired evidence'):
-                release.select_anchor(Path('.'),api,'a'*40,'b'*40)
 
 class NormalizationBoundaryTests(unittest.TestCase):
     fixture=EvidenceTests.fixture
@@ -627,7 +712,7 @@ class DurableResolutionTests(unittest.TestCase):
         api.ci_jobs.return_value=[{'id':5,'name':'Validate committed PR integration diff','conclusion':'success','steps':steps}]
         api.job_log.return_value='\n'.join(['PR HEAD: '+revision,'Tested integration revision: '+revision,'Tested base revision: '+revision,logs])
         api.pages.side_effect=lambda path: ([{'sha':revision}] if path.endswith('/commits') else [{'number':27,'merged_at':'date','base':{'ref':'main'},'merge_commit_sha':revision}])
-        authority=release.EvidenceAuthority(api)
+        authority=release.FrozenHistoricalEvidenceAuthority(api)
         snapshots=release.verify_frozen_release_evidence(f['evidence'],authority.record)
         evidence_call('verify_live_integrations',authority,f['evidence'],root)
         context={'repository':release.REPOSITORY,'release_version':'2026.11.16','source_revision':revision,
@@ -669,45 +754,13 @@ class IntegrationMembershipTests(unittest.TestCase):
         api.pages.side_effect=pages
         with self.assertRaises(release.ReleaseError):evidence_call('verify_membership',api,integration)
 
-class RebaseDiscoveryTests(unittest.TestCase):
-    def test_normal_dispatch_groups_all_rebased_commits(self):
-        import shutil,subprocess,tempfile
-        from unittest.mock import patch
-        from release_evidence_tests import EvidenceV2Tests,OrdinaryChronologyIntegrationTests
-        with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary)
-            def git(*args):return subprocess.check_output(['git','-C',temporary,*args],stderr=subprocess.DEVNULL).decode().strip()
-            git('init');git('config','user.name','Test');git('config','user.email','test@example.invalid')
-            workflow=root/'.github/workflows/ci.yml';workflow.parent.mkdir(parents=True)
-            shutil.copyfile(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml',workflow)
-            (root/'scripts').mkdir();(root/'tests').mkdir()
-            (root/'scripts/changed.py').write_text('VALUE = "baseline"\n')
-            (root/'tests/changed_test.py').write_text('def test_value(): assert True\n')
-            commits=[]
-            git('add','.');git('commit','-m','baseline');commits.append(git('rev-parse','HEAD'))
-            for content in ('first rebased change','second rebased change'):
-                (root/'scripts/changed.py').write_text(f'VALUE = "{content}"\n')
-                (root/'tests/changed_test.py').write_text(f'def test_value(): assert {content!r}\n')
-                git('add','.');git('commit','-m',content);commits.append(git('rev-parse','HEAD'))
-            base,first,result=commits
-            fixture=EvidenceV2Tests().ordinary_fixture(root,base,result,pull_request=9)
-            root,api,_,_,_,_=OrdinaryChronologyIntegrationTests().qualified_fixture(
-                fixture,integrated_commits=[first,result],original_commits=[first,result])
-            api.request.return_value=api.record(release.BASE)
-            with patch.object(release,'select_anchor',return_value=(base,'2026.11.15')):
-                evidence=evidence_call('discover_evidence',root,api,result,result)
-            self.assertEqual(len(evidence['integrations']),1)
-            self.assertEqual(evidence['integrations'][0]['integrated_commits'],[first,result])
-            ordinary_proof=evidence_call('verify_evidence',evidence,api.record,root)
-            evidence_call('verify_coverage',root,evidence,result,admitted=True,
-                ordinary_evidence=ordinary_proof)
-
-
 class SigningContextTests(unittest.TestCase):
     def test_signing_requires_exact_trusted_dispatch(self):
         from unittest.mock import patch
-        context={'repository':release.REPOSITORY,'builder_revision':'b'*40,'run_id':7,
-                 'run_attempt':2,'qualification':{'run_attempt':2}}
+        context={'release_context_schema_version':1,'repository':release.REPOSITORY,
+                 'source_revision':'b'*40,'builder_revision':'b'*40,'owner_id':123,
+                 'run_id':7,'run_attempt':2,'created_at':'2026-11-16T01:00:00Z',
+                 'qualification':{'run_attempt':2}}
         environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':'b'*40,
             'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'7','GITHUB_RUN_ATTEMPT':'2',
             'GITHUB_WORKFLOW_REF':release.REPOSITORY+'/.github/workflows/skill-release.yml@refs/heads/main'}
@@ -723,8 +776,10 @@ class SigningContextTests(unittest.TestCase):
     def test_rerun_signs_same_frozen_context_after_current_validation(self):
         from unittest.mock import patch
         import copy
-        context={'repository':release.REPOSITORY,'builder_revision':'b'*40,'run_id':7,
-                 'run_attempt':2,'qualification':{'run_attempt':2},'validation_attempt':3}
+        context={'release_context_schema_version':1,'repository':release.REPOSITORY,
+                 'source_revision':'b'*40,'builder_revision':'b'*40,'owner_id':123,
+                 'run_id':7,'created_at':'2026-11-16T01:00:00Z',
+                 'run_attempt':2,'qualification':{'run_attempt':3},'validation_attempt':3}
         frozen=copy.deepcopy(context)
         environment={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_SHA':'b'*40,
             'GITHUB_REF':'refs/heads/main','GITHUB_RUN_ID':'7','GITHUB_RUN_ATTEMPT':'3',
@@ -902,43 +957,18 @@ class ManagedInstallationTests(unittest.TestCase):
                 with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
 
 
-from release_evidence_tests import (
-    EvidenceModuleBoundaryTests, EvidenceV2Tests, CaptureTests,
-    OrdinaryChronologyIntegrationTests, evidence_call)
-from prospective_baseline_tests import ProspectiveBaselineTests, AuditTests
-
-
 class CLIEntrypointTests(unittest.TestCase):
-    def test_audit_cli_reaches_evidence_module_before_reporting_missing_data(self):
-        import io,json,os,runpy,subprocess
+    def test_obsolete_receipt_and_baseline_commands_are_not_exposed(self):
+        import io
         from unittest.mock import patch
-        repository='danielbyon/development-process'
-        base='/repos/'+repository
-        token_name='CODEX_TEST_AUDIT_TOKEN'
-        script=Path(__file__).resolve().parents[1]/'scripts'/'skill_release.py'
-        output=io.StringIO();errors=io.StringIO()
-        def fake_run(command,**kwargs):
-            self.assertEqual(command[3],'GET')
-            endpoint=command[4]
-            if endpoint=='/user':
-                payload={'login':'danielbyon'}
-            elif endpoint==base:
-                payload={'full_name':repository,'owner':{'login':'danielbyon'}}
-            elif endpoint==base+'/pulls/33':
-                payload={'number':33,'base':{'ref':'main','repo':{'full_name':repository}}}
-            elif endpoint.startswith(base+'/issues/33/comments?'):
-                payload=[]
-            else:
-                raise AssertionError('Unexpected audit request: '+endpoint)
-            return subprocess.CompletedProcess(command,0,json.dumps(payload).encode(),b'')
-        argv=[str(script),'audit','--root',str(script.parents[1]),
-              '--pr','33','--token-env',token_name]
-        with patch.dict(os.environ,{token_name:'offline-test-token'}), \
-                patch.object(sys,'argv',argv), patch('subprocess.run',side_effect=fake_run), \
-                patch('sys.stdout',output), patch('sys.stderr',errors):
-            with self.assertRaises(SystemExit) as result:
-                runpy.run_path(str(script),run_name='__main__')
-        self.assertEqual(result.exception.code,2)
-        self.assertEqual(json.loads(output.getvalue())['gates']['evidence_receipts'],
-                         'MISSING_EVIDENCE')
-        self.assertEqual(errors.getvalue(),'')
+        output=io.StringIO()
+        with patch('sys.stdout',output), self.assertRaises(SystemExit) as result:
+            release.main(['--help'])
+        self.assertEqual(result.exception.code,0)
+        for command in ('audit','capture-execution','owner-receipt',
+                        'prepare-index','admit-baseline'):
+            with self.subTest(command=command):
+                self.assertNotIn(command,output.getvalue())
+        for command in ('preflight','qualify','verify-bundle','publish',
+                        'verify-release','resolve-task'):
+            self.assertIn(command,output.getvalue())

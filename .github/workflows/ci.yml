@@ -115,6 +115,11 @@ jobs:
           PYTHONSAFEPATH: "1"
         run: python3 -m unittest discover -s tests -p test_github_releases.py -v
 
+      - name: Run trusted-main release integration tests
+        env:
+          PYTHONSAFEPATH: "1"
+        run: python3 -m unittest discover -s tests -p trusted_main_integration_tests.py -v
+
       - name: Check out the exact PR source for package provenance
         uses: actions/checkout@v4
         with:
