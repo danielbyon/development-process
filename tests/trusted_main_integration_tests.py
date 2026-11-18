@@ -121,6 +121,9 @@ class TrustedMainIntegrationTests(unittest.TestCase):
                 if destination.is_symlink():
                     destination.unlink()
                 shutil.copy2(source, destination)
+        (self.root / "trusted-main-integration-source.txt").write_text(
+            "fixture-only source commit\n"
+        )
         git(self.root, "add", "-A")
         git(self.root, "commit", "--quiet", "-m", "trusted dispatch source")
         self.source = git(self.root, "rev-parse", "HEAD").decode().strip()
