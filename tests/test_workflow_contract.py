@@ -161,6 +161,56 @@ class WorkflowContractTests(unittest.TestCase):
             else:
                 self.fail(f"Unknown policy scenario: {scenario['kind']}")
 
+    def test_development_review_activation_metadata_covers_closeout_triggers(self) -> None:
+        skill_path = ROOT / "skills" / "development-review" / "SKILL.md"
+        skill_markdown = skill_path.read_text()
+        _, separator, frontmatter_and_body = skill_markdown.partition("---")
+        self.assertEqual(separator, "---")
+        frontmatter, separator, _ = frontmatter_and_body.partition("---")
+        self.assertEqual(separator, "---")
+        skill_description = yaml.safe_load(frontmatter)["description"].casefold()
+
+        for trigger in (
+            "`implemented`",
+            "`review feedback`",
+            "merge readiness",
+            "`merge`",
+            "`close this out`",
+            "reports cleanup complete",
+            "post-closeout issue discovery",
+        ):
+            with self.subTest(trigger=trigger):
+                self.assertIn(trigger, skill_description)
+
+        skill_intro = next(
+            line
+            for line in skill_markdown.splitlines()
+            if line.startswith("Use this Skill ")
+        ).casefold()
+        for trigger in (
+            "`implemented`",
+            "`review feedback`",
+            "readiness, `merge`",
+            "`close this out`",
+            "reports cleanup complete",
+            "requests post-closeout issue discovery",
+        ):
+            with self.subTest(intro_trigger=trigger):
+                self.assertIn(trigger, skill_intro)
+
+        agent_metadata = yaml.safe_load(
+            (
+                ROOT
+                / "skills"
+                / "development-review"
+                / "agents"
+                / "openai.yaml"
+            ).read_text()
+        )
+        agent_description = agent_metadata["interface"]["short_description"].casefold()
+        self.assertIn("cleanup", agent_description)
+        self.assertIn("post-closeout issue discovery", agent_description)
+
     def test_skill_sections_satisfy_workflow_contracts(self) -> None:
         fixture = json.loads(
             (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
