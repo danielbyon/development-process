@@ -1,3 +1,3 @@
 interface:
   display_name: "Development Review"
-  short_description: "Review changes, PR feedback, and merge readiness"
+  short_description: "Review PRs, cleanup, merges, and post-closeout issue discovery"

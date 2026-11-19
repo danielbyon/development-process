@@ -1,11 +1,11 @@
 ---
 name: development-review
-description: Use when a user says `implemented`, asks for `review feedback` or merge readiness, says `merge`, or asks to `close this out`.
+description: Use when a user says `implemented`, asks for `review feedback` or merge readiness, says `merge`, or asks to `close this out`, reports cleanup complete, or requests post-closeout issue discovery.
 ---
 
 # Development review
 
-Use this Skill for `implemented`, `review feedback`, readiness, `merge`, and `close this out` requests. This Skill applies the pinned policy to review and closeout; it does not replace the policy or create a separate approval authority.
+Use this Skill for `implemented`, `review feedback`, readiness, `merge`, and `close this out` requests, and when the owner reports cleanup complete or requests post-closeout issue discovery. This Skill applies the pinned policy to review and closeout; it does not replace the policy or create a separate approval authority.
 
 The issue defines accepted scope, and the pinned policy governs roles and process. If the issue, approved plan, or task contract conflicts with the pinned policy, or material scope is unclear, state the conflict and stop the affected decision for owner adjudication. This Skill does not expand scope or authorize an action by itself. The owner must explicitly authorize a merge for the current task.
 
