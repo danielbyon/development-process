@@ -5,7 +5,11 @@
       "contract": [
         "Codex Plan-mode prompt",
         "execution/bootstrap handoff",
-        "read-only"
+        "read-only",
+        "HOSTED_VERIFICATION_UNAVAILABLE",
+        "HOSTED_INSTALLATION_MISMATCH",
+        "verify-release",
+        "verify the revision loaded in the current session against the recorded Skill identity"
       ]
     },
     {
@@ -14,7 +18,11 @@
         "clean, isolated starting tree",
         "manual task contract",
         "separate, non-authoring execution",
-        "draft PR"
+        "draft PR",
+        "--installed-path",
+        "LOCAL_INSTALLATION_UNAVAILABLE",
+        "LOCAL_INSTALLATION_MISMATCH",
+        "inspect the actual Codex installation against the recorded Skill identity"
       ]
     },
     {
@@ -22,7 +30,11 @@
       "contract": [
         "Inspect final source",
         "tested commit",
-        "owner must explicitly authorize a merge"
+        "owner must explicitly authorize a merge",
+        "HOSTED_VERIFICATION_UNAVAILABLE",
+        "HOSTED_INSTALLATION_MISMATCH",
+        "verify-release",
+        "verify the revision loaded in the current session against the recorded Skill identity"
       ]
     }
   ],

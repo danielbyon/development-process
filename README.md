@@ -24,7 +24,7 @@ Every change receives a full review from a separate, non-authoring execution. Ch
 
 ## Skill distribution
 
-New tasks resolve the newest verified immutable CalVer release and record its tag once. Source, policy and builder revisions remain distinct internal evidence. Verify the release and installed Skill compatibility before use. An unverifiable newest eligible release blocks; before the first release, resolution returns `NO_IMMUTABLE_RELEASE`.
+New tasks resolve the newest verified immutable CalVer release and record its tag once. Source, policy and builder revisions remain distinct internal evidence. Verify the release and inspect the Skill in its runtime before use. ChatGPT verifies `development-orchestrator` and `development-review` against the revision loaded in the task session. Codex verifies `delegation-executor` against its installed files. An unverifiable newest eligible release blocks; before the first release, resolution returns `NO_IMMUTABLE_RELEASE`.
 
 Existing tasks retain their recorded SHA or CalVer. Historical pins include `aa8dc7784641dd5416befdebc246ed081bfd7ade`, `93a86127a3721d6044f4a8e993a764731fbda4e5`, `142422527de28b8e20dea1158d2f54d020dcdcd5`, `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`, `6fea1f50e0745c189685849f560f10a946e04091`, and `e2afa055d1126763c69f0e0392d25b86bab98014`. None is an implicit new-task default.
 
@@ -65,16 +65,16 @@ STAGING_ROOT="$(mktemp -d)"
 python3 scripts/skill_distribution.py init-staging \
   --staging-root "$STAGING_ROOT"
 python3 scripts/skill_distribution.py stage \
-  --archive "$ARTIFACT_DIR/development-orchestrator.zip" \
+  --archive "$ARTIFACT_DIR/delegation-executor.zip" \
   --staging-root "$STAGING_ROOT" \
   --policy-revision e2afa055d1126763c69f0e0392d25b86bab98014
 ```
 
 Continue in the same shell so `ARTIFACT_DIR` still points to the verified packages. Inspect the staged directory at `$STAGING_ROOT/.agents/skills/<skill-name>`. Repeating the same installation is a no-op. A different source requires `--upgrade`; the installer checks the existing marker and files first. It refuses an unknown installation, local file drift, a mismatched policy, or an automatic policy migration. It changes only the named Skill and preserves other entries.
 
-After the change merges, environment activation remains a manual owner step. Review the staged Skill, then copy the selected directory from the staging root into the intended project's `.agents/skills` directory. Inspect any existing target before replacing it. The command has no implicit production target, and it does not provide auto-sync.
+After the change merges, environment activation remains a manual owner step. For Codex, review the staged `delegation-executor` before copying it into the intended project's `.agents/skills` directory. Inspect any existing target before replacing it. The command has no implicit production target, and it does not provide auto-sync.
 
-In ChatGPT, open Plugins from the sidebar and select Skills. Choose Create, then Upload from computer. Upload each archive separately. Availability depends on the workspace plan and administrator settings. ChatGPT scans uploaded Skills and may require review or block an upload; review the source before installation. The upload flow is described in [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt). No live ChatGPT upload was performed for this change.
+In ChatGPT, open Plugins from the sidebar and select Skills. Choose Create, then Upload from computer. Upload the `development-orchestrator` and `development-review` archives separately. Availability depends on the workspace plan and administrator settings. ChatGPT scans uploaded Skills and may require review or block an upload; review the source before installation. The upload flow is described in [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt). After manual activation, use `python3 scripts/skill_release.py verify-release` for the ChatGPT release comparison and verify the loaded revision in ChatGPT. For Codex, use `python3 scripts/skill_release.py resolve-task --skill delegation-executor --installed-path <Codex Skill directory>`. See the [runtime verification procedure](docs/skill-releases.md#6-resolution-compatibility-and-staging).
 
 ### Checks
 

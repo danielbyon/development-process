@@ -1,6 +1,6 @@
 # Development review scenarios
 
-These cases exercise the decisions made by the `development-review` Skill. Each case is a frozen snapshot. Run each one in a fresh, independent Codex evaluation with the Skill loaded from this directory. If the host cannot load the unpublished Skill, provide the exact `SKILL.md` text.
+These cases exercise the decisions made by the `development-review` Skill. Each case is a frozen snapshot. For synthetic evaluations, give a fresh evaluator the exact candidate `SKILL.md` text. Use authenticated ChatGPT session evidence for live installation qualification.
 
 Treat each setup as a closed snapshot. Do not use the current checkout or live external services to replace its facts. The setup states which source, tests, policy, or review records the evaluator has inspected. Give the evaluator only the case setup, its artifacts, and its prompt. Keep the expected result below the prompt and do not expose it before the evaluator responds. Record the evaluation ID, observed result, and a short response excerpt. Leave the case `UNVERIFIED` until it has run.
 
@@ -695,3 +695,22 @@ Prompt:
 Expected result: In A, retain the worktree, report `MERGED — CLEANUP PENDING` and `MCP RESTART REQUIRED — OWNER ACTION`, and require owner action then read-only active verification. In B, direct Codex to recheck current disk absence and validation applicability, active absence, identity, integration, and preservation before removing the exact worktree. Keep discovery pending until actual cleanup and the other closeout gates are verified. Lifecycle actions belong to the owner.
 
 **Current evaluation:** PASS — independent run `/root/vaporeon`. It kept discovery blocked until physical cleanup was verified and required fresh checks of disk absence, validation, active absence, and worktree safety.
+
+## Hosted installation evidence
+
+Synthetic evaluation. In a fresh evaluator context, use the exact candidate Skill instructions. Give the evaluator the setup and one case at a time. Keep the expected result out of its input.
+
+Prompt. Decide whether to apply the review workflow to a continuing task. Report the hosted outcome and the evidence that supports it. Preserve the recorded pin in every case. These cases exercise the decision procedure without accessing a live installation.
+
+Setup. The release at the recorded CalVer passed full verification. A newer release is available. The target workspace and task session are known. No local copy of the hosted Skill exists. For compatible changes, the verification record must name the inspected installation, session-bound revision, release and policy, differences, and validation.
+
+| Case | Evidence supplied | Expected result |
+|---|---|---|
+| Exact payload | An authenticated ChatGPT surface binds the correct workspace, installation and concrete loaded revision to the current session. The complete effective inventory and bytes match the verified package. | `HOSTED_IDENTITY_VERIFIED`. Continue using the recorded pin. |
+| Inspected transformations | The same session binding and complete inventory are present. The packaged release link matches. The host maps every removed frontmatter field into equivalent platform metadata and adds a display field in `agents/openai.yaml`. Direct inspection accounts for each change, including metadata effects, and applicable validation passes. | `HOSTED_COMPATIBILITY_VERIFIED`. Record the actual differences and validation. |
+| Partial payload | The binding is present and the instruction body matches. Effective metadata is inaccessible. | `HOSTED_VERIFICATION_UNAVAILABLE`. Ask for the effective metadata and keep task use blocked. |
+| Unknown transformation | The complete effective payload is visible, but the effect of a changed invocation field cannot be established. | `HOSTED_VERIFICATION_UNAVAILABLE`. Identify the field and seek evidence about its effect. |
+| Detached export | A caller supplies a ZIP and checksum that match the release. No authenticated surface connects the ZIP or installed revision to this session. | `HOSTED_VERIFICATION_UNAVAILABLE`. Ask for authenticated session and revision evidence. |
+| Stale inspection | The workspace's export was inspected before a session change. There is no current binding. | `HOSTED_VERIFICATION_UNAVAILABLE`. Obtain fresh binding and effective payload evidence. |
+| Wrong binding | Authenticated evidence identifies a different workspace or conclusively shows that the revision inspected is different from the revision loaded. | `HOSTED_INSTALLATION_MISMATCH`. Identify the binding mismatch and block. |
+| Incompatible metadata | The correct binding and complete payload are present. A changed invocation requirement contradicts intended behavior and fails targeted validation. | `HOSTED_INSTALLATION_MISMATCH`. Report the failed behavior and block. |
