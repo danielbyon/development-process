@@ -527,4 +527,159 @@ Prompt:
 
 Expected outcome: Preserve the candidate checkout and report `MERGED — CLEANUP PENDING` with the identity mismatch. Keep Issue #100 open. Do not fetch from the mismatched remote, run the merge command, or call synchronization `not applicable`.
 
-**Evaluation record:** [Recorded runs](../../../tests/primary_main_fast_forward_evaluations.md#cleanup-primary-identity-unknown).
+## Issue #31 post-closeout discovery inputs
+
+These inputs cover A1–A6 and the closeout side of A25. Grouped inputs ask for one response with a separate disposition for each labeled snapshot. Keep snapshot facts isolated. A25-closeout remains a separate context from A25-next-task.
+
+The frozen repository evidence is danielbyon/development-process at baseline SHA e37b72870ce4c601b4fc87e2d6d3d68d05d41dfa, with recorded policy pin 9075d29d0d0fe296085ef153bcc9c9b1f89f8f84. Historical scenario-specific policy pins remain authoritative and separate from the candidate fingerprint below.
+
+Every evaluator input includes this synthetic candidate compatibility envelope. It identifies the candidate policy and Skills under evaluation and closes the compatibility question for these behavior scenarios.
+
+- Fixture ID ISSUE31-COMPAT-001 has result PASS.
+- Candidate fingerprint source SHA is 3131313131313131313131313131313131313131. It identifies synthetic candidate artifacts, not the frozen repository evidence baseline above.
+- Candidate policy revision is 3232323232323232323232323232323232323232.
+- development-review identity is bound to the candidate source SHA, with fixture SHA-256 3333333333333333333333333333333333333333333333333333333333333333.
+- development-orchestrator identity is bound to the same candidate source SHA, with fixture SHA-256 4444444444444444444444444444444444444444444444444444444444444444.
+- The compatibility manifest SHA-256 is 5555555555555555555555555555555555555555555555555555555555555555. It records both Skill digests and the candidate policy revision as one compatible set. Exact-source packaging and the fixture manifest check passed.
+- Immutable release 2026.11.18 and its production qualification are already verified. Evaluators assess the supplied candidate behavior. Candidate publication, installation, and activation are outside these behavior scenarios.
+
+| Acceptance check | Input ID |
+| --- | --- |
+| A1 | A1-A4 |
+| A2 | A1-A4 |
+| A3 | A1-A4 |
+| A4 | A1-A4 |
+| A5 | A5 |
+| A6 | A6 |
+| A25 closeout context | A25-closeout |
+
+### A1–A4 — closeout dispositions
+
+Input ID A1-A4
+
+Checks
+
+- A1 triggers discovery only after required cleanup is verified and records closeout first.
+- A2 verifies an owner-reported cleanup completion before discovery.
+- A3 triggers discovery after verified remote-only closeout and reports local cleanup as inapplicable.
+- A4 triggers discovery after owner-approved retention and preserves its reason and deferred cleanup.
+
+Setup
+
+Each artifact below is a separate, closed snapshot. Do not transfer state between artifacts.
+
+Artifacts
+
+- A1. Issue #210 is merged, all required checks passed, and Codex worktree /task/issue-210, branch codex/issue-210, primary synchronization, artifact disposition, registration removal, and final cleanup are verified.
+- A2. The owner reports cleanup complete for merged Issue #211. Frozen read-only outputs show /task/issue-211 and its branch absent, primary synchronization verified, task artifacts preserved, and registration state verified after restart.
+- A3. Issue #212 is a remote-only documentation edit through GitHub. Accepted scope, checks, and remote branch housekeeping are complete. Inspected issue, PR, and task records identify no local task worktree or primary checkout.
+- A4. Issue #213 is merged and other checks passed. The owner approved retaining /task/issue-213 on codex/issue-213 for follow-up Issue #214 because it contains useful in-progress changes. Cleanup is deferred until that follow-up no longer depends on the worktree.
+
+Prompt
+
+> For A1 through A4, report the closeout disposition and whether post-closeout discovery runs. Treat every snapshot independently. Record closeout before discovery and stop after each report.
+
+Expected result
+
+- A1 records successful closeout before report-only discovery.
+- A2 shows supplied verification before discovery.
+- A3 marks local cleanup inapplicable from checked records and makes no claim about global artifact absence.
+- A4 runs discovery after other gates pass and preserves the retained worktree, owner-approved reason, follow-up issue, and deferred cleanup.
+
+Status
+
+UNVERIFIED — no fresh independent evaluation is recorded.
+
+### A5 — owner-reported cleanup fails verification
+
+Input ID A5
+
+Checks
+
+- A5a keeps discovery gated when required closeout verification remains pending.
+- A5b keeps discovery gated when registration or owner restart verification remains unresolved.
+
+Setup
+
+Each artifact below is a separate, closed snapshot. The owner reports cleanup complete in both cases, but verification fails for a different reason.
+
+Artifacts
+
+- A5a. Issue #215 is merged. Required primary synchronization has not run because the primary checkout contains an untracked owner file. The task worktree remains intact and no synchronization result exists.
+- A5b. Issue #216 is merged. The task-root entry was removed from the verified configuration and static validation passed, but the shared server still has the old configuration loaded. The owner has not restarted it or verified server recognition.
+
+Prompt
+
+> For A5a and A5b, verify the supplied owner reports and state whether closeout and discovery can proceed. Treat the snapshots independently.
+
+Expected result
+
+- A5a keeps closeout pending because primary synchronization is unverified.
+- A5b keeps closeout pending because server recognition after the owner-controlled restart is unverified.
+- Neither case runs discovery or reports successful closeout.
+
+Status
+
+UNVERIFIED — no fresh independent evaluation is recorded.
+
+### A6 — discovery retrieval fails after closeout
+
+Input ID A6
+
+Checks
+
+- Report discovery retrieval failure after verified closeout.
+- Keep the successful closeout result unchanged.
+
+Setup
+
+Issue #217 has a verified successful closeout, including required cleanup. The subsequent GitHub issue-list request fails with an authorization error before any candidate can be inspected. No other approved-backlog source is available.
+
+Prompt
+
+> close out Issue #217 and run post-closeout discovery. Report the result from the supplied snapshot.
+
+Expected result
+
+Return an Unavailable discovery result with the retrieval error. Keep successful closeout recorded.
+
+Status
+
+UNVERIFIED — no fresh independent evaluation is recorded.
+
+### A25-closeout — terminal discovery report
+
+Input ID A25-closeout
+
+Checks
+
+- Use the same candidate qualification facts as A25-next-task.
+- Use the synthetic TEST-325 task policy pin that matches the candidate compatibility manifest. Keep the real Issue #31 policy pin unchanged.
+- Return a terminal report after verified closeout with no planning handoff.
+
+Setup
+
+Repository: danielbyon/development-process
+Repository URL: https://github.com/danielbyon/development-process
+Frozen repository baseline SHA: e37b72870ce4c601b4fc87e2d6d3d68d05d41dfa
+Inspection timestamp: 2026-11-18T17:33:42-08:00 (2026-11-19T01:33:42Z)
+Real Issue #31 task policy pin: 9075d29d0d0fe296085ef153bcc9c9b1f89f8f84
+Synthetic TEST-325 task policy pin: 3232323232323232323232323232323232323232
+Candidate issue: TEST-325 is open with accepted scope to add bounded retry handling for idempotent API requests. Its criteria require retries to stop at the configured limit, prohibit retries for non-idempotent requests, and test the boundaries. The existing request-classification interface satisfies its prerequisite. No owner decision is open. No active implementation or open or draft PR covers it. Owner priority is Medium. It unlocks no downstream issue. Its risk and scope are medium and bounded, and it is ready for ordinary Codex planning. The implementation paths are src/retry.py and tests/test_retry.py.
+Existing task instructions: Codex is the sole bootstrap owner. A Plan-mode task handoff is required before implementation.
+Proposed branch: codex/test-325-retry-policy
+Proposed worktree: /task/test-325-retry-policy
+Active work: none
+Closeout context: Issue #324 has verified successful closeout and cleanup.
+
+Prompt
+
+> close out Issue #324 and perform post-closeout discovery from the supplied facts. Stop after the report.
+
+Expected result
+
+Return a terminal report for eligible TEST-325 and stop. Do not create a task contract, Plan-mode prompt, execution handoff, or next-step mutation.
+
+Status
+
+UNVERIFIED — no fresh independent evaluation is recorded.

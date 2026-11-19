@@ -23,21 +23,41 @@ Continue an existing task using its recorded SHA or CalVer and Skill source iden
 - Separate verified facts from inferences. If the issue, source, policy pin, or task identity cannot be inspected, report the gap and stop at the affected decision.
 - Do not silently change the pinned policy. If the task cites another revision or the approved source has moved, identify the revisions and request owner adjudication.
 
+## Approved backlog qualification
+
+Use the same eligibility criteria for `next task` and post-closeout discovery. Inspect the approved issue backlog, project instructions, applicable specifications and decisions, dependencies, relevant source and tests, active task and worktree records, and open or draft pull requests as needed to establish eligibility. In standalone `next task`, gather only the evidence needed to select eligible work. The broader coverage and ranking requirements below apply only to the post-closeout report. Use the GitHub connection that matches the repository owner. Bind findings to the repository and inspected source revision.
+
+An issue is eligible when its accepted scope is clear, sufficient acceptance criteria exist, prerequisites are satisfied, material owner decisions are resolved, and no active implementation already covers it. An ordinary Codex plan may remain pending and does not block eligibility. Exclude issues with unmet prerequisites, unresolved material owner decisions, blocked scope, duplicate active implementation, or missing eligibility evidence, and name the reason. Missing overlap evidence does not exclude an otherwise eligible issue.
+
 ## `next task`
 
 When asked to find or prepare the next task:
 
-1. Inspect the current repository and approved issue backlog. Read the relevant specifications, decisions, project instructions, and active work before selecting a slice.
-2. Continue an active task or report why no new task can start. Follow the policy's serial-per-repository default; treat work as parallel only when its independence is explicit.
-3. Select an approved slice without adding requirements. For a substantial custom subsystem, check native features and maintained libraries before proposing new tooling. Prepare a task contract that states:
+1. Apply the existing standalone active-work gate before selecting any backlog issue. When the gate directs continuation of existing work, identify that work and state clearly that no new issue starts. Honor the active task's established output contract.
+2. Only when the gate permits selection, use Approved backlog qualification with the evidence needed to establish eligibility. Follow this branch's standalone task contract and Plan-mode or no-plan response rules below. Do not apply the post-closeout report's `Complete`, `Partial`, or `Unavailable` coverage labels or return a ranked discovery report. Follow the policy's serial-per-repository default; treat work as parallel only when its independence is explicit.
+3. Select an approved slice without adding requirements. For a substantial custom subsystem, check native features and maintained libraries before proposing new tooling. Establish the task-contract facts needed to describe the slice:
    - beneficiary, current problem, desired outcome, and why the work is timely;
    - source issues and specifications, scope, exclusions, PAC/TAC, and constraints;
    - risk classification, relevant failure modes, validation, and independent review.
-4. When a Codex plan is required, return **one read-only Plan-mode prompt only**. Include the accepted issue, verified source revision and expected baseline, the branch and worktree as *proposed* when they do not exist, and exactly one designated bootstrap owner. Do not include an execution/bootstrap handoff in this response. Do not tell Plan mode to create or edit files, branches, worktrees, MCP configuration, or Delegation v3 artifacts. An absent task worktree is not an approval blocker.
+4. When a Codex plan is required, return **one read-only Plan-mode prompt only**. The reply must consist solely of that prompt. Use verified task-contract facts inside it as needed, but do not return a separate task contract, issue-ranking report, framing, explanation, or execution/bootstrap handoff. Include the accepted issue, verified source revision and expected baseline, the branch and worktree as *proposed* when they do not exist, and exactly one designated bootstrap owner. Do not tell Plan mode to create or edit files, branches, worktrees, MCP configuration, or Delegation v3 artifacts. An absent task worktree is not an approval blocker.
 5. When a task is straightforward and no Codex plan is produced, the no-plan path may return the execution/bootstrap handoff directly after accepted scope and source state are verified. An explicitly authorized pre-plan bootstrap remains separate from Plan mode.
 6. After plan approval and verified worktree bootstrap, prefer native Delegation v3 only when worktree-bound registration and administration are also verified. Manual Codex execution remains the default, and a queued runner is not required. If V3 materialization is unavailable, use a truthful manual task contract tied to the verified worktree and issue. Never bind work to a proposed worktree, stale primary checkout, or invented lineage.
 
 For new-project planning, design decisions, or delegation preparation, gather repository evidence first. Ask only about choices that materially affect scope, architecture, security, or acceptance; resolve routine technical choices within the approved design and leave material owner decisions with the owner.
+
+## Post-closeout issue discovery
+
+When `development-review` invokes post-closeout discovery after an eligible verified closeout, reuse Approved backlog qualification and return one report. Include named active work in concurrency checks, while continuing to assess other candidates even when work is active.
+
+Ranking is qualitative. Apply explicit owner priority first, then dependency unlocking or critical-path impact, product value and urgency, and finally risk, complexity, and readiness. Do not invent numerical scores or let issue-number order override owner priority or dependency evidence. Explain each rank using verified owner priorities, dependencies, value and urgency, risk, complexity, and readiness; link to source records when available. The ranked recommendation list has a hard cap of five. Assess eligible candidates beyond fifth place, but never include them in that list or present them as ordinary ranked recommendations. Surface a lower-ranked candidate outside the list only when it enables a verified useful parallel group, and explain any group that omits the highest-ranked issue.
+
+Assess each candidate against named active work and against the complete proposed group. Check ordering, overlapping files and interfaces, unstable contracts, migrations, mutable resources, shared tests or infrastructure, and hardware when relevant. Use `Independent` when compatibility is verified, `Conditional` when a concrete coordination requirement remains, `Serial` for a known conflict or ordering constraint, and `Unverified` when evidence is insufficient. Check the whole group because pairwise compatibility can miss a shared conflict. Recommend only groups verified as safe. Serial execution remains the default. Parallel execution requires the owner's explicit choice.
+
+Set coverage to `Complete` when evidence establishes repository-wide coverage, including a verified result with zero qualifying issues. Set `Partial` when some useful candidates are supported but available evidence cannot establish full coverage. Set `Unavailable` only when evidence is insufficient and no useful candidate can be recommended. An interrupted or unavailable source must never be reported as a verified empty backlog.
+
+Include the repository and inspected source SHA, inspection time, closeout disposition, issue and active-work identities, evidence links, stale or unavailable sources, and limitations. Issue and active-work state can change after inspection; report this as an evidence-freshness limitation. Do not frame revalidation as a next-step recommendation.
+
+This path is report-only and ends the invocation after one report. It creates no task contract, planning or execution prompt, assignment, schedule, branch, worktree, task session, delegation, source or configuration change, or GitHub mutation. Do not include a call to action or recommendation to prepare a task, plan, execution prompt, or bootstrap. State revalidation only as an evidence-freshness limitation because issue and active-work state can change. Preserve the recorded closeout result if qualification or retrieval fails. Applicability or compatibility gaps stop discovery without changing that result.
 
 ## `codex plan`
 
