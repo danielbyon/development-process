@@ -22,7 +22,7 @@ from release_evidence import baseline as evidence_baseline
 from release_evidence import integrations as evidence_integrations
 from release_evidence import qualification as evidence_qualification
 from release_evidence.common import (
-    BASE, BOOTSTRAP_BASELINE, REPOSITORY, SHA, SUITES, ReleaseError,
+    BASE, BOOTSTRAP_BASELINE, REPOSITORY, SHA, SUITES, MissingEvidenceError, ReleaseError,
     canonical, digest, git, require, revision,
 )
 from release_evidence.legacy import load_evidence_export, verify_frozen_release_evidence
@@ -460,10 +460,18 @@ def _verify_release(root,api,tag):
             name=asset['name']
             require(name==Path(name).name and name not in ('.','..') and not (directory/name).exists(),'Unsafe/duplicate asset name')
             (directory/name).write_bytes(api.asset(asset))
-        manifest=json.loads((directory/'release-manifest.json').read_text())
+        try:
+            manifest = json.loads((directory / 'release-manifest.json').read_text())
+        except ValueError as error:
+            raise ReleaseError('Malformed release manifest') from error
+        require(isinstance(manifest, dict), 'Malformed release manifest')
         context=manifest.get('context',manifest)
+        require(isinstance(context, dict), 'Malformed release manifest context')
         require(context.get('release_version')==tag and context.get('repository')==REPOSITORY,'Manifest release identity mismatch')
-        package.verify_release_packages(root,directory,context)
+        try:
+            package.verify_release_packages(root, directory, context)
+        except package.DistributionError as error:
+            raise ReleaseError(str(error)) from error
         repository=api.record(BASE)
         require(repository.get('owner',{}).get('id')==context.get('owner_id'),
                 'Frozen publisher owner mismatch')
@@ -521,23 +529,66 @@ def _verify_release(root,api,tag):
                             for member,value in provenance['payload_sha256'].items()}
         return {**context,'verified_payload_identities':payloads}
 
+def _newest_release_tag(api):
+    candidates = []
+    for release in api.releases():
+        try:
+            key = version_key(release['tag_name'])
+        except ReleaseError:
+            continue
+        if release.get('draft') is False and release.get('prerelease') is False:
+            candidates.append((key, release['tag_name']))
+    return max(candidates)[1] if candidates else None
+
+
+def _verify_selected_release(root, api, tag=None):
+    """Verify the selected release without falling back after a failure."""
+    try:
+        selected = _newest_release_tag(api) if tag is None else tag
+        if selected is not None:
+            return selected, verify_release(Path(root), api, selected)
+    except (ReleaseError, APIError, OSError, ValueError, KeyError, TypeError) as error:
+        raise ReleaseError(f'RELEASE_VERIFICATION_FAILED: {error}') from error
+    raise ReleaseError('NO_IMMUTABLE_RELEASE')
+
+
 def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatibility=None,*,skill=None,installed_path=None):
     if existing_pin is not None:
         require(bool(SHA.fullmatch(existing_pin)) or bool(version_key(existing_pin)),'Invalid recorded task pin')
         return {'task_pin':existing_pin}
-    candidates=[]
-    for release in api.releases():
-        try: key=version_key(release['tag_name'])
-        except ReleaseError: continue
-        if release.get('draft') is False and release.get('prerelease') is False: candidates.append((key,release['tag_name']))
-    require(candidates,'NO_IMMUTABLE_RELEASE')
-    tag=max(candidates)[1]; context=verify_release(Path(root),api,tag)
+
+    tag, context = _verify_selected_release(root, api)
     require(installed_payload is None,'Caller-supplied payload claims are not installation evidence')
-    expected=context.get('verified_payload_identities',{}).get(skill)
-    require(isinstance(expected,dict) and expected and installed_path is not None,
-            'Requested Skill and installed path required')
-    directory=Path(installed_path)
-    require(directory.is_dir() and not directory.is_symlink(),'Installed Skill directory unavailable')
+    if skill in ('development-orchestrator', 'development-review'):
+        raise ReleaseError(
+            f'HOSTED_VERIFICATION_UNAVAILABLE: {skill} runs in ChatGPT. '
+            'Use verify-release for release provenance, then inspect the effective payload and '
+            'installed revision bound to the task session in the authenticated ChatGPT workspace '
+            'as described in docs/skill-releases.md.'
+        )
+    require(skill == 'delegation-executor', 'Requested Skill has no supported runtime')
+    expected = context.get('verified_payload_identities', {}).get(skill)
+    require(isinstance(expected, dict) and expected,
+            'RELEASE_VERIFICATION_FAILED: verified payload identity missing for ' + skill)
+    try:
+        _verify_local_installation(api, context, skill, expected, installed_path, compatibility)
+    except MissingEvidenceError as error:
+        raise ReleaseError(f'LOCAL_INSTALLATION_UNAVAILABLE: {error}') from error
+    except (ReleaseError, APIError, OSError, ValueError, KeyError, TypeError) as error:
+        raise ReleaseError(f'LOCAL_INSTALLATION_MISMATCH: {error}') from error
+    return {'task_pin':tag,'provenance':context}
+
+
+def _verify_local_installation(api, context, skill, expected, installed_path, compatibility):
+    """Inspect the files loaded by Codex and authenticate any compatibility record."""
+    if installed_path is None:
+        raise MissingEvidenceError('Pass --installed-path for the installed Codex delegation-executor.')
+    directory = Path(installed_path)
+    require(not directory.is_symlink(), 'Installed Skill symlink forbidden')
+    if not directory.is_dir():
+        raise MissingEvidenceError(f'Installed Skill directory unavailable: {directory}')
+    if isinstance(compatibility, Path):
+        compatibility = json.loads(compatibility.read_text())
     inspected={}
     for member in expected:
         relative=Path(member)
@@ -545,7 +596,8 @@ def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatib
         path=directory/relative
         require(all(not (directory/Path(*relative.parts[:i])).is_symlink() for i in range(1,len(relative.parts)+1)),
                 'Installed Skill symlink forbidden')
-        require(path.is_file(),'Installed Skill file missing: '+member)
+        if not path.is_file():
+            raise MissingEvidenceError('Installed Skill file missing: ' + member)
         inspected[member]=digest(path.read_bytes())
     files={path.relative_to(directory).as_posix() for path in directory.rglob('*') if path.is_file() or path.is_symlink()}
     marker_name='.skill-distribution.json'
@@ -571,13 +623,15 @@ def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatib
         require(isinstance(compatibility,dict),'Installed Skill compatibility unverified')
         record=api.record(compatibility.get('ref'))
         require(digest(canonical(record))==compatibility.get('sha256'),'Compatibility record drift')
-        require(record.get('user',{}).get('id')==context.get('owner_id'),'Compatibility author unverified')
+        user = record.get('user') if isinstance(record, dict) else None
+        require(isinstance(user, dict) and user.get('id') == context.get('owner_id'),
+                'Compatibility author unverified')
         marker='<!-- release-evidence\n'; body=record.get('body','')
-        require(marker in body,'Inspectable compatibility report required')
+        require(isinstance(body, str) and marker in body,'Inspectable compatibility report required')
         report=json.loads(body.split(marker,1)[1].split('\n-->',1)[0])
+        require(isinstance(report, dict), 'Malformed compatibility report')
         require(report.get('gate')=='compatibility' and report.get('skill')==skill and report.get('revision')==context['source_revision'] and report.get('policy_revision')==context['policy_revision'],'Compatibility target mismatch')
         require(report.get('installed_payload')==installed_payload and SHA.fullmatch(report.get('installed_source','')) and report.get('differences') and report.get('validation') and report.get('execution_id') and report.get('verdict')=='pass','Incomplete compatibility inspection')
-    return {'task_pin':tag,'provenance':context}
 
 
 def main(argv=None):
@@ -596,7 +650,8 @@ def main(argv=None):
         if command=='verify-bundle': p.add_argument('--for-attestation',action='store_true')
         if command=='qualify': p.add_argument('--output-dir',type=Path,required=True)
         if command in ('verify-bundle','publish'): p.add_argument('--artifact-dir',type=Path,required=True)
-        if command=='verify-release': p.add_argument('--tag',required=True)
+        if command=='verify-release':
+            p.add_argument('--tag', help='Verify this release tag. Defaults to the newest eligible release.')
         if command=='resolve-task':
             p.add_argument('--existing-pin'); p.add_argument('--skill'); p.add_argument('--installed-path',type=Path); p.add_argument('--compatibility',type=Path)
     args=parser.parse_args(argv)
@@ -622,8 +677,12 @@ def main(argv=None):
             else:
                 require(int(args.run_id)==context['run_id'] and int(args.run_attempt)==context.get('validation_attempt',context['run_attempt']),'Run recovery identity mismatch')
                 result=publish(args.root,api,context,args.artifact_dir)
-        elif args.command=='verify-release': result=verify_release(args.root,api,args.tag)
-        else: result=resolve_task(api,existing_pin=args.existing_pin,root=args.root,compatibility=json.loads(args.compatibility.read_text()) if args.compatibility else None,skill=args.skill,installed_path=args.installed_path)
+        elif args.command=='verify-release':
+            _, result = _verify_selected_release(args.root, api, args.tag)
+        else:
+            result = resolve_task(api, existing_pin=args.existing_pin, root=args.root,
+                                  compatibility=args.compatibility, skill=args.skill,
+                                  installed_path=args.installed_path)
         print(json.dumps(result,sort_keys=True)); return 0
     except (ReleaseError,APIError,OSError,ValueError,KeyError,TypeError) as error:
         print(f'ERROR: {error}',file=sys.stderr); return 1

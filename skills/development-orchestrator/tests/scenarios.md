@@ -1,6 +1,6 @@
 # Scenario validation
 
-These cases check the decisions the `development-orchestrator` Skill must make. The first seven preserve historical Issue #2 acceptance and corrective evidence; the five plan-first scenarios retain their Issue #12 history and include separate Issue #20 regression runs where recorded. Treat each setup as a frozen scenario snapshot. Run each case in a fresh Codex execution with the Skill loaded from this directory. If the host cannot load this unpublished Skill, include the exact current `SKILL.md` text in that execution. Do not expose expected outcomes to the evaluator before it responds.
+These cases check the decisions the `development-orchestrator` Skill must make. The first seven preserve historical Issue #2 acceptance and corrective evidence; the five plan-first scenarios retain their Issue #12 history and include separate Issue #20 regression runs where recorded. Treat each setup as a frozen scenario snapshot. For synthetic evaluations, give a fresh evaluator the exact candidate `SKILL.md` text. Use authenticated ChatGPT session evidence for live installation qualification. Do not expose expected outcomes to the evaluator before it responds.
 
 Record the evaluator execution ID, its observed result, and the relevant response excerpt for every case. A fixture is only a test input; leave a case `UNVERIFIED` until it has been run.
 
@@ -600,3 +600,22 @@ UNVERIFIED — no fresh independent evaluation is recorded.
 **Expected outcome:** Use the approved manual contract bound to the verified worktree and source. Report that the connected listing does not show the root and that disk registration remains unverified. Do not edit the client file or default JSON, claim V3 readiness, or issue a restart handoff. If V3 becomes required, obtain evidence identifying the exact registry and verify its administration authority.
 
 **Current evaluation:** PASS — independent run `/root/bulbasaur`. It bound the manual contract to the verified worktree and recorded disk enrollment as unverified.
+
+## Hosted installation evidence
+
+Synthetic evaluation. In a fresh evaluator context, use the exact candidate Skill instructions. Give the evaluator the setup and one case at a time. Keep the expected result out of its input.
+
+Prompt. Decide whether to proceed with a new task or stop before recording a pin. Report the hosted outcome and the evidence that supports it. These cases exercise the decision procedure without accessing a live installation.
+
+Setup. The selected release passed full verification. The target workspace and task session are known. No local copy of the hosted Skill exists. For compatible changes, the verification record must name the inspected installation, session-bound revision, release and policy, differences, and validation.
+
+| Case | Evidence supplied | Expected result |
+|---|---|---|
+| Exact payload | An authenticated ChatGPT surface binds the correct workspace, installation and concrete loaded revision to the current session. The complete effective inventory and bytes match the verified package. | `HOSTED_IDENTITY_VERIFIED`. A new task can record the selected pin. |
+| Inspected transformations | The same session binding and complete inventory are present. The packaged release link matches. The host maps every removed frontmatter field into equivalent platform metadata and adds a display field in `agents/openai.yaml`. Direct inspection accounts for each change, including metadata effects, and applicable validation passes. | `HOSTED_COMPATIBILITY_VERIFIED`. Record the actual differences and validation. |
+| Partial payload | The binding is present and the instruction body matches. Effective metadata is inaccessible. | `HOSTED_VERIFICATION_UNAVAILABLE`. Ask for the effective metadata and keep task use blocked. |
+| Unknown transformation | The complete effective payload is visible, but the effect of a changed invocation field cannot be established. | `HOSTED_VERIFICATION_UNAVAILABLE`. Identify the field and seek evidence about its effect. |
+| Detached export | A caller supplies a ZIP and checksum that match the release. No authenticated surface connects the ZIP or installed revision to this session. | `HOSTED_VERIFICATION_UNAVAILABLE`. Ask for authenticated session and revision evidence. |
+| Stale inspection | The workspace's export was inspected before a session change. There is no current binding. | `HOSTED_VERIFICATION_UNAVAILABLE`. Obtain fresh binding and effective payload evidence. |
+| Wrong binding | Authenticated evidence identifies a different workspace or conclusively shows that the revision inspected is different from the revision loaded. | `HOSTED_INSTALLATION_MISMATCH`. Identify the binding mismatch and block. |
+| Incompatible metadata | The correct binding and complete payload are present. A changed invocation requirement contradicts intended behavior and fails targeted validation. | `HOSTED_INSTALLATION_MISMATCH`. Report the failed behavior and block. |

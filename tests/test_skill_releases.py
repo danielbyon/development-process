@@ -27,7 +27,9 @@ class ReleaseTests(unittest.TestCase):
         for tag in ['2026.02.30', '2026.11.15.1', '2026.11.15.0', 'v2026.11.15']:
             with self.assertRaises(release.ReleaseError): release.version_key(tag)
     def test_existing_pin_is_not_reselected(self):
-        self.assertEqual(release.resolve_task(None, existing_pin='a'*40), {'task_pin':'a'*40})
+        for pin in ('a' * 40, '2026.11.18'):
+            with self.subTest(pin=pin):
+                self.assertEqual(release.resolve_task(None, existing_pin=pin), {'task_pin': pin})
     def test_no_release_blocks(self):
         class API:
             def releases(self): return []
@@ -885,6 +887,23 @@ class DurableResolutionTests(unittest.TestCase):
                 with self.assertRaises(release.ReleaseError):
                     release.verify_release(root,api,context['release_version'])
                 remote[key]=original
+            package_id = next(asset['id'] for asset in assets if asset['name'].endswith('.zip'))
+            original_package = payload[package_id]
+            payload[package_id] = b'corrupt package'
+            with self.assertRaisesRegex(release.ReleaseError, 'RELEASE_VERIFICATION_FAILED'):
+                release.resolve_task(api, root=root, skill='development-orchestrator')
+            payload[package_id] = original_package
+            manifest_id = next(asset['id'] for asset in assets
+                               if asset['name'] == 'release-manifest.json')
+            original_manifest = payload[manifest_id]
+            for malformed_manifest in (b'{', b'[]', b'{"context": []}'):
+                with self.subTest(manifest=malformed_manifest):
+                    payload[manifest_id] = malformed_manifest
+                    with self.assertRaisesRegex(
+                        release.ReleaseError, 'RELEASE_VERIFICATION_FAILED: Malformed release manifest'
+                    ):
+                        release.resolve_task(api, root=root, skill='development-orchestrator')
+            payload[manifest_id] = original_manifest
             api.verify_qualification_attestation.side_effect=release.APIError('unsigned qualification')
             with self.assertRaisesRegex(release.APIError,'unsigned qualification'):
                 release.verify_release(root,api,context['release_version'])
@@ -1040,11 +1059,97 @@ class SuiteExecutionTests(unittest.TestCase):
                                          'if: false\n        run: python3 -m unittest discover -s tests -p test_skill_distribution.py -v')]:
             with self.assertRaises(release.ReleaseError):evidence_call('verify_ci_suites',logs,2,steps,changed)
 
+class RuntimeResolutionTests(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import Mock, patch
+
+        self.api = Mock()
+        self.api.releases.return_value = [
+            {'tag_name': tag, 'draft': draft, 'prerelease': prerelease}
+            for tag, draft, prerelease in (
+                ('2026.11.18.2', False, False),
+                ('2026.11.18.10', False, False),
+                ('2026.11.19', True, False),
+                ('2026.11.20', False, True),
+            )
+        ]
+        self.payload = {'SKILL.md': release.digest(b'instructions')}
+        self.context = {
+            'release_version': '2026.11.18.10',
+            'verified_payload_identities': {
+                name: self.payload for name in (
+                    'development-orchestrator', 'development-review', 'delegation-executor'
+                )
+            },
+        }
+        self.verify_release = self.enterContext(
+            patch.object(release, 'verify_release', return_value=self.context)
+        )
+        self.enterContext(patch.object(release, 'GitHubAPI', return_value=self.api))
+
+    def run_cli(self, *arguments):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = release.main(arguments)
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def test_release_only_selects_newest_without_creating_task_pin(self):
+        import json
+
+        status, output, error = self.run_cli('verify-release')
+        self.assertEqual((status, error), (0, ''))
+        self.assertEqual(json.loads(output), self.context)
+        self.assertNotIn('task_pin', json.loads(output))
+        self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.10')
+
+    def test_release_only_keeps_explicit_historical_tag(self):
+        status, _, error = self.run_cli('verify-release', '--tag', '2026.11.18.2')
+        self.assertEqual((status, error), (0, ''))
+        self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.2')
+        self.api.releases.assert_not_called()
+
+    def test_hosted_skills_cannot_use_local_installation_bytes(self):
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temporary:
+            installed = Path(temporary)
+            (installed / 'SKILL.md').write_bytes(b'instructions')
+            for skill in ('development-orchestrator', 'development-review'):
+                for flags in ((), ('--installed-path', temporary)):
+                    with self.subTest(skill=skill, local=bool(flags)):
+                        status, output, error = self.run_cli(
+                            'resolve-task', '--skill', skill, *flags
+                        )
+                        self.assertEqual((status, output), (1, ''))
+                        self.assertIn('HOSTED_VERIFICATION_UNAVAILABLE', error)
+
+    def test_unverifiable_newest_release_blocks_before_installation(self):
+        self.verify_release.side_effect = release.ReleaseError('attestation rejected')
+        for args in (('verify-release',), ('resolve-task', '--skill', 'development-review')):
+            with self.subTest(args=args):
+                status, output, error = self.run_cli(*args)
+                self.assertEqual((status, output), (1, ''))
+                self.assertIn('RELEASE_VERIFICATION_FAILED', error)
+                self.assertIn('attestation rejected', error)
+                self.assertNotIn('HOSTED_VERIFICATION_UNAVAILABLE', error)
+                self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.10')
+        self.assertEqual(self.verify_release.call_count, 2)
+
+    def test_local_codex_requires_an_installed_directory(self):
+        status, output, error = self.run_cli('resolve-task', '--skill', 'delegation-executor')
+        self.assertEqual((status, output), (1, ''))
+        self.assertIn('LOCAL_INSTALLATION_UNAVAILABLE', error)
+        self.assertIn('--installed-path', error)
+
+
 class InstalledSkillTests(unittest.TestCase):
     def test_inspected_skill_bytes_and_compatibility(self):
         import tempfile,json
         from unittest.mock import Mock,patch
-        names=['development-orchestrator','development-review']
+        names=['delegation-executor','development-review']
         hashes={'SKILL.md':release.digest(b'current'),'agents/openai.yaml':release.digest(b'agent')}
         context={'verified_payload_identities':{names[0]:hashes,names[1]:{'SKILL.md':release.digest(b'other')}},
                  'source_revision':'a'*40,'policy_revision':'b'*40,'owner_id':123}
@@ -1057,7 +1162,8 @@ class InstalledSkillTests(unittest.TestCase):
             with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[1],installed_path=path)
             with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,installed_payload=release.digest(release.canonical(hashes)))
             (path/'SKILL.md').unlink()
-            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[0],installed_path=path)
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_UNAVAILABLE.*Installed Skill file missing'):
+                release.resolve_task(api,root=path,skill=names[0],installed_path=path)
             (path/'SKILL.md').write_bytes(b'older')
             inspected={**hashes,'SKILL.md':release.digest(b'older')}
             report={'gate':'compatibility','skill':names[0],'revision':'a'*40,'policy_revision':'b'*40,
@@ -1070,6 +1176,12 @@ class InstalledSkillTests(unittest.TestCase):
             report['skill']=names[1];record['body']='<!-- release-evidence\n'+json.dumps(report)+'\n-->'
             compatibility['sha256']=release.digest(release.canonical(record))
             with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[0],installed_path=path,compatibility=compatibility)
+            record['body'] = '<!-- release-evidence\n[]\n-->'
+            compatibility['sha256'] = release.digest(release.canonical(record))
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                release.resolve_task(api, root=path, skill=names[0], installed_path=path,
+                                     compatibility=compatibility)
+
 
 class ManagedInstallationTests(unittest.TestCase):
     def test_real_installer_metadata_binds_payload_and_skill(self):
@@ -1086,14 +1198,14 @@ class ManagedInstallationTests(unittest.TestCase):
             package.build_release_packages(root,bundle,context)
             package.initialize_staging_root(root,stage)
             package.stage_release_packages(root,bundle,stage,context)
-            name='development-orchestrator';installed=stage/'.agents/skills'/name
+            name='delegation-executor';installed=stage/'.agents/skills'/name
             marker=installed/'.skill-distribution.json';original=marker.read_text();metadata=json.loads(original)
             verified={**context,'verified_payload_identities':{name:metadata['payload_sha256']}}
             with patch.object(release,'verify_release',return_value=verified):
                 self.assertEqual(release.resolve_task(api,root=root,skill=name,installed_path=installed)['task_pin'],'2026.11.16')
                 for key,value in [('skill_name','development-review'),('schema_version',2),('source_revision','invalid'),('policy_revision','invalid'),('archive_sha256','invalid'),('payload_sha256',{'../outside':'a'*64})]:
                     changed=copy.deepcopy(metadata);changed[key]=value;marker.write_text(json.dumps(changed))
-                    with self.subTest(key=key),self.assertRaises(release.ReleaseError):
+                    with self.subTest(key=key),self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
                         release.resolve_task(api,root=root,skill=name,installed_path=installed)
                 marker.write_text('not JSON')
                 with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
