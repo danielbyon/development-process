@@ -18,16 +18,17 @@ from test_skill_distribution import (
 
 class WorkflowContractTests(unittest.TestCase):
     @staticmethod
-    def _markdown_section(markdown: str, title: str, end_title: str) -> str:
+    def _markdown_section(markdown: str, title: str, end_title: str | None) -> str:
         lines = markdown.splitlines()
         target_heading = f"## {title}"
-        end_heading = f"## {end_title}"
         try:
             target_index = lines.index(target_heading)
         except ValueError:
             raise AssertionError(f"Markdown section not found: {title}")
+        if end_title is None:
+            return "\n".join(lines[target_index + 1:]).casefold()
         try:
-            end_index = lines.index(end_heading, target_index + 1)
+            end_index = lines.index(f"## {end_title}", target_index + 1)
         except ValueError:
             raise AssertionError(f"Markdown section boundary not found: {end_title}")
         return "\n".join(lines[target_index + 1:end_index]).casefold()
@@ -229,6 +230,20 @@ class WorkflowContractTests(unittest.TestCase):
                     self.assertIn(required.casefold(), section)
                 for forbidden in contract["forbidden"]:
                     self.assertNotIn(forbidden.casefold(), section)
+
+    def test_mcp_root_registry_workflow_contract(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+        for contract in fixture["mcp_registry_contracts"]:
+            section = self._markdown_section(
+                (ROOT / contract["path"]).read_text(),
+                contract["heading"],
+                contract["end_heading"],
+            )
+            for required in contract["required"]:
+                with self.subTest(path=contract["path"], heading=contract["heading"], required=required):
+                    self.assertIn(required.casefold(), section)
 
     def test_policy_sections_preserve_workflow_and_distribution_obligations(self) -> None:
         fixture = json.loads(
