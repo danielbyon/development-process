@@ -64,12 +64,13 @@
         "immediately before deletion, recheck absence in that verified registry and active instance",
         "confirm offline validation applies to the current registry contents",
         "MERGED — CLEANUP PENDING",
-        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
-        "verify exact worktree root identity and canonical path containment",
+        "only verified, regenerable CodeGraph, TokenSave, and Serena-generated worktree-local caches are disposable",
+        "canonical path containment",
         "Do not inspect database contents or demand backups solely for identified disposable caches",
         "preserve owner-designated durable files inside tool-state directories",
         "unknown ignored data and `.chatgpt` task data remain protected",
-        "an open database handle alone does not prevent worktree removal",
+        "an open database handle alone does not block cache cleanup",
+        "does not require tool termination, handle release, or a reader, writer, or consumer status check",
         "eligibility for cleanup does not establish successful filesystem removal"
       ]
     },
@@ -96,12 +97,13 @@
         "recheck disk and active absence immediately before deleting the exact task worktree",
         "verify offline validation still applies to the current file",
         "MERGED — CLEANUP PENDING",
-        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
-        "verify exact worktree root identity and canonical path containment",
+        "only verified, regenerable CodeGraph, TokenSave, and Serena-generated worktree-local caches are disposable",
+        "canonical path containment",
         "Do not inspect database contents or demand backups solely for identified disposable caches",
         "preserve owner-designated durable files inside tool-state directories",
         "unknown ignored data and `.chatgpt` task data remain protected",
-        "an open database handle alone does not prevent worktree removal",
+        "an open database handle alone does not block cache cleanup",
+        "does not require tool termination, handle release, or a reader, writer, or consumer status check",
         "eligibility for cleanup does not establish successful filesystem removal"
       ]
     },
@@ -116,12 +118,13 @@
         "recheck disk and active absence immediately before removing the exact worktree",
         "verify offline validation still applies to the current file",
         "MERGED — CLEANUP PENDING",
-        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
-        "verify exact worktree root identity and canonical path containment",
+        "only verified, regenerable CodeGraph, TokenSave, and Serena-generated worktree-local caches are disposable",
+        "canonical path containment",
         "Do not inspect database contents or demand backups solely for identified disposable caches",
         "preserve owner-designated durable files inside tool-state directories",
         "unknown ignored data and `.chatgpt` task data remain protected",
-        "an open database handle alone does not prevent worktree removal",
+        "an open database handle alone does not block cache cleanup",
+        "does not require tool termination, handle release, or a reader, writer, or consumer status check",
         "eligibility for cleanup does not establish successful filesystem removal"
       ]
     }
@@ -197,12 +200,13 @@
         "LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION",
         "Never label this disposition `CLEANUP COMPLETE` or `MERGED — CLEANUP COMPLETE`",
         "MCP RESTART REQUIRED — OWNER ACTION",
-        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
-        "verify exact worktree root identity and canonical path containment",
+        "only verified, regenerable CodeGraph, TokenSave, and Serena-generated worktree-local caches are disposable",
+        "canonical path containment",
         "Do not inspect database contents or demand backups solely for identified disposable caches",
         "preserve owner-designated durable files inside tool-state directories",
         "unknown ignored data and `.chatgpt` task data remain protected",
-        "an open database handle alone does not prevent worktree removal",
+        "an open database handle alone does not block cache cleanup",
+        "does not require tool termination, handle release, or a reader, writer, or consumer status check",
         "eligibility for cleanup does not establish successful filesystem removal"
       ],
       "forbidden": [
@@ -323,12 +327,13 @@
         "record the closeout result before discovery",
         "discovery retrieval failure does not reopen closeout",
         "recorded policy pin and source identity",
-        "Only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
-        "verify exact worktree root identity and canonical path containment",
+        "Only verified, regenerable CodeGraph, TokenSave, and Serena-generated worktree-local caches are disposable",
+        "canonical path containment",
         "Do not inspect database contents or demand backups solely for identified disposable caches",
         "preserve owner-designated durable files inside tool-state directories",
         "unknown ignored data and `.chatgpt` task data remain protected",
-        "an open database handle alone does not prevent worktree removal",
+        "an open database handle alone does not block cache cleanup",
+        "does not require tool termination, handle release, or a reader, writer, or consumer status check",
         "Eligibility for cleanup does not establish successful filesystem removal"
       ],
       "forbidden": [
@@ -442,6 +447,13 @@
         "unverified live instance",
         "stale active registration",
         "deletion command failed"
+      ],
+      "eligibility_required": [
+        "saved bootstrap provenance manifest",
+        "live tool API response is not required",
+        "filename or directory name alone is insufficient",
+        "TokenSave database has an open SQLite handle during evaluation",
+        "reader, writer, or consumer status check, tool shutdown, or handle release"
       ]
     },
     {
@@ -467,6 +479,13 @@
         "unverified live instance",
         "stale active registration",
         "deletion command failed"
+      ],
+      "eligibility_required": [
+        "saved bootstrap provenance manifest",
+        "live tool API response is not required",
+        "filename or directory name alone is insufficient",
+        "TokenSave database has an open SQLite handle during evaluation",
+        "reader, writer, or consumer status check, tool shutdown, or handle release"
       ]
     }
   ]

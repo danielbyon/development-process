@@ -893,19 +893,27 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 
 ## DISPOSABLE-TOOL-CACHE-ELIGIBILITY
 
-**Setup:** This synthetic task has verified provenance, merge, checks, and primary-main synchronization. The exact task root is `/sandbox/task`. Current offline validation is valid, and verified disk and active absence show no task registration removal pending. The inventory identifies three generated entries, each reported by its owning tool and each resolving inside the task root: CodeGraph at `/sandbox/task/.codegraph/graph.db`, TokenSave at `/sandbox/task/.tokensave/index.sqlite`, and Serena at `/sandbox/task/.serena/project-cache`. An open SQLite handle remains for the TokenSave database, with no active writer or consumer reported. No authored, durable, or unknown files share those exact entries.
+**Setup:** This synthetic task has verified provenance, merge, checks, and primary-main synchronization. The exact task root is `/sandbox/task`. Current offline validation is valid, and verified disk and active absence show no task registration removal pending. A saved bootstrap provenance manifest maps each exact cache path to its generating tool and this task-root identity; the live tool APIs are unavailable. The paths canonicalize inside the task root: CodeGraph at `/sandbox/task/.codegraph/graph.db`, TokenSave at `/sandbox/task/.tokensave/index.sqlite`, and Serena at `/sandbox/task/.serena/project-cache`. The TokenSave database has an open SQLite handle during evaluation. No authored, durable, or unknown files share those exact entries.
 
 **Prompt:**
 
 > Can I remove these tool caches during closeout? State what needs inspection or backup and how you will confirm the result.
 
-**Expected outcome:** Permit cleanup of only the three verified paths after rechecking task identity and the MCP conditions. Do not inspect database contents or require a backup solely because TokenSave uses SQLite. An open database handle alone does not make the cache ineligible. Do not delete parent directories by name or wildcard. Report removal only after the exact filesystem operation succeeds. The evaluator does not mutate a real worktree.
+**Expected outcome:** Permit cleanup of only the three verified paths after rechecking task identity, manifest provenance, and the MCP conditions. A live tool API response is not required, and a filename or directory name alone is insufficient to establish provenance. Do not inspect database contents or require a backup solely because TokenSave uses SQLite. The open handle does not require a reader, writer, or consumer status check, tool shutdown, or handle release. Do not delete parent directories by name or wildcard. Report removal only after the exact filesystem operation succeeds; keep cleanup pending if that operation fails. The evaluator does not mutate a real worktree.
 
-**Run record:** PASS — Arcanine, independent evaluator `01a1fdde-edc0-7a70-b748-de7b05f7bbe4`.
+**Earlier evaluation on candidate `422fce8`:** PASS — Arcanine, independent evaluator `01a1fdde-edc0-7a70-b748-de7b05f7bbe4`.
+
+- Context: The earlier setup required no active writer or consumer to be reported. This record is historical; the current case removes that condition.
 
 - Observed result: All three exact, tool-reported cache entries were eligible. The open TokenSave handle alone did not block removal because no active writer or consumer was reported. No filesystem action was taken.
 - Evidence: Candidate `skills/delegation-executor/SKILL.md` lines 83, 85, and 87; `docs/PROCESS.md` lines 123 and 124. The evaluation checked identity, containment, preservation, cache-only backup limits, and truthful removal reporting.
 - Response excerpt: “The three exact tool-reported cache entries are eligible for removal under the stated facts; the open TokenSave handle alone does not block it.”
+
+**Run record:** PASS — independent evaluator `01a1fe64-cb4c-7b50-b857-33a6b89b4d04` (Raichu; turn `01a1fe64-cb64-70e3-bbd2-b3e8f8e5cdfc`).
+
+- Observed result: The three exact cache entries were eligible for removal under the supplied provenance, containment, and preservation facts. The open TokenSave handle did not block eligibility. Removal was not performed.
+- Evidence: Raichu independently read `docs/PROCESS.md`, `docs/DECISIONS.md`, and this Skill. It cited the provenance and containment rule at `PROCESS.md` line 122 and `SKILL.md` line 83, the open-handle rule at `PROCESS.md` line 123 and `SKILL.md` line 85, and exact deletion failure handling at `PROCESS.md` line 124 and `SKILL.md` line 87. No filesystem action was taken.
+- Response excerpt: “Yes. The supplied provenance and path checks make these three exact cache entries eligible for removal. I would not inspect or back up the verified caches solely for cleanup, and the open TokenSave handle does not block removal.”
 
 ## DISPOSABLE-TOOL-CACHE-PRESERVATION
 

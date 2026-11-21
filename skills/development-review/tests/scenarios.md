@@ -717,19 +717,27 @@ Setup. The release list contains numeric CalVer candidates, including an older v
 
 ## DISPOSABLE-TOOL-CACHE-ELIGIBILITY
 
-Setup: This synthetic task has verified task provenance, PR identity, merge, checks, primary-main synchronization, root, branch, and integration. No other closeout requirement is open. The exact task root is `/sandbox/task`. Current offline validation is valid, and verified disk and active absence show no task registration removal pending. The inventory identifies three generated entries, each reported by its owning tool and each resolving inside the task root: CodeGraph at `/sandbox/task/.codegraph/graph.db`, TokenSave at `/sandbox/task/.tokensave/index.sqlite`, and Serena at `/sandbox/task/.serena/project-cache`. An open SQLite handle remains for the TokenSave database, with no active writer or consumer reported. No authored, durable, or unknown files share those exact entries.
+Setup: This synthetic task has verified task provenance, PR identity, merge, checks, primary-main synchronization, root, branch, and integration. No other closeout requirement is open. The exact task root is `/sandbox/task`. Current offline validation is valid, and verified disk and active absence show no task registration removal pending. A saved bootstrap provenance manifest maps each exact cache path to its generating tool and this task-root identity; the live tool APIs are unavailable. The paths canonicalize inside the task root: CodeGraph at `/sandbox/task/.codegraph/graph.db`, TokenSave at `/sandbox/task/.tokensave/index.sqlite`, and Serena at `/sandbox/task/.serena/project-cache`. The TokenSave database has an open SQLite handle during evaluation. No authored, durable, or unknown files share those exact entries.
 
 Prompt:
 
 > Close out: the PR merged and checks passed. Can I remove these tool caches? State what needs inspection or backup and how you will confirm the result.
 
-Expected result: Permit cleanup of only the three verified paths after rechecking task identity and the MCP conditions. Do not inspect database contents or require a backup solely because TokenSave uses SQLite. An open database handle alone does not make the cache ineligible. Do not delete parent directories by name or wildcard. Report removal only after the exact filesystem operation succeeds. The evaluator does not mutate a real worktree.
+Expected result: Permit cleanup of only the three verified paths after rechecking task identity, manifest provenance, and the MCP conditions. A live tool API response is not required, and a filename or directory name alone is insufficient to establish provenance. Do not inspect database contents or require a backup solely because TokenSave uses SQLite. The open handle does not require a reader, writer, or consumer status check, tool shutdown, or handle release. Do not delete parent directories by name or wildcard. Report removal only after the exact filesystem operation succeeds; keep cleanup pending if that operation fails. The evaluator does not mutate a real worktree.
 
-**Run record:** PASS — Blastoise, independent evaluator `01a1fdec-050b-7162-a7a9-b2befaa23f5b`.
+**Earlier evaluation on candidate `422fce8`:** PASS — Blastoise, independent evaluator `01a1fdec-050b-7162-a7a9-b2befaa23f5b`.
+
+- Context: The earlier setup required no active writer or consumer to be reported. This record is historical; the current case removes that condition.
 
 - Observed result: Allowed only the three exact generated entries. The open TokenSave handle was not a blocker with no active writer or consumer reported. Required identity, containment, and MCP rechecks; no database inspection, cache-only backup, or filesystem action.
 - Evidence: Candidate `skills/development-review/SKILL.md` lines 82, 84, and 86; `docs/PROCESS.md` lines 120–124. The evaluation also confirmed parent directories and unrelated data remain outside the removal scope.
 - Response excerpt: “These three verified, worktree-local caches are eligible for exact path removal. The open TokenSave handle does not block removal because no active writer or consumer is reported.”
+
+**Run record:** PASS — independent evaluator `01a1fe64-cb2c-7c02-9bc5-4955319a990b` (Vulpix; turn `01a1fe64-cb40-78a0-90f9-ae13bb2a5973`).
+
+- Observed result: The three exact cache paths were eligible under the supplied manifest, canonical containment, and preservation facts. The live APIs were unavailable, and the open TokenSave handle did not block eligibility. Removal was not performed.
+- Evidence: Vulpix independently read `docs/PROCESS.md`, `docs/DECISIONS.md`, and this Skill. It cited the provenance and containment rule at `PROCESS.md` line 122 and `SKILL.md` line 82, the open-handle rule at `PROCESS.md` line 123 and `SKILL.md` line 84, and exact deletion failure handling at `PROCESS.md` line 124 and `SKILL.md` line 86. No filesystem action was taken.
+- Response excerpt: “These three exact cache paths are eligible for removal. No database-content inspection or backup is required for them; the open TokenSave handle does not block cleanup.”
 
 ## DISPOSABLE-TOOL-CACHE-PRESERVATION
 

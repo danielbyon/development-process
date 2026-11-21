@@ -336,15 +336,26 @@ class WorkflowContractTests(unittest.TestCase):
                 expected_scenarios,
                 [heading for heading, _ in scenario_sections],
             )
+            eligibility_section = next(
+                section
+                for heading, section in scenario_sections
+                if heading == "disposable-tool-cache-eligibility"
+            )
+            for required in contract["eligibility_required"]:
+                with self.subTest(path=contract["path"], eligibility=required):
+                    self.assertIn(required.casefold(), eligibility_section)
+
             for heading, section in scenario_sections:
                 with self.subTest(
                     path=contract["path"],
                     scenario=heading,
                 ):
-                    self.assertIn("**run record:** pass", section)
-                    self.assertIn("- observed result:", section)
-                    self.assertIn("- evidence:", section)
-                    self.assertRegex(section, run_id_pattern)
+                    run_record_marker = "**run record:** pass"
+                    self.assertIn(run_record_marker, section)
+                    current_record = section.split(run_record_marker, maxsplit=1)[1]
+                    self.assertIn("- observed result:", current_record)
+                    self.assertIn("- evidence:", current_record)
+                    self.assertRegex(current_record, run_id_pattern)
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
