@@ -891,7 +891,7 @@ class DurableResolutionTests(unittest.TestCase):
             original_package = payload[package_id]
             payload[package_id] = b'corrupt package'
             with self.assertRaisesRegex(release.ReleaseError, 'RELEASE_VERIFICATION_FAILED'):
-                release.resolve_task(api, root=root, skill='development-orchestrator')
+                release._verify_selected_release(root, api, context['release_version'])
             payload[package_id] = original_package
             manifest_id = next(asset['id'] for asset in assets
                                if asset['name'] == 'release-manifest.json')
@@ -902,7 +902,7 @@ class DurableResolutionTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                         release.ReleaseError, 'RELEASE_VERIFICATION_FAILED: Malformed release manifest'
                     ):
-                        release.resolve_task(api, root=root, skill='development-orchestrator')
+                        release._verify_selected_release(root, api, context['release_version'])
             payload[manifest_id] = original_manifest
             api.verify_qualification_attestation.side_effect=release.APIError('unsigned qualification')
             with self.assertRaisesRegex(release.APIError,'unsigned qualification'):
@@ -1061,29 +1061,149 @@ class SuiteExecutionTests(unittest.TestCase):
 
 class RuntimeResolutionTests(unittest.TestCase):
     def setUp(self):
+        import hashlib
+        import json
         from unittest.mock import Mock, patch
 
         self.api = Mock()
-        self.api.releases.return_value = [
-            {'tag_name': tag, 'draft': draft, 'prerelease': prerelease}
-            for tag, draft, prerelease in (
-                ('2026.11.18.2', False, False),
-                ('2026.11.18.10', False, False),
-                ('2026.11.19', True, False),
-                ('2026.11.20', False, True),
-            )
-        ]
-        self.payload = {'SKILL.md': release.digest(b'instructions')}
         self.context = {
-            'release_version': '2026.11.18.10',
-            'verified_payload_identities': {
-                name: self.payload for name in (
-                    'development-orchestrator', 'development-review', 'delegation-executor'
-                )
+            'release_context_schema_version': 1,
+            'repository': release.REPOSITORY,
+            'release_version': '2026.11.20',
+            'source_revision': 'a' * 40,
+            'policy_revision': 'b' * 40,
+            'builder_revision': 'a' * 40,
+            'owner_id': 123,
+            'run_id': 77,
+            'run_attempt': 1,
+            'created_at': '2026-11-20T09:00:00Z',
+            'transform_version': 1,
+            'qualification': {
+                'run_attempt': 2,
+                'suites': [
+                    {'suite': suite, 'tests': 1} for suite in release.SUITES
+                ],
             },
         }
+        skill_names = (
+            'development-orchestrator',
+            'development-review',
+            'delegation-executor',
+        )
+        self.payloads = {}
+        sidecars = {}
+        package_hashes = {}
+        for skill in skill_names:
+            members = {
+                f'{skill}/SKILL.md': hashlib.sha256((skill + ' instructions').encode()).hexdigest(),
+                f'{skill}/agents/openai.yaml': hashlib.sha256((skill + ' metadata').encode()).hexdigest(),
+            }
+            self.payloads[skill] = {
+                member.removeprefix(skill + '/'): value
+                for member, value in members.items()
+            }
+            sidecar = {
+                'schema_version': 2,
+                'skill_name': skill,
+                'release_version': self.context['release_version'],
+                'source_revision': self.context['source_revision'],
+                'policy_revision': self.context['policy_revision'],
+                'builder_revision': self.context['builder_revision'],
+                'transform_version': 1,
+                'source_files': {
+                    f'{skill}/SKILL.md': f'skills/{skill}/SKILL.md',
+                    f'{skill}/agents/openai.yaml': f'skills/{skill}/agents/openai.yaml',
+                },
+                'payload_sha256': members,
+                'archive_sha256': 'd' * 64,
+            }
+            sidecar_name = f'{skill}.provenance.json'
+            sidecars[sidecar_name] = (
+                json.dumps(sidecar, sort_keys=True, indent=2) + '\n'
+            ).encode()
+            package_hashes[sidecar_name] = hashlib.sha256(sidecars[sidecar_name]).hexdigest()
+            package_hashes[f'{skill}.zip'] = 'd' * 64
+
+        asset_names = sorted([
+            *(f'{skill}.zip' for skill in skill_names),
+            *(f'{skill}.provenance.json' for skill in skill_names),
+            'release-manifest.json',
+            'SHA256SUMS',
+        ])
+        manifest = {
+            'schema_version': 2,
+            'context': self.context,
+            'assets': asset_names,
+            'asset_sha256': package_hashes,
+        }
+        self.asset_bytes = {
+            'release-manifest.json': (
+                json.dumps(manifest, sort_keys=True, indent=2) + '\n'
+            ).encode(),
+            **sidecars,
+        }
+        self.release_detail = {
+            'id': 20,
+            'tag_name': self.context['release_version'],
+            'name': self.context['release_version'],
+            'body': 'Release context: ' + hashlib.sha256(
+                json.dumps(self.context, sort_keys=True, separators=(',', ':')).encode()
+            ).hexdigest(),
+            'draft': False,
+            'prerelease': False,
+            'immutable': True,
+            'assets': [
+                {'id': index + 1, 'name': name}
+                for index, name in enumerate(asset_names)
+            ],
+        }
+        self.api.releases.return_value = [
+            {'id': 18, 'tag_name': '2026.11.18.10', 'draft': False, 'prerelease': False},
+            {'id': 20, 'tag_name': '2026.11.20', 'draft': False, 'prerelease': False},
+            {'id': 21, 'tag_name': '2026.11.21', 'draft': True, 'prerelease': False},
+            {'id': 22, 'tag_name': '2026.11.22', 'draft': False, 'prerelease': True},
+        ]
+        self.api.release.return_value = self.release_detail
+        self.api.tags.return_value = [{
+            'ref': 'refs/tags/2026.11.20',
+            'object': {'sha': self.context['source_revision'], 'type': 'commit'},
+        }]
+        self.api.record.return_value = {'owner': {'id': self.context['owner_id']}}
+        self.api.run.return_value = {
+            'id': self.context['run_id'],
+            'run_attempt': 3,
+            'event': 'workflow_dispatch',
+            'head_branch': 'main',
+            'head_sha': self.context['source_revision'],
+            'path': '.github/workflows/skill-release.yml@refs/heads/main',
+            'actor': {'id': self.context['owner_id']},
+            'triggering_actor': {'id': self.context['owner_id']},
+            'created_at': self.context['created_at'],
+            'status': 'completed',
+            'conclusion': 'success',
+            'html_url': 'https://github.com/danielbyon/development-process/actions/runs/77',
+        }
+        self.workflow_attempts = {
+            attempt_number: {
+                **self.api.run.return_value,
+                'run_attempt': attempt_number,
+                'status': 'completed',
+                'conclusion': conclusion,
+            }
+            for attempt_number, conclusion in (
+                (1, 'failure'),
+                (2, 'failure'),
+                (3, 'success'),
+            )
+        }
+        self.api.run_attempt.side_effect = (
+            lambda run_id, attempt_number: self.workflow_attempts[attempt_number]
+        )
+        self.api.asset.side_effect = lambda asset: self.asset_bytes[asset['name']]
         self.verify_release = self.enterContext(
-            patch.object(release, 'verify_release', return_value=self.context)
+            patch.object(release, 'verify_release', side_effect=AssertionError(
+                'ordinary task resolution must not run the full release audit'
+            ))
         )
         self.enterContext(patch.object(release, 'GitHubAPI', return_value=self.api))
 
@@ -1096,47 +1216,207 @@ class RuntimeResolutionTests(unittest.TestCase):
             status = release.main(arguments)
         return status, stdout.getvalue(), stderr.getvalue()
 
-    def test_release_only_selects_newest_without_creating_task_pin(self):
+    def test_explicit_release_audit_remains_available(self):
         import json
 
+        self.verify_release.side_effect = None
+        self.verify_release.return_value = self.context
         status, output, error = self.run_cli('verify-release')
         self.assertEqual((status, error), (0, ''))
         self.assertEqual(json.loads(output), self.context)
         self.assertNotIn('task_pin', json.loads(output))
-        self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.10')
+        self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.20')
 
     def test_release_only_keeps_explicit_historical_tag(self):
+        self.verify_release.side_effect = None
+        self.verify_release.return_value = self.context
         status, _, error = self.run_cli('verify-release', '--tag', '2026.11.18.2')
         self.assertEqual((status, error), (0, ''))
         self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.2')
         self.api.releases.assert_not_called()
 
-    def test_hosted_skills_cannot_use_local_installation_bytes(self):
-        from tempfile import TemporaryDirectory
+    def test_new_task_returns_release_provenance_and_qualification_basis(self):
+        import json
+        import skill_distribution as package
+        from unittest.mock import patch
 
-        with TemporaryDirectory() as temporary:
-            installed = Path(temporary)
-            (installed / 'SKILL.md').write_bytes(b'instructions')
-            for skill in ('development-orchestrator', 'development-review'):
-                for flags in ((), ('--installed-path', temporary)):
-                    with self.subTest(skill=skill, local=bool(flags)):
-                        status, output, error = self.run_cli(
-                            'resolve-task', '--skill', skill, *flags
-                        )
-                        self.assertEqual((status, output), (1, ''))
-                        self.assertIn('HOSTED_VERIFICATION_UNAVAILABLE', error)
+        with patch.object(package, 'verify_release_packages', side_effect=AssertionError(
+            'ordinary task resolution must not rebuild release packages'
+        )) as package_verifier:
+            status, output, error = self.run_cli(
+                'resolve-task', '--skill', 'development-orchestrator'
+            )
+        self.assertEqual((status, error), (0, ''))
+        result = json.loads(output)
+        self.assertEqual(set(result), {'task_pin', 'provenance'})
+        self.assertEqual(result['task_pin'], '2026.11.20')
+        provenance = result['provenance']
+        self.assertEqual(provenance['source_revision'], 'a' * 40)
+        self.assertEqual(provenance['policy_revision'], 'b' * 40)
+        self.assertEqual(provenance['builder_revision'], 'a' * 40)
+        self.assertEqual(provenance['owner_id'], 123)
+        self.assertEqual(provenance['verified_payload_identities'], self.payloads)
+        self.assertEqual(
+            provenance['qualification_basis'],
+            'successful_release_workflow_and_immutable_publication',
+        )
+        self.assertEqual(provenance['workflow_run']['id'], 77)
+        self.assertEqual(provenance['workflow_run']['attempt'], 3)
+        self.assertEqual(provenance['workflow_run']['original_attempt'], 1)
+        self.assertEqual(provenance['workflow_run']['qualification_attempt'], 2)
+        self.assertEqual(provenance['workflow_run']['publication_attempt'], 3)
+        self.assertEqual(provenance['workflow_run']['latest_attempt'], 3)
+        self.assertEqual(provenance['workflow_run']['conclusion'], 'success')
+        self.verify_release.assert_not_called()
+        package_verifier.assert_not_called()
+        self.api.verify_attestation.assert_not_called()
+        self.api.verify_qualification_attestation.assert_not_called()
+        self.api.release.assert_called_once_with(20)
+        self.api.run.assert_called_once_with(77)
+        fetched_names = [call.args[0]['name'] for call in self.api.asset.call_args_list]
+        self.assertEqual(set(fetched_names), {
+            'release-manifest.json',
+            'development-orchestrator.provenance.json',
+            'development-review.provenance.json',
+            'delegation-executor.provenance.json',
+        })
+        self.assertFalse(any(name.endswith('.zip') for name in fetched_names))
+        self.assertEqual(
+            [(call.args[0], call.args[1]) for call in self.api.run_attempt.call_args_list],
+            [(77, 1), (77, 3)],
+        )
 
-    def test_unverifiable_newest_release_blocks_before_installation(self):
-        self.verify_release.side_effect = release.ReleaseError('attestation rejected')
-        for args in (('verify-release',), ('resolve-task', '--skill', 'development-review')):
-            with self.subTest(args=args):
-                status, output, error = self.run_cli(*args)
-                self.assertEqual((status, output), (1, ''))
-                self.assertIn('RELEASE_VERIFICATION_FAILED', error)
-                self.assertIn('attestation rejected', error)
-                self.assertNotIn('HOSTED_VERIFICATION_UNAVAILABLE', error)
-                self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.10')
-        self.assertEqual(self.verify_release.call_count, 2)
+    def test_both_chatgpt_skills_resolve_without_installation_or_session_evidence(self):
+        for skill in ('development-orchestrator', 'development-review'):
+            with self.subTest(skill=skill):
+                result = release.resolve_task(self.api, skill=skill)
+                self.assertEqual(result['task_pin'], '2026.11.20')
+                self.assertIn('provenance', result)
+
+    def test_failed_newest_release_blocks_without_falling_back(self):
+        self.api.run.return_value['conclusion'] = 'failure'
+        self.workflow_attempts[3]['conclusion'] = 'failure'
+        with self.assertRaisesRegex(
+            release.ReleaseError, 'RELEASE_QUALIFICATION_FAILED'
+        ):
+            release.resolve_task(self.api, skill='development-review')
+        self.api.release.assert_called_once_with(20)
+
+    def test_successful_publication_survives_a_failed_later_rerun(self):
+        self.workflow_attempts[2]['conclusion'] = 'success'
+        self.workflow_attempts[3]['conclusion'] = 'failure'
+        self.workflow_attempts[3]['actor'] = {
+            **self.workflow_attempts[3]['actor'], 'id': 999,
+        }
+        self.workflow_attempts[3]['triggering_actor'] = {
+            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
+        }
+        self.api.run.return_value.update(status='completed', conclusion='failure')
+
+        result = release.resolve_task(self.api, skill='development-review')
+        workflow = result['provenance']['workflow_run']
+
+        self.assertEqual(workflow['original_attempt'], 1)
+        self.assertEqual(workflow['qualification_attempt'], 2)
+        self.assertEqual(workflow['publication_attempt'], 2)
+        self.assertEqual(workflow['attempt'], 2)
+        self.assertEqual(workflow['latest_attempt'], 3)
+        self.assertEqual(workflow['status'], 'completed')
+        self.assertEqual(workflow['conclusion'], 'success')
+        self.assertEqual(
+            [(call.args[0], call.args[1]) for call in self.api.run_attempt.call_args_list],
+            [(77, 1), (77, 3), (77, 2)],
+        )
+
+    def test_non_owner_success_does_not_replace_owner_qualified_publication(self):
+        self.workflow_attempts[2]['conclusion'] = 'success'
+        self.workflow_attempts[3]['conclusion'] = 'success'
+        self.workflow_attempts[3]['actor'] = {
+            **self.workflow_attempts[3]['actor'], 'id': 999,
+        }
+        self.workflow_attempts[3]['triggering_actor'] = {
+            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
+        }
+
+        result = release.resolve_task(self.api, skill='development-review')
+        workflow = result['provenance']['workflow_run']
+
+        self.assertEqual(workflow['publication_attempt'], 2)
+        self.assertEqual(workflow['latest_attempt'], 3)
+        self.assertEqual(workflow['triggering_actor_id'], 123)
+
+    def test_successful_publication_survives_an_in_progress_later_rerun(self):
+        self.workflow_attempts[2]['conclusion'] = 'success'
+        self.workflow_attempts[3].update(status='in_progress', conclusion=None)
+        self.workflow_attempts[3]['actor'] = {
+            **self.workflow_attempts[3]['actor'], 'id': 999,
+        }
+        self.workflow_attempts[3]['triggering_actor'] = {
+            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
+        }
+        self.api.run.return_value.update(status='in_progress', conclusion=None)
+
+        result = release.resolve_task(self.api, skill='development-review')
+        workflow = result['provenance']['workflow_run']
+
+        self.assertEqual(workflow['publication_attempt'], 2)
+        self.assertEqual(workflow['latest_attempt'], 3)
+        self.assertEqual(workflow['conclusion'], 'success')
+
+    def test_incomplete_workflow_blocks(self):
+        self.api.run.return_value.update(status='in_progress', conclusion=None)
+        self.workflow_attempts[3].update(status='in_progress', conclusion=None)
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_workflow_attempt_cannot_precede_qualification_attempt(self):
+        self.api.run.return_value.update(run_attempt=1)
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_non_immutable_release_blocks(self):
+        self.release_detail.update(immutable=False)
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_workflow_or_tag_identity_mismatch_blocks(self):
+        self.api.run.return_value.update(head_sha='f' * 40)
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+        self.api.release.assert_called_once_with(20)
+
+    def test_original_dispatch_owner_mismatch_blocks(self):
+        self.workflow_attempts[1]['triggering_actor']['id'] = 999
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_tag_target_mismatch_blocks(self):
+        self.api.tags.return_value[0]['object']['sha'] = 'f' * 40
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_missing_provenance_sidecar_blocks(self):
+        self.release_detail['assets'] = [
+            asset for asset in self.release_detail['assets']
+            if asset['name'] != 'development-review.provenance.json'
+        ]
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_provenance_sidecar_hash_mismatch_blocks(self):
+        self.asset_bytes['development-review.provenance.json'] = b'{}'
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_frozen_context_body_mismatch_blocks(self):
+        self.release_detail['body'] = 'Release context: ' + '0' * 64
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
+
+    def test_owner_binding_mismatch_blocks(self):
+        self.api.record.return_value['owner']['id'] = 999
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
 
     def test_local_codex_requires_an_installed_directory(self):
         status, output, error = self.run_cli('resolve-task', '--skill', 'delegation-executor')
@@ -1151,15 +1431,16 @@ class InstalledSkillTests(unittest.TestCase):
         from unittest.mock import Mock,patch
         names=['delegation-executor','development-review']
         hashes={'SKILL.md':release.digest(b'current'),'agents/openai.yaml':release.digest(b'agent')}
-        context={'verified_payload_identities':{names[0]:hashes,names[1]:{'SKILL.md':release.digest(b'other')}},
+        context={'release_version':'2026.11.16',
+                 'verified_payload_identities':{names[0]:hashes,names[1]:{'SKILL.md':release.digest(b'other')}},
                  'source_revision':'a'*40,'policy_revision':'b'*40,'owner_id':123}
-        api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
-        with tempfile.TemporaryDirectory() as temporary,patch.object(release,'verify_release',return_value=context):
+        api=Mock()
+        with tempfile.TemporaryDirectory() as temporary,patch.object(release,'_resolve_qualified_release',return_value=context):
             path=Path(temporary);(path/'agents').mkdir();(path/'SKILL.md').write_bytes(b'current');(path/'agents/openai.yaml').write_bytes(b'agent')
             self.assertEqual(release.resolve_task(api,root=path,skill=names[0],installed_path=path)['task_pin'],'2026.11.16')
-            with patch.object(release,'GitHubAPI',return_value=api),patch('sys.stdout'):
+            with patch.object(release,'GitHubAPI',return_value=api),patch('sys.stdout'), \
+                    patch.object(release,'_resolve_qualified_release',return_value=context):
                 self.assertEqual(release.main(['resolve-task','--root',str(path),'--skill',names[0],'--installed-path',str(path)]),0)
-            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[1],installed_path=path)
             with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,installed_payload=release.digest(release.canonical(hashes)))
             (path/'SKILL.md').unlink()
             with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_UNAVAILABLE.*Installed Skill file missing'):
@@ -1192,7 +1473,7 @@ class ManagedInstallationTests(unittest.TestCase):
         revision=release.git(root,'rev-parse','HEAD').decode().strip()
         policy=release.git(root,'log','--first-parent','-1','--format=%H',revision,'--','docs/PROCESS.md').decode().strip()
         context={'release_version':'2026.11.16','source_revision':revision,'policy_revision':policy,'builder_revision':revision}
-        api=Mock();api.releases.return_value=[{'tag_name':'2026.11.16','draft':False,'prerelease':False}]
+        api=Mock()
         with tempfile.TemporaryDirectory() as temporary:
             base=Path(temporary);bundle=base/'bundle';stage=base/'stage';stage.mkdir()
             package.build_release_packages(root,bundle,context)
@@ -1201,7 +1482,8 @@ class ManagedInstallationTests(unittest.TestCase):
             name='delegation-executor';installed=stage/'.agents/skills'/name
             marker=installed/'.skill-distribution.json';original=marker.read_text();metadata=json.loads(original)
             verified={**context,'verified_payload_identities':{name:metadata['payload_sha256']}}
-            with patch.object(release,'verify_release',return_value=verified):
+            verified['release_version'] = '2026.11.16'
+            with patch.object(release,'_resolve_qualified_release',return_value=verified):
                 self.assertEqual(release.resolve_task(api,root=root,skill=name,installed_path=installed)['task_pin'],'2026.11.16')
                 for key,value in [('skill_name','development-review'),('schema_version',2),('source_revision','invalid'),('policy_revision','invalid'),('archive_sha256','invalid'),('payload_sha256',{'../outside':'a'*64})]:
                     changed=copy.deepcopy(metadata);changed[key]=value;marker.write_text(json.dumps(changed))

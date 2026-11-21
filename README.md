@@ -24,7 +24,7 @@ Every change receives a full review from a separate, non-authoring execution. Ch
 
 ## Skill distribution
 
-New tasks resolve the newest verified immutable CalVer release and record its tag once. Source, policy and builder revisions remain distinct internal evidence. Verify the release and inspect the Skill in its runtime before use. ChatGPT verifies `development-orchestrator` and `development-review` against the revision loaded in the task session. Codex verifies `delegation-executor` against its installed files. An unverifiable newest eligible release blocks; before the first release, resolution returns `NO_IMMUTABLE_RELEASE`.
+New tasks select the newest eligible qualified immutable CalVer release and record its tag and policy revision once. A successful owner-triggered release workflow on merged `main` followed by immutable publication qualifies the release. Routine task resolution does not run `verify-release` or inspect hosted installation or session evidence. Codex still checks the local `delegation-executor` files and compatibility as a separate runtime safety check. The user manually installs and updates Skills in ChatGPT and Codex; publication does not install or activate them. Missing evidence for the newest candidate blocks selection without fallback. Before the first qualified release, resolution returns `NO_IMMUTABLE_RELEASE`.
 
 Existing tasks retain their recorded SHA or CalVer. Historical pins include `aa8dc7784641dd5416befdebc246ed081bfd7ade`, `93a86127a3721d6044f4a8e993a764731fbda4e5`, `142422527de28b8e20dea1158d2f54d020dcdcd5`, `9da7c0b9113da4c0aab172860bdc5d5c77cccf0d`, `6fea1f50e0745c189685849f560f10a946e04091`, and `e2afa055d1126763c69f0e0392d25b86bab98014`. None is an implicit new-task default.
 
@@ -74,7 +74,7 @@ Continue in the same shell so `ARTIFACT_DIR` still points to the verified packag
 
 After the change merges, environment activation remains a manual owner step. For Codex, review the staged `delegation-executor` before copying it into the intended project's `.agents/skills` directory. Inspect any existing target before replacing it. The command has no implicit production target, and it does not provide auto-sync.
 
-In ChatGPT, open Plugins from the sidebar and select Skills. Choose Create, then Upload from computer. Upload the `development-orchestrator` and `development-review` archives separately. Availability depends on the workspace plan and administrator settings. ChatGPT scans uploaded Skills and may require review or block an upload; review the source before installation. The upload flow is described in [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt). After manual activation, use `python3 scripts/skill_release.py verify-release` for the ChatGPT release comparison and verify the loaded revision in ChatGPT. For Codex, use `python3 scripts/skill_release.py resolve-task --skill delegation-executor --installed-path <Codex Skill directory>`. See the [runtime verification procedure](docs/skill-releases.md#6-resolution-compatibility-and-staging).
+In ChatGPT, open Plugins from the sidebar and select Skills. Choose Create, then Upload from computer. Upload the `development-orchestrator` and `development-review` archives separately. Availability depends on the workspace plan and administrator settings. ChatGPT scans uploaded Skills and may require review or block an upload; review the source before installation. The upload flow is described in [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt). The user is responsible for installing and updating both Skills. Release publication does not upload or activate them. Use `python3 scripts/skill_release.py verify-release` for an explicit release audit or diagnosis; ordinary task startup does not require it. For Codex, use `python3 scripts/skill_release.py resolve-task --skill delegation-executor --installed-path <Codex Skill directory>` to select the release and check the installed files. See the [release resolution and audit procedure](docs/skill-releases.md#6-resolution-audits-and-staging).
 
 ### Checks
 
@@ -95,7 +95,7 @@ CI checks the GitHub synthetic merge commit's parents and diff, then runs these 
 
 ## Adoption
 
-Apply policy prospectively. Existing repositories adopt it on their next task and add CI for relevant local suites when needed. New tasks resolve a verified immutable release; existing tasks retain their recorded pins. Do not rewrite historical task records.
+Apply policy prospectively. Existing repositories adopt it on their next task and add CI for relevant local suites when needed. New tasks record the newest qualified immutable release; existing tasks retain their recorded pins. Do not rewrite historical task records.
 
 ## Follow-up slices
 

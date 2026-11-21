@@ -126,7 +126,7 @@ class WorkflowContractTests(unittest.TestCase):
             (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
         )
         self.assertEqual(fixture["new_task_resolution"], {
-            "selector": "newest_verified_immutable_release",
+            "selector": "newest_qualified_immutable_release",
             "recorded_pin": "release_version",
             "failure": "fail_closed",
             "continuation": "preserve_existing_pin",
@@ -151,7 +151,7 @@ class WorkflowContractTests(unittest.TestCase):
             if scenario["kind"] == "new-task":
                 self.assertEqual(
                     scenario["expected"],
-                    "verified_release_version",
+                    "qualified_release_version",
                 )
             elif scenario["kind"] == "in-flight-task":
                 self.assertIn(scenario["existing_pin"], HISTORICAL_POLICY_REVISIONS)
@@ -230,6 +230,48 @@ class WorkflowContractTests(unittest.TestCase):
                     self.assertIn(required.casefold(), section)
                 for forbidden in contract["forbidden"]:
                     self.assertNotIn(forbidden.casefold(), section)
+
+    def test_post_closeout_contract_explicitly_forbids_hosted_compatibility_gates(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+        expected_forbidden = {
+            "compatible Skill identity",
+            "hosted installation",
+            "payload compatibility",
+            "session revision",
+            "session compatibility",
+        }
+        contracts = [
+            contract
+            for contract in fixture["workflow_contracts"]
+            if contract["skill"] == "development-review"
+            and contract["heading"] == "Post-closeout issue discovery"
+        ]
+        contracts += [
+            contract
+            for contract in fixture["policy_contracts"]
+            if contract["heading"] in {
+                "11. Merge/closeout/cleanup",
+                "12. Distribution/pinning",
+            }
+        ]
+        self.assertEqual(len(contracts), 3)
+        for contract in contracts:
+            with self.subTest(heading=contract["heading"]):
+                if contract["heading"] == "12. Distribution/pinning":
+                    expected = {
+                        "compatible Skill identity",
+                        "hosted compatibility check",
+                        "hosted installation is required",
+                        "verify hosted installation before discovery",
+                        "session compatibility check",
+                        "verify session revision before discovery",
+                        "payload compatibility check",
+                    }
+                else:
+                    expected = expected_forbidden
+                self.assertTrue(expected.issubset(set(contract["forbidden"])))
 
     def test_mcp_root_registry_workflow_contract(self) -> None:
         fixture = json.loads(

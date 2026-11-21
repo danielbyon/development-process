@@ -15,6 +15,14 @@ class AdapterTests(unittest.TestCase):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
             github.GitHubAPI().request('GET','/user')
             self.assertIn('GET',run.call_args.args[0])
+
+    def test_workflow_run_attempt_uses_attempt_specific_endpoint(self):
+        with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
+            github.GitHubAPI().run_attempt(77, 2)
+        self.assertIn(
+            '/repos/danielbyon/development-process/actions/runs/77/attempts/2',
+            run.call_args.args[0],
+        )
     def test_binary_assets_request_octet_stream(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'PK',b'')) as run:
             self.assertEqual(github.GitHubAPI().asset({'id':2}),b'PK')

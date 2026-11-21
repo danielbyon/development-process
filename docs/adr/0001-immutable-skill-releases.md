@@ -23,3 +23,7 @@ Release discovery verifies numeric CalVer candidates and fails closed on an unve
 Merged code can be released without reconstructing its review history. Historical evidence formats remain available only for verifying signed releases that already contain them. The controller still reconciles interrupted remote mutations and preserves unknown state. Published corrections require a new version.
 
 GitHub mutable presentation metadata requires repeated resolver checks. Repository administrators can change protections; prepublication checks do not eliminate that authority. Reproducibility is qualified within a recorded toolchain. Live environment qualification and installation remain separate work.
+
+## Amendment for Issue #42 (2026-11-20)
+
+A successful owner-triggered release workflow on merged `main`, followed by immutable publication, is sufficient release qualification. The workflow retains its six suites, deterministic packaging, provenance, signed attestation and publication checks. Ordinary new-task resolution matches the published manifest, tag, sidecars and successful workflow identity. It does not run `verify-release`, reconstruct attestations or require hosted installation and session-revision evidence. The explicit full audit remains available. Existing SHA and CalVer pins retain their recorded identities. The user installs and updates Skills manually; release publication does not install or activate them.

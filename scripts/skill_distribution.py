@@ -285,7 +285,7 @@ def resolve_task_policy(root: Path, task_policy_revision: str | None = None) -> 
         else task_policy_revision
     )
     if task_policy_revision is None and manifest.get("schema_version") == 2:
-        raise DistributionError("Use resolve-task to select a verified immutable release.")
+        raise DistributionError("Use resolve-task to select a qualified immutable release.")
     _policy_file_exists(root, selected)
     return selected
 
