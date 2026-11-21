@@ -304,6 +304,60 @@ class WorkflowContractTests(unittest.TestCase):
                 for forbidden in contract["forbidden"]:
                     self.assertNotIn(forbidden.casefold(), section)
 
+    def test_cleanup_scenarios_cover_disposable_cache_boundaries(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+
+        for contract in fixture["scenario_contracts"]:
+            scenarios = (ROOT / contract["path"]).read_text().casefold()
+            for required in contract["required"]:
+                with self.subTest(path=contract["path"], required=required):
+                    self.assertIn(required.casefold(), scenarios)
+
+            expected_scenarios = {
+                required.casefold()
+                for required in contract["required"]
+                if required.startswith("DISPOSABLE-TOOL-CACHE-")
+            }
+            run_id_pattern = (
+                r"independent evaluator `"
+                r"[0-9a-f]{8}-[0-9a-f]{4}-"
+                r"[0-9a-f]{4}-[0-9a-f]{4}-"
+                r"[0-9a-f]{12}`"
+            )
+            scenario_sections = []
+            for section in scenarios.split("\n## "):
+                heading, _, body = section.partition("\n")
+                if heading.startswith("disposable-tool-cache-"):
+                    scenario_sections.append((heading, body))
+
+            self.assertCountEqual(
+                expected_scenarios,
+                [heading for heading, _ in scenario_sections],
+            )
+            eligibility_section = next(
+                section
+                for heading, section in scenario_sections
+                if heading == "disposable-tool-cache-eligibility"
+            )
+            for required in contract["eligibility_required"]:
+                with self.subTest(path=contract["path"], eligibility=required):
+                    self.assertIn(required.casefold(), eligibility_section)
+
+            for heading, section in scenario_sections:
+                with self.subTest(
+                    path=contract["path"],
+                    scenario=heading,
+                ):
+                    run_record_marker = "**run record:** pass"
+                    self.assertIn(run_record_marker, section)
+                    current_record = section.split(run_record_marker, maxsplit=1)[1]
+                    self.assertIn("- observed result:", current_record)
+                    self.assertIn("- evidence:", current_record)
+                    self.assertRegex(current_record, run_id_pattern)
+
+
 class ReleaseWorkflowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
