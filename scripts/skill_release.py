@@ -563,10 +563,11 @@ def _newest_eligible_release(api):
 
 
 def _resolve_qualified_release(api):
-    """Match the immutable release manifest to its successful workflow run.
+    """Match release metadata to an owner-bound successful publication attempt.
 
     Task startup reads the manifest and provenance sidecars. The release workflow
     has already run the package checks, qualification suites and attestation.
+    Attempt-specific records keep later failed reruns from erasing that publication.
     """
     try:
         selected = _newest_eligible_release(api)
@@ -710,14 +711,12 @@ def _resolve_qualified_release(api):
                 qualification_attempt >= context['run_attempt'],
                 'Published qualification attempt identity unavailable')
         run = api.run(context['run_id'])
-        actor = run.get('actor') if isinstance(run, dict) else None
-        triggering_actor = run.get('triggering_actor') if isinstance(run, dict) else None
         workflow_path = '.github/workflows/skill-release.yml'
-        workflow_attempt = run.get('run_attempt') if isinstance(run, dict) else None
-        # The frozen context retains its qualification attempt when publication retries.
+        latest_attempt = run.get('run_attempt') if isinstance(run, dict) else None
+        actor = run.get('actor') if isinstance(run, dict) else None
         require(isinstance(run, dict) and
                 type(run.get('id')) is int and run['id'] == context['run_id'] and
-                type(workflow_attempt) is int and workflow_attempt >= qualification_attempt and
+                type(latest_attempt) is int and latest_attempt >= qualification_attempt and
                 run.get('event') == 'workflow_dispatch' and
                 run.get('head_branch') == 'main' and
                 run.get('head_sha') == context['source_revision'] and
@@ -725,26 +724,84 @@ def _resolve_qualified_release(api):
                 isinstance(actor, dict) and type(actor.get('id')) is int and
                 actor['id'] == context['owner_id'],
                 'Release workflow identity mismatch')
-        require(isinstance(triggering_actor, dict) and
-                type(triggering_actor.get('id')) is int and
-                triggering_actor['id'] == context['owner_id'] and
-                run.get('created_at') == context['created_at'] and
-                run.get('status') == 'completed' and run.get('conclusion') == 'success',
-                'Release workflow did not complete successfully')
+        require(run.get('created_at') == context['created_at'],
+                'Release workflow creation identity mismatch')
+
+        attempts = {}
+
+        def read_attempt(attempt_number):
+            if attempt_number not in attempts:
+                attempt = api.run_attempt(context['run_id'], attempt_number)
+                require(isinstance(attempt, dict) and
+                        type(attempt.get('id')) is int and
+                        attempt['id'] == context['run_id'] and
+                        type(attempt.get('run_attempt')) is int and
+                        attempt['run_attempt'] == attempt_number,
+                        'Release workflow attempt identity mismatch')
+                attempts[attempt_number] = attempt
+            return attempts[attempt_number]
+
+        def verify_attempt_binding(attempt):
+            attempt_actor = attempt.get('actor')
+            attempt_triggering_actor = attempt.get('triggering_actor')
+            require(attempt.get('event') == 'workflow_dispatch' and
+                    attempt.get('head_branch') == 'main' and
+                    attempt.get('head_sha') == context['source_revision'] and
+                    attempt.get('path') in
+                    (workflow_path, workflow_path + '@refs/heads/main') and
+                    isinstance(attempt_actor, dict) and
+                    type(attempt_actor.get('id')) is int and
+                    attempt.get('created_at') == context['created_at'],
+                    'Release workflow attempt binding mismatch')
+            return attempt_actor, attempt_triggering_actor
+
+        def attempt_was_owner_triggered(attempt_actor, attempt_triggering_actor):
+            return (attempt_actor['id'] == context['owner_id'] and
+                    isinstance(attempt_triggering_actor, dict) and
+                    type(attempt_triggering_actor.get('id')) is int and
+                    attempt_triggering_actor['id'] == context['owner_id'])
+
+        original_attempt_number = context['run_attempt']
+        original_attempt = read_attempt(original_attempt_number)
+        original_actor, original_triggering_actor = verify_attempt_binding(original_attempt)
+        require(attempt_was_owner_triggered(original_actor, original_triggering_actor),
+                'Release workflow attempt owner mismatch')
+
+        publication_attempt_number = None
+        publication_attempt = None
+        publication_actor = None
+        publication_triggering_actor = None
+        for attempt_number in range(latest_attempt, qualification_attempt - 1, -1):
+            attempt = read_attempt(attempt_number)
+            if (attempt.get('status') == 'completed' and
+                    attempt.get('conclusion') == 'success'):
+                attempt_actor, attempt_triggering_actor = verify_attempt_binding(attempt)
+                if not attempt_was_owner_triggered(attempt_actor, attempt_triggering_actor):
+                    continue
+                publication_attempt_number = attempt_number
+                publication_attempt = attempt
+                publication_actor = attempt_actor
+                publication_triggering_actor = attempt_triggering_actor
+                break
+        require(publication_attempt is not None,
+                'Release workflow has no successful publication attempt')
 
         workflow_identity = {
             'id': run['id'],
-            'attempt': workflow_attempt,
+            'attempt': publication_attempt_number,
+            'original_attempt': original_attempt_number,
             'qualification_attempt': qualification_attempt,
-            'event': run['event'],
-            'path': run['path'],
-            'head_branch': run['head_branch'],
-            'head_sha': run['head_sha'],
-            'status': run['status'],
-            'conclusion': run['conclusion'],
-            'actor_id': actor['id'],
-            'triggering_actor_id': triggering_actor['id'],
-            'created_at': run['created_at'],
+            'publication_attempt': publication_attempt_number,
+            'latest_attempt': latest_attempt,
+            'event': publication_attempt['event'],
+            'path': publication_attempt['path'],
+            'head_branch': publication_attempt['head_branch'],
+            'head_sha': publication_attempt['head_sha'],
+            'status': publication_attempt['status'],
+            'conclusion': publication_attempt['conclusion'],
+            'actor_id': publication_actor['id'],
+            'triggering_actor_id': publication_triggering_actor['id'],
+            'created_at': publication_attempt['created_at'],
         }
         if isinstance(run.get('html_url'), str):
             workflow_identity['url'] = run['html_url']

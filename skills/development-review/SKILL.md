@@ -85,9 +85,9 @@ An owner's cleanup-completion report triggers applicable verification first. The
 
 Run discovery after required cleanup has been verified, after a verified remote-only disposition makes local cleanup inapplicable, or immediately after owner-approved intentional retention of a verified worktree when all other required checks pass. Record the retention reason and deferred cleanup.
 
-Keep discovery blocked for pending required checks, unknown provenance, unresolved registration or restart verification, or unsafe or unverified retention. Use the procedure only when the task's recorded policy pin and compatible Skill identity support it.
+Keep discovery blocked for pending required checks, unknown provenance, unresolved registration or restart verification, or unsafe or unverified retention. Carry the task's recorded policy pin and source identity into discovery as context. Discovery does not reselect a release or act on user-managed Skill installation changes.
 
-Record the closeout result before discovery. Then invoke the `development-orchestrator` Skill's post-closeout issue discovery procedure. Pass the repository identity, merge and issue identities, verified cleanup disposition, policy pin, Skill identity, and inspected source revision. Report retrieval failures separately. A discovery failure does not reopen the closeout result.
+Record the closeout result before discovery. Then invoke the `development-orchestrator` Skill's post-closeout issue discovery procedure. Pass the repository identity, merge and issue identities, verified cleanup disposition, recorded policy pin, task source identity, and inspected source revision. Report retrieval failures separately. A discovery failure does not reopen the closeout result.
 
 Closeout-triggered discovery ends this review invocation after one report. Do not offer or recommend preparing a task, Plan-mode handoff, or bootstrap. Do not echo prospective task-preparation details from shared input, including a proposed branch, worktree, or bootstrap owner. Mention an existing worktree or branch only when it supports eligibility or concurrency evidence. The owner may choose to handle a recommendation in a separate session.
 

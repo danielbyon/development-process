@@ -116,6 +116,11 @@ class GitHubAPI:
             raise APIError('Frozen source is not in authenticated main history')
         return main_revision
     def run(self, run_id): return self.request('GET',self.base+f'/actions/runs/{int(run_id)}')
+    def run_attempt(self, run_id, attempt_number):
+        return self.request(
+            'GET',
+            self.base + f'/actions/runs/{int(run_id)}/attempts/{int(attempt_number)}',
+        )
     def record(self, reference):
         # References are repository-scoped API paths, never arbitrary URLs.
         if not isinstance(reference,str) or not (reference==self.base or reference.startswith(self.base+'/')) or '?' in reference or '..' in reference:

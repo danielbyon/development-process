@@ -267,9 +267,15 @@
         "Closeout-triggered discovery ends this review invocation after one report",
         "Do not offer or recommend preparing a task, Plan-mode handoff, or bootstrap",
         "The owner may choose to handle a recommendation in a separate session",
-        "recorded policy pin and compatible Skill identity"
+        "recorded policy pin and source identity"
       ],
-      "forbidden": []
+      "forbidden": [
+        "compatible Skill identity",
+        "hosted installation",
+        "payload compatibility",
+        "session revision",
+        "session compatibility"
+      ]
     }
   ],
   "policy_contracts": [
@@ -288,9 +294,15 @@
         "This qualifying disposition is distinct from `MERGED — CLEANUP PENDING`",
         "record the closeout result before discovery",
         "discovery retrieval failure does not reopen closeout",
-        "recorded policy pin and compatible Skill identity"
+        "recorded policy pin and source identity"
       ],
-      "forbidden": []
+      "forbidden": [
+        "compatible Skill identity",
+        "hosted installation",
+        "payload compatibility",
+        "session revision",
+        "session compatibility"
+      ]
     },
     {
       "heading": "12. Distribution/pinning",
@@ -322,6 +334,13 @@
         "HOSTED_VERIFICATION_UNAVAILABLE",
         "HOSTED_INSTALLATION_MISMATCH",
         "session-bound revision",
+        "compatible Skill identity",
+        "hosted compatibility check",
+        "hosted installation is required",
+        "verify hosted installation before discovery",
+        "session compatibility check",
+        "verify session revision before discovery",
+        "payload compatibility check",
         "native attestation and reconstructed provenance"
       ]
     }

@@ -1183,6 +1183,22 @@ class RuntimeResolutionTests(unittest.TestCase):
             'conclusion': 'success',
             'html_url': 'https://github.com/danielbyon/development-process/actions/runs/77',
         }
+        self.workflow_attempts = {
+            attempt_number: {
+                **self.api.run.return_value,
+                'run_attempt': attempt_number,
+                'status': 'completed',
+                'conclusion': conclusion,
+            }
+            for attempt_number, conclusion in (
+                (1, 'failure'),
+                (2, 'failure'),
+                (3, 'success'),
+            )
+        }
+        self.api.run_attempt.side_effect = (
+            lambda run_id, attempt_number: self.workflow_attempts[attempt_number]
+        )
         self.api.asset.side_effect = lambda asset: self.asset_bytes[asset['name']]
         self.verify_release = self.enterContext(
             patch.object(release, 'verify_release', side_effect=AssertionError(
@@ -1246,7 +1262,10 @@ class RuntimeResolutionTests(unittest.TestCase):
         )
         self.assertEqual(provenance['workflow_run']['id'], 77)
         self.assertEqual(provenance['workflow_run']['attempt'], 3)
+        self.assertEqual(provenance['workflow_run']['original_attempt'], 1)
         self.assertEqual(provenance['workflow_run']['qualification_attempt'], 2)
+        self.assertEqual(provenance['workflow_run']['publication_attempt'], 3)
+        self.assertEqual(provenance['workflow_run']['latest_attempt'], 3)
         self.assertEqual(provenance['workflow_run']['conclusion'], 'success')
         self.verify_release.assert_not_called()
         package_verifier.assert_not_called()
@@ -1262,6 +1281,10 @@ class RuntimeResolutionTests(unittest.TestCase):
             'delegation-executor.provenance.json',
         })
         self.assertFalse(any(name.endswith('.zip') for name in fetched_names))
+        self.assertEqual(
+            [(call.args[0], call.args[1]) for call in self.api.run_attempt.call_args_list],
+            [(77, 1), (77, 3)],
+        )
 
     def test_both_chatgpt_skills_resolve_without_installation_or_session_evidence(self):
         for skill in ('development-orchestrator', 'development-review'):
@@ -1272,14 +1295,77 @@ class RuntimeResolutionTests(unittest.TestCase):
 
     def test_failed_newest_release_blocks_without_falling_back(self):
         self.api.run.return_value['conclusion'] = 'failure'
+        self.workflow_attempts[3]['conclusion'] = 'failure'
         with self.assertRaisesRegex(
             release.ReleaseError, 'RELEASE_QUALIFICATION_FAILED'
         ):
             release.resolve_task(self.api, skill='development-review')
         self.api.release.assert_called_once_with(20)
 
+    def test_successful_publication_survives_a_failed_later_rerun(self):
+        self.workflow_attempts[2]['conclusion'] = 'success'
+        self.workflow_attempts[3]['conclusion'] = 'failure'
+        self.workflow_attempts[3]['actor'] = {
+            **self.workflow_attempts[3]['actor'], 'id': 999,
+        }
+        self.workflow_attempts[3]['triggering_actor'] = {
+            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
+        }
+        self.api.run.return_value.update(status='completed', conclusion='failure')
+
+        result = release.resolve_task(self.api, skill='development-review')
+        workflow = result['provenance']['workflow_run']
+
+        self.assertEqual(workflow['original_attempt'], 1)
+        self.assertEqual(workflow['qualification_attempt'], 2)
+        self.assertEqual(workflow['publication_attempt'], 2)
+        self.assertEqual(workflow['attempt'], 2)
+        self.assertEqual(workflow['latest_attempt'], 3)
+        self.assertEqual(workflow['status'], 'completed')
+        self.assertEqual(workflow['conclusion'], 'success')
+        self.assertEqual(
+            [(call.args[0], call.args[1]) for call in self.api.run_attempt.call_args_list],
+            [(77, 1), (77, 3), (77, 2)],
+        )
+
+    def test_non_owner_success_does_not_replace_owner_qualified_publication(self):
+        self.workflow_attempts[2]['conclusion'] = 'success'
+        self.workflow_attempts[3]['conclusion'] = 'success'
+        self.workflow_attempts[3]['actor'] = {
+            **self.workflow_attempts[3]['actor'], 'id': 999,
+        }
+        self.workflow_attempts[3]['triggering_actor'] = {
+            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
+        }
+
+        result = release.resolve_task(self.api, skill='development-review')
+        workflow = result['provenance']['workflow_run']
+
+        self.assertEqual(workflow['publication_attempt'], 2)
+        self.assertEqual(workflow['latest_attempt'], 3)
+        self.assertEqual(workflow['triggering_actor_id'], 123)
+
+    def test_successful_publication_survives_an_in_progress_later_rerun(self):
+        self.workflow_attempts[2]['conclusion'] = 'success'
+        self.workflow_attempts[3].update(status='in_progress', conclusion=None)
+        self.workflow_attempts[3]['actor'] = {
+            **self.workflow_attempts[3]['actor'], 'id': 999,
+        }
+        self.workflow_attempts[3]['triggering_actor'] = {
+            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
+        }
+        self.api.run.return_value.update(status='in_progress', conclusion=None)
+
+        result = release.resolve_task(self.api, skill='development-review')
+        workflow = result['provenance']['workflow_run']
+
+        self.assertEqual(workflow['publication_attempt'], 2)
+        self.assertEqual(workflow['latest_attempt'], 3)
+        self.assertEqual(workflow['conclusion'], 'success')
+
     def test_incomplete_workflow_blocks(self):
         self.api.run.return_value.update(status='in_progress', conclusion=None)
+        self.workflow_attempts[3].update(status='in_progress', conclusion=None)
         with self.assertRaises(release.ReleaseError):
             release.resolve_task(self.api, skill='development-review')
 
@@ -1298,6 +1384,11 @@ class RuntimeResolutionTests(unittest.TestCase):
         with self.assertRaises(release.ReleaseError):
             release.resolve_task(self.api, skill='development-review')
         self.api.release.assert_called_once_with(20)
+
+    def test_original_dispatch_owner_mismatch_blocks(self):
+        self.workflow_attempts[1]['triggering_actor']['id'] = 999
+        with self.assertRaises(release.ReleaseError):
+            release.resolve_task(self.api, skill='development-review')
 
     def test_tag_target_mismatch_blocks(self):
         self.api.tags.return_value[0]['object']['sha'] = 'f' * 40
