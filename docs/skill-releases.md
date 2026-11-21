@@ -82,6 +82,8 @@ The resolver reads `release-manifest.json` and the three provenance sidecars. It
 
 The result keeps the top-level `task_pin` and `provenance` fields and preserves source, policy, builder, owner and payload identities. Its `workflow_run` summary records the original, qualification, successful publication and latest attempt numbers; the status and conclusion describe the successful publication attempt. It adds `qualification_basis` set to `successful_release_workflow_and_immutable_publication`.
 
+The top-level `resolve-task` output shape is unchanged. Within `provenance.workflow_run`, `attempt`, `status`, and `conclusion` now describe the selected successful publication attempt; `latest_attempt` reports the newest attempt number. Consumers that treated the former fields as latest-run state must adjust. This candidate PR is still draft, so no published release depends on the nested field semantics.
+
 If the newest eligible release has missing, failed or inconsistent evidence, resolution stops without selecting an older release. The controller reports `RELEASE_QUALIFICATION_FAILED` for invalid records and `RELEASE_QUALIFICATION_UNAVAILABLE` when GitHub evidence cannot be read. An empty eligible set reports `NO_IMMUTABLE_RELEASE`.
 
 ### Full release audit
