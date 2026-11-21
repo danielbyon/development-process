@@ -2,7 +2,7 @@
 
 ## 1. Authority and bootstrap
 
-A release distributes the policy and three Skills. It does not install or activate them. The owner dispatches the release workflow on `main`; the workflow takes its source from that run's `github.sha`. Merge, dispatch, credential provisioning and activation remain separate actions. Pull request CI never publishes.
+A release distributes the policy and three Skills. It does not install or activate them. The owner dispatches the release workflow on `main`; the workflow takes its source from that run's `github.sha`. The user manually installs and updates released Skills in ChatGPT and Codex. Pull request CI never publishes.
 
 The owner is the repository's sole maintainer. The approved trust model treats an authenticated owner merge as sufficient; a compromised owner account is outside its scope.
 
@@ -50,6 +50,8 @@ Exactly eight assets are required:
 
 Each ZIP contains only its Skill directory, `SKILL.md` and `agents/openai.yaml`. Sidecars bind payload and archive hashes. The manifest hashes the six package assets and binds release, source, policy, builder, transformation and qualification identities. Checksums cover those six assets plus the manifest, excluding themselves. The verifier reconstructs bytes from committed inputs.
 
+The successful owner-triggered workflow run that publishes this immutable release is the release-qualification event. Its required suites, deterministic builds, provenance, signed attestation and publication checks remain release gates.
+
 ## 5. Draft-first publication and recovery
 
 Finish rebuilding and verification before exposing publishing credentials. The build uses trusted workflow code and reads committed source files as data. Create an owned draft targeting the selected source, upload only missing expected assets, verify the complete set, then create and verify the lightweight source tag. Recheck dispatch identity, source ancestry, release ownership, tag and assets immediately before publication.
@@ -70,28 +72,32 @@ For recovery, rerun the complete workflow so all six suites and both builds run 
 
 Correct published content with a new CalVer and supersession context. Never delete assets, retag or rewrite published history.
 
-## 6. Resolution, compatibility and staging
+## 6. Resolution, audits and staging
 
-`verify-release` without `--tag` selects the newest eligible published CalVer release. It reads all pages, sorts versions numerically, and ignores drafts, prereleases and GitHub's `latest` designation. The selected candidate must pass verification, including the immutability check. A failed candidate reports `RELEASE_VERIFICATION_FAILED` and blocks selection. An empty eligible set reports `NO_IMMUTABLE_RELEASE`. Use `verify-release --tag <recorded-CalVer>` to verify a specific release. Both forms return verified provenance without creating a task pin.
+### New task resolution
 
-### ChatGPT-hosted Skills
+`resolve-task` selects the newest eligible published CalVer numerically. It ignores drafts, prereleases and GitHub's `latest` designation. It checks that the release is immutable, its tag points to the recorded source commit, the release body binds the frozen manifest context, and the manifest and three provenance sidecars agree on release, source, policy, builder and payload identities. It also checks that the matching owner-triggered `workflow_dispatch` on `main` completed successfully.
 
-Verify `development-orchestrator` and `development-review` in ChatGPT. The local `resolve-task` command returns `HOSTED_VERIFICATION_UNAVAILABLE` for these Skills. Use `python3 scripts/skill_release.py verify-release` to obtain the reference payload identities and release provenance.
+The resolver reads `release-manifest.json` and the three provenance sidecars. It does not download ZIPs, rebuild packages, rerun qualification suites or verify attestations. Successful workflow execution and immutable publication qualify the release. The result keeps the top-level `task_pin` and `provenance` fields and preserves source, policy, builder, owner and payload identities. It adds a `workflow_run` summary with both the published run attempt and the recorded qualification attempt, plus `qualification_basis` set to `successful_release_workflow_and_immutable_publication`.
 
-Inspect the installed Skill through an authenticated surface in the target workspace. Require a stable installation identity, the concrete revision loaded in the current task session, and the complete effective payload (instructions, metadata and supporting files). A native attestation that binds the session and revision to the complete effective payload can establish exact identity. A downloaded ZIP is useful for comparing bytes when the host can bind the export to that same revision and account for the effective payload. A caller-provided checksum, an uploaded copy, or matching instructions alone cannot establish that binding.
+If the newest eligible release has missing, failed or inconsistent evidence, resolution stops without selecting an older release. The controller reports `RELEASE_QUALIFICATION_FAILED` for invalid records and `RELEASE_QUALIFICATION_UNAVAILABLE` when GitHub evidence cannot be read. An empty eligible set reports `NO_IMMUTABLE_RELEASE`.
 
-Record `HOSTED_IDENTITY_VERIFIED` for a complete match to the release payload. When the payload differs, inspect each difference and run the applicable validation before recording `HOSTED_COMPATIBILITY_VERIFIED`. Compare with the packaged instructions, which already include the release tag. Account for any stripped frontmatter and every added, removed or changed metadata field, including its effect on invocation, dependencies and permissions. Record the installation and workspace identity, session-bound revision, evidence reference, inspected payload or native provenance, selected release and its source/policy/builder revisions, differences, rationale and validation.
+### Full release audit
 
-If trusted evidence establishes a different installation or loaded revision than the one inspected, or a material incompatibility, report `HOSTED_INSTALLATION_MISMATCH`. If the revision, session binding, effective payload, or compatibility is unverified, report `HOSTED_VERIFICATION_UNAVAILABLE`. Identify the missing item and ask the owner or workspace admin for authenticated Skill details, an export bound to the installed revision, or supported audit evidence. Keep task use blocked until the evidence is sufficient. Recheck after any revision change. Supported download and audit features vary by workspace. Their availability alone gives no assurance of a session-bound export. See [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt).
+`verify-release` remains available for explicit audits and diagnostics. Without `--tag`, it selects the newest eligible published CalVer. It reads all pages, sorts versions numerically and ignores drafts, prereleases and GitHub's `latest` designation. The full audit checks package contents, all asset hashes, tag target, immutability and signed attestations. A failed candidate reports `RELEASE_VERIFICATION_FAILED` and blocks the audit. Use `verify-release --tag <recorded-CalVer>` to audit a specific release. Neither form creates a task pin. Ordinary task startup and continuation do not require this command.
+
+### ChatGPT Skills
+
+`development-orchestrator` and `development-review` use the release qualification record during new-task selection. They do not require a hosted installation check, session revision evidence or a per-task `verify-release` run. A successful release does not mean the Skills are installed. The user manually installs and updates them in ChatGPT; publication does not upload or activate them. See [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt) for the upload interface.
 
 ### Local Codex Skill
 
-Run `python3 scripts/skill_release.py resolve-task --skill delegation-executor --installed-path <Codex Skill directory>`. The controller hashes the files at that path. A missing directory or required file reports `LOCAL_INSTALLATION_UNAVAILABLE`. Drift, symlinks, unexpected files and invalid installation or compatibility evidence report `LOCAL_INSTALLATION_MISMATCH`. The existing `.skill-distribution.json` marker must agree with the inspected files. An older payload requires an authenticated compatibility record that identifies the inspected payload and source, selected policy and source, differences and applicable validation.
+Run `python3 scripts/skill_release.py resolve-task --skill delegation-executor --installed-path <Codex Skill directory>`. The controller checks the files at that path against the release payload. These are runtime safety checks separate from release qualification. A missing directory or required file reports `LOCAL_INSTALLATION_UNAVAILABLE`. Drift, symlinks, unexpected files and invalid installation or compatibility evidence report `LOCAL_INSTALLATION_MISMATCH`. The existing `.skill-distribution.json` marker must agree with the inspected files. An older payload requires an authenticated compatibility record that identifies the inspected payload and source, selected policy and source, differences and applicable validation. The user manually installs and updates the Skill in Codex.
 
-### Continuing tasks and activation
+### Continuing tasks and installation
 
-Record the selected tag once after release and runtime verification succeed. `resolve-task --existing-pin <SHA-or-CalVer>` returns the recorded pin. Before continuing, verify the recorded policy and Skill identity or inspected compatibility against that pin in the appropriate runtime. An existing task keeps its pin unless the owner explicitly approves migration. Release resolution and validation perform no installation or upgrade.
+Record the selected CalVer and policy identity once for a new task. `resolve-task --existing-pin <SHA-or-CalVer>` returns the recorded pin without release selection or qualification. Continuing tasks keep their recorded SHA or CalVer and source, policy and builder identities. Do not repin, force installation or updates, or repeat qualification unless the owner explicitly approves migration.
 
-Legacy schema-1 packages and explicit historical SHA pins remain supported. Preserve the serialized `issue5-codex-skill-staging` marker; changing it requires separate compatibility migration authorization. Temporary staging preserves unrelated Skills, verifies existing markers/files, refuses drift and cross-policy migration, and has no implicit production target.
+Legacy schema-1 packages and explicit historical SHA pins remain supported. Preserve the serialized `issue5-codex-skill-staging` marker; changing it requires separate compatibility migration authorization. Temporary staging preserves unrelated Skills, verifies existing markers and files, refuses drift and cross-policy migration, and has no implicit production target.
 
-Production installation, fresh-session ChatGPT/Codex qualification, global instruction changes and active-task migration remain separately owner-authorized. Synthetic CI/staging results cannot prove live activation. The workflow never manages MCP services or configuration.
+The user manages Skill installation and updates. The release workflow never installs or activates Skills, changes global instructions, migrates active tasks or manages MCP services and configuration.

@@ -541,6 +541,226 @@ def _newest_release_tag(api):
     return max(candidates)[1] if candidates else None
 
 
+def _newest_eligible_release(api):
+    """Select the numerically newest published CalVer release record."""
+    candidates = []
+    for release in api.releases():
+        require(isinstance(release, dict), 'Malformed release listing')
+        tag = release.get('tag_name')
+        require(isinstance(tag, str), 'Release tag unavailable')
+        try:
+            key = version_key(tag)
+        except ReleaseError:
+            continue
+        require(type(release.get('draft')) is bool and
+                type(release.get('prerelease')) is bool,
+                'Release publication state unavailable')
+        if not release['draft'] and not release['prerelease']:
+            candidates.append((key, release))
+    tags = [release['tag_name'] for _, release in candidates]
+    require(len(tags) == len(set(tags)), 'Ambiguous published CalVer listing')
+    return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+
+def _resolve_qualified_release(api):
+    """Match the immutable release manifest to its successful workflow run.
+
+    Task startup reads the manifest and provenance sidecars. The release workflow
+    has already run the package checks, qualification suites and attestation.
+    """
+    try:
+        selected = _newest_eligible_release(api)
+    except APIError as error:
+        raise ReleaseError(f'RELEASE_QUALIFICATION_UNAVAILABLE: {error}') from error
+    except (ReleaseError, OSError, ValueError, KeyError, TypeError) as error:
+        raise ReleaseError(f'RELEASE_QUALIFICATION_FAILED: {error}') from error
+    if selected is None:
+        raise ReleaseError('NO_IMMUTABLE_RELEASE')
+
+    try:
+        tag = selected['tag_name']
+        release_id = selected.get('id')
+        require(type(release_id) is int and release_id > 0,
+                'Published release ID unavailable')
+        published = api.release(release_id)
+        require(isinstance(published, dict) and type(published.get('id')) is int and
+                published['id'] == release_id,
+                'Published release identity mismatch')
+        require(published.get('tag_name') == tag and published.get('name') == tag,
+                'Published CalVer identity mismatch')
+        require(published.get('draft') is False and
+                published.get('prerelease') is False and
+                published.get('immutable') is True,
+                'Release is not immutably published')
+
+        import skill_distribution as package
+        skill_names = set(package.SKILL_NAMES)
+        expected_assets = {
+            name
+            for skill in skill_names
+            for name in (f'{skill}.zip', f'{skill}.provenance.json')
+        } | {'release-manifest.json', 'SHA256SUMS'}
+        remote_assets = published.get('assets')
+        require(isinstance(remote_assets, list), 'Published release assets unavailable')
+        assets_by_name = {}
+        for asset in remote_assets:
+            require(isinstance(asset, dict), 'Malformed published asset record')
+            name = asset.get('name')
+            require(isinstance(name, str) and name not in assets_by_name,
+                    'Duplicate or malformed published asset')
+            assets_by_name[name] = asset
+        require(set(assets_by_name) == expected_assets,
+                'Published release asset names differ from the release contract')
+
+        def read_asset(name):
+            asset = assets_by_name[name]
+            require(type(asset.get('id')) is int and asset['id'] > 0,
+                    'Published asset ID unavailable: ' + name)
+            content = api.asset(asset)
+            require(isinstance(content, bytes), 'Published asset content unavailable: ' + name)
+            return content
+
+        try:
+            manifest = json.loads(read_asset('release-manifest.json'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ReleaseError('Malformed published release manifest') from error
+        require(isinstance(manifest, dict) and type(manifest.get('schema_version')) is int and
+                manifest['schema_version'] == 2,
+                'Unsupported published release manifest')
+        manifest_assets = manifest.get('assets')
+        require(isinstance(manifest_assets, list) and
+                all(isinstance(name, str) for name in manifest_assets) and
+                len(manifest_assets) == len(set(manifest_assets)) and
+                set(manifest_assets) == expected_assets,
+                'Release manifest asset list mismatch')
+        asset_hashes = manifest.get('asset_sha256')
+        require(isinstance(asset_hashes, dict) and
+                set(asset_hashes) == expected_assets - {'release-manifest.json', 'SHA256SUMS'},
+                'Release manifest asset hashes unavailable')
+        context = manifest.get('context')
+        require(isinstance(context, dict), 'Release manifest context unavailable')
+        require(not any(key in context for key in _ATTEMPT_LOCAL_CONTEXT_FIELDS),
+                'Published release context contains attempt-local data')
+        require(context.get('release_version') == tag,
+                'Published release context identity mismatch')
+        verify_trusted_main_context(context)
+        require(isinstance(context.get('policy_revision'), str) and
+                SHA.fullmatch(context['policy_revision']),
+                'Published policy identity unavailable')
+        expected_body = 'Release context: ' + digest(canonical(frozen_release_context(context)))
+        require(published.get('body') == expected_body,
+                'Published release body does not bind its frozen context')
+
+        payload_identities = {}
+        for skill in skill_names:
+            sidecar_name = f'{skill}.provenance.json'
+            sidecar_bytes = read_asset(sidecar_name)
+            expected_sidecar_hash = asset_hashes.get(sidecar_name)
+            require(isinstance(expected_sidecar_hash, str) and
+                    re.fullmatch(r'[0-9a-f]{64}', expected_sidecar_hash) and
+                    digest(sidecar_bytes) == expected_sidecar_hash,
+                    'Published provenance sidecar hash mismatch: ' + skill)
+            try:
+                sidecar = json.loads(sidecar_bytes)
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
+                raise ReleaseError('Malformed published provenance sidecar: ' + skill) from error
+            expected_sources = {
+                f'{skill}/SKILL.md': f'skills/{skill}/SKILL.md',
+                f'{skill}/agents/openai.yaml': f'skills/{skill}/agents/openai.yaml',
+            }
+            hashes = sidecar.get('payload_sha256') if isinstance(sidecar, dict) else None
+            require(isinstance(sidecar, dict) and
+                    type(sidecar.get('schema_version')) is int and sidecar['schema_version'] == 2 and
+                    sidecar.get('skill_name') == skill and
+                    sidecar.get('release_version') == tag and
+                    sidecar.get('source_revision') == context['source_revision'] and
+                    sidecar.get('policy_revision') == context['policy_revision'] and
+                    sidecar.get('builder_revision') == context['builder_revision'] and
+                    sidecar.get('transform_version') == context.get('transform_version', 1) and
+                    sidecar.get('source_files') == expected_sources and
+                    isinstance(hashes, dict) and set(hashes) == set(expected_sources) and
+                    all(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+                        for value in hashes.values()) and
+                    isinstance(sidecar.get('archive_sha256'), str) and
+                    re.fullmatch(r'[0-9a-f]{64}', sidecar['archive_sha256']) and
+                    asset_hashes.get(f'{skill}.zip') == sidecar['archive_sha256'],
+                    'Published provenance sidecar identity mismatch: ' + skill)
+            payload_identities[skill] = {
+                member.removeprefix(skill + '/'): value
+                for member, value in hashes.items()
+            }
+
+        tags = [item for item in api.tags()
+                if isinstance(item, dict) and item.get('ref') == 'refs/tags/' + tag]
+        require(len(tags) == 1 and isinstance(tags[0].get('object'), dict) and
+                tags[0]['object'].get('sha') == context['source_revision'] and
+                tags[0]['object'].get('type') == 'commit',
+                'Published release tag does not point to its source commit')
+        repository = api.record('/repos/' + REPOSITORY)
+        require(isinstance(repository, dict) and
+                repository.get('owner', {}).get('id') == context['owner_id'],
+                'Published release owner identity mismatch')
+
+        qualification = context.get('qualification')
+        qualification_attempt = (
+            qualification.get('run_attempt') if isinstance(qualification, dict) else None
+        )
+        require(type(context.get('run_attempt')) is int and context['run_attempt'] > 0 and
+                type(qualification_attempt) is int and
+                qualification_attempt >= context['run_attempt'],
+                'Published qualification attempt identity unavailable')
+        run = api.run(context['run_id'])
+        actor = run.get('actor') if isinstance(run, dict) else None
+        triggering_actor = run.get('triggering_actor') if isinstance(run, dict) else None
+        workflow_path = '.github/workflows/skill-release.yml'
+        workflow_attempt = run.get('run_attempt') if isinstance(run, dict) else None
+        # The frozen context retains its qualification attempt when publication retries.
+        require(isinstance(run, dict) and
+                type(run.get('id')) is int and run['id'] == context['run_id'] and
+                type(workflow_attempt) is int and workflow_attempt >= qualification_attempt and
+                run.get('event') == 'workflow_dispatch' and
+                run.get('head_branch') == 'main' and
+                run.get('head_sha') == context['source_revision'] and
+                run.get('path') in (workflow_path, workflow_path + '@refs/heads/main') and
+                isinstance(actor, dict) and type(actor.get('id')) is int and
+                actor['id'] == context['owner_id'],
+                'Release workflow identity mismatch')
+        require(isinstance(triggering_actor, dict) and
+                type(triggering_actor.get('id')) is int and
+                triggering_actor['id'] == context['owner_id'] and
+                run.get('created_at') == context['created_at'] and
+                run.get('status') == 'completed' and run.get('conclusion') == 'success',
+                'Release workflow did not complete successfully')
+
+        workflow_identity = {
+            'id': run['id'],
+            'attempt': workflow_attempt,
+            'qualification_attempt': qualification_attempt,
+            'event': run['event'],
+            'path': run['path'],
+            'head_branch': run['head_branch'],
+            'head_sha': run['head_sha'],
+            'status': run['status'],
+            'conclusion': run['conclusion'],
+            'actor_id': actor['id'],
+            'triggering_actor_id': triggering_actor['id'],
+            'created_at': run['created_at'],
+        }
+        if isinstance(run.get('html_url'), str):
+            workflow_identity['url'] = run['html_url']
+        return {
+            **context,
+            'verified_payload_identities': payload_identities,
+            'workflow_run': workflow_identity,
+            'qualification_basis':
+                'successful_release_workflow_and_immutable_publication',
+        }
+    except APIError as error:
+        raise ReleaseError(f'RELEASE_QUALIFICATION_UNAVAILABLE: {error}') from error
+    except (ReleaseError, OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        raise ReleaseError(f'RELEASE_QUALIFICATION_FAILED: {error}') from error
+
+
 def _verify_selected_release(root, api, tag=None):
     """Verify the selected release without falling back after a failure."""
     try:
@@ -553,29 +773,26 @@ def _verify_selected_release(root, api, tag=None):
 
 
 def resolve_task(api,existing_pin=None,installed_payload=None,root=None,compatibility=None,*,skill=None,installed_path=None):
+    """Keep a recorded pin or resolve a new release and Codex runtime state."""
     if existing_pin is not None:
         require(bool(SHA.fullmatch(existing_pin)) or bool(version_key(existing_pin)),'Invalid recorded task pin')
         return {'task_pin':existing_pin}
 
-    tag, context = _verify_selected_release(root, api)
+    context = _resolve_qualified_release(api)
+    tag = context['release_version']
     require(installed_payload is None,'Caller-supplied payload claims are not installation evidence')
-    if skill in ('development-orchestrator', 'development-review'):
-        raise ReleaseError(
-            f'HOSTED_VERIFICATION_UNAVAILABLE: {skill} runs in ChatGPT. '
-            'Use verify-release for release provenance, then inspect the effective payload and '
-            'installed revision bound to the task session in the authenticated ChatGPT workspace '
-            'as described in docs/skill-releases.md.'
-        )
-    require(skill == 'delegation-executor', 'Requested Skill has no supported runtime')
-    expected = context.get('verified_payload_identities', {}).get(skill)
-    require(isinstance(expected, dict) and expected,
-            'RELEASE_VERIFICATION_FAILED: verified payload identity missing for ' + skill)
-    try:
-        _verify_local_installation(api, context, skill, expected, installed_path, compatibility)
-    except MissingEvidenceError as error:
-        raise ReleaseError(f'LOCAL_INSTALLATION_UNAVAILABLE: {error}') from error
-    except (ReleaseError, APIError, OSError, ValueError, KeyError, TypeError) as error:
-        raise ReleaseError(f'LOCAL_INSTALLATION_MISMATCH: {error}') from error
+    require(skill in ('development-orchestrator', 'development-review', 'delegation-executor'),
+            'Requested Skill has no supported runtime')
+    if skill == 'delegation-executor':
+        expected = context.get('verified_payload_identities', {}).get(skill)
+        require(isinstance(expected, dict) and expected,
+                'RELEASE_QUALIFICATION_FAILED: verified payload identity missing for ' + skill)
+        try:
+            _verify_local_installation(api, context, skill, expected, installed_path, compatibility)
+        except MissingEvidenceError as error:
+            raise ReleaseError(f'LOCAL_INSTALLATION_UNAVAILABLE: {error}') from error
+        except (ReleaseError, APIError, OSError, ValueError, KeyError, TypeError) as error:
+            raise ReleaseError(f'LOCAL_INSTALLATION_MISMATCH: {error}') from error
     return {'task_pin':tag,'provenance':context}
 
 

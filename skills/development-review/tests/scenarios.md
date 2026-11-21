@@ -696,21 +696,21 @@ Expected result: In A, retain the worktree, report `MERGED — CLEANUP PENDING` 
 
 **Current evaluation:** PASS — independent run `/root/vaporeon`. It kept discovery blocked until physical cleanup was verified and required fresh checks of disk absence, validation, active absence, and worktree safety.
 
-## Hosted installation evidence
+## Release qualification and task resolution
 
-Synthetic evaluation. In a fresh evaluator context, use the exact candidate Skill instructions. Give the evaluator the setup and one case at a time. Keep the expected result out of its input.
+Synthetic evaluation. Use the exact candidate Skill instructions. Give the evaluator the setup and one case at a time. Keep the expected result out of its input.
 
-Prompt. Decide whether to apply the review workflow to a continuing task. Report the hosted outcome and the evidence that supports it. Preserve the recorded pin in every case. These cases exercise the decision procedure without accessing a live installation.
+Prompt. Determine which release identity a new task records and whether the release workflow qualified it. Preserve the recorded pin for a continuing task. State who handles Skill installation and updates.
 
-Setup. The release at the recorded CalVer passed full verification. A newer release is available. The target workspace and task session are known. No local copy of the hosted Skill exists. For compatible changes, the verification record must name the inspected installation, session-bound revision, release and policy, differences, and validation.
+Setup. The release list contains numeric CalVer candidates, including an older valid release. The owner-triggered workflow runs against merged `main`. A valid release has an immutable publication, a manifest whose frozen context matches the release body, matching tag and provenance sidecars, and a successful workflow record.
 
 | Case | Evidence supplied | Expected result |
 |---|---|---|
-| Exact payload | An authenticated ChatGPT surface binds the correct workspace, installation and concrete loaded revision to the current session. The complete effective inventory and bytes match the verified package. | `HOSTED_IDENTITY_VERIFIED`. Continue using the recorded pin. |
-| Inspected transformations | The same session binding and complete inventory are present. The packaged release link matches. The host maps every removed frontmatter field into equivalent platform metadata and adds a display field in `agents/openai.yaml`. Direct inspection accounts for each change, including metadata effects, and applicable validation passes. | `HOSTED_COMPATIBILITY_VERIFIED`. Record the actual differences and validation. |
-| Partial payload | The binding is present and the instruction body matches. Effective metadata is inaccessible. | `HOSTED_VERIFICATION_UNAVAILABLE`. Ask for the effective metadata and keep task use blocked. |
-| Unknown transformation | The complete effective payload is visible, but the effect of a changed invocation field cannot be established. | `HOSTED_VERIFICATION_UNAVAILABLE`. Identify the field and seek evidence about its effect. |
-| Detached export | A caller supplies a ZIP and checksum that match the release. No authenticated surface connects the ZIP or installed revision to this session. | `HOSTED_VERIFICATION_UNAVAILABLE`. Ask for authenticated session and revision evidence. |
-| Stale inspection | The workspace's export was inspected before a session change. There is no current binding. | `HOSTED_VERIFICATION_UNAVAILABLE`. Obtain fresh binding and effective payload evidence. |
-| Wrong binding | Authenticated evidence identifies a different workspace or conclusively shows that the revision inspected is different from the revision loaded. | `HOSTED_INSTALLATION_MISMATCH`. Identify the binding mismatch and block. |
-| Incompatible metadata | The correct binding and complete payload are present. A changed invocation requirement contradicts intended behavior and fails targeted validation. | `HOSTED_INSTALLATION_MISMATCH`. Report the failed behavior and block. |
+| Qualified publication | The newest eligible CalVer has matching manifest, source tag, provenance sidecars and owner-triggered workflow identity. The release is immutable and the workflow completed successfully. | Select its CalVer and policy identity once. Preserve `task_pin` and `provenance`, including source, policy, builder and payload identities. |
+| Later successful retry | The frozen context records original attempt 1 and qualification attempt 2. The published workflow record is successful at attempt 3 with matching run, owner and source. | Accept the release and report workflow attempt 3 separately from qualification attempt 2. |
+| Failed newest workflow | The newest eligible release has a failed workflow conclusion. An older release is valid. | Stop with qualification failure. Do not fall back to the older release. |
+| Incomplete evidence | The newest release lacks its manifest, a provenance sidecar, tag target or completed workflow result. | Stop resolution and identify the missing evidence. Do not fall back. |
+| Identity mismatch | The workflow actor, run, source SHA, tag target, release body or sidecar differs from the published context. | Stop resolution. Do not select another release. |
+| No eligible release | No published CalVer candidate exists. | Return `NO_IMMUTABLE_RELEASE`; do not choose a static SHA. |
+| Continuing task | The task record contains a historical SHA or CalVer and policy identity. A newer release is available. | Keep the recorded identities. Do not reselect or repeat release qualification. |
+| Installation | The release is qualified but has not been installed in ChatGPT or Codex. | Task resolution still reports release qualification. The user manually installs and updates Skills; publication does not install or activate them. |

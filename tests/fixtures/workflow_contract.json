@@ -6,10 +6,12 @@
         "Codex Plan-mode prompt",
         "execution/bootstrap handoff",
         "read-only",
-        "HOSTED_VERIFICATION_UNAVAILABLE",
-        "HOSTED_INSTALLATION_MISMATCH",
-        "verify-release",
-        "verify the revision loaded in the current session against the recorded Skill identity"
+        "newest eligible qualified immutable published CalVer release",
+        "successful release workflow execution and immutable publication qualify the release",
+        "does not run `verify-release`",
+        "explicit audits and diagnostics",
+        "user manually installs and updates",
+        "publication does not upload or activate"
       ]
     },
     {
@@ -22,7 +24,11 @@
         "--installed-path",
         "LOCAL_INSTALLATION_UNAVAILABLE",
         "LOCAL_INSTALLATION_MISMATCH",
-        "inspect the actual Codex installation against the recorded Skill identity"
+        "newest eligible qualified immutable published CalVer release",
+        "successful release workflow execution and immutable publication qualify the release",
+        "local checks protect the runtime",
+        "user manually installs and updates",
+        "publication does not install or activate"
       ]
     },
     {
@@ -31,10 +37,12 @@
         "Inspect final source",
         "tested commit",
         "owner must explicitly authorize a merge",
-        "HOSTED_VERIFICATION_UNAVAILABLE",
-        "HOSTED_INSTALLATION_MISMATCH",
-        "verify-release",
-        "verify the revision loaded in the current session against the recorded Skill identity"
+        "newest eligible qualified immutable published CalVer release",
+        "successful release workflow execution and immutable publication qualify the release",
+        "does not run `verify-release`",
+        "explicit audits and diagnostics",
+        "user manually installs and updates",
+        "publication does not upload or activate"
       ]
     }
   ],
@@ -288,24 +296,33 @@
       "heading": "12. Distribution/pinning",
       "end_heading": "13. Adoption and vocabulary",
       "required": [
-        "newest verified immutable published CalVer",
-        "Existing tasks retain their recorded SHA or CalVer",
-        "release source, policy revision and builder separately",
+        "newest eligible qualified published CalVer release",
+        "record its CalVer and policy identity once",
+        "release qualification for task admission is the successful owner-triggered Skill workflow run",
+        "does not run `verify-release`",
+        "Missing or inconsistent evidence for the newest eligible release blocks resolution without fallback",
+        "Existing tasks retain their recorded SHA or CalVer and source, policy, and builder identities",
+        "Codex's local installed-file and compatibility checks",
         "Independent review",
         "ChatGPT source/test inspection",
         "required CI",
         "owner merge authorization",
             "release controller trusts code after it enters authenticated",
-            "all six mandatory qualification suites",
+            "six qualification suites",
         "all eight assets",
         "Temporary staging preserves unrelated Skills",
-        "Publication and activation are separate"
+        "The user manually installs and updates released Skills",
+        "Publication never installs or activates them"
       ],
       "forbidden": [
         "readiness records locate actual evidence",
         "prospective first-release baseline",
         "ordinary chronology and coverage",
-        "baseline admission"
+        "baseline admission",
+        "HOSTED_VERIFICATION_UNAVAILABLE",
+        "HOSTED_INSTALLATION_MISMATCH",
+        "session-bound revision",
+        "native attestation and reconstructed provenance"
       ]
     }
   ],
@@ -313,7 +330,7 @@
     {
       "kind": "new-task",
       "existing_pin": null,
-      "expected": "verified_release_version"
+      "expected": "qualified_release_version"
     },
     {
       "kind": "in-flight-task",
@@ -342,7 +359,7 @@
     }
   ],
   "new_task_resolution": {
-    "selector": "newest_verified_immutable_release",
+    "selector": "newest_qualified_immutable_release",
     "recorded_pin": "release_version",
     "failure": "fail_closed",
     "continuation": "preserve_existing_pin"
