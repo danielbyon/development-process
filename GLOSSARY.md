@@ -11,3 +11,4 @@
 9. **Compatibility evidence:** Inspected evidence relating an installed Skill payload to selected policy/source and validation.
 10. **Activation:** Owner-controlled installation and environment adoption, separate from release publication.
 11. **Patch-forward release:** New immutable version correcting or superseding an earlier release while preserving history.
+12. **Configuration activation:** Applying an authorized, validated GPT Repo MCP root-configuration change through a supported mechanism that preserves the running process, MCP sessions, connections and tunnel; distinct from Skill activation and process lifecycle operations.

@@ -51,7 +51,7 @@
       "path": "docs/PROCESS.md",
       "heading": "4. Worktrees and Delegation v3",
       "end_heading": "5. Validation and coverage",
-      "required": ["client connection settings", "repos[]", "`repo_list_roots`", "ownership and access permissions", "MCP RESTART REQUIRED — OWNER ACTION"]
+      "required": ["client connection settings", "repos[]", "`repo_list_roots`", "ownership and access permissions", "MCP RESTART REQUIRED — OWNER ACTION", "supported configuration activation", "running server process", "indeterminate outcome after possible dispatch", "before retrying", "raw JSON edit", "owner-only"]
     },
     {
       "path": "docs/PROCESS.md",
@@ -63,6 +63,10 @@
         "after an owner handoff, verify again which backing file the now-running instance uses",
         "immediately before deletion, recheck absence in that verified registry and active instance",
         "confirm offline validation applies to the current registry contents",
+        "supported configuration activation",
+        "active absence alone does not prove",
+        "completion/quiescence",
+        "prior root users remain unfinished or unverified",
         "MERGED — CLEANUP PENDING"
       ]
     },
@@ -70,13 +74,13 @@
       "path": "skills/development-orchestrator/SKILL.md",
       "heading": "Authority and MCP boundaries",
       "end_heading": null,
-      "required": ["client connection settings", "server root registry", "manual", "owner-only"]
+      "required": ["client connection settings", "server root registry", "manual", "owner-only", "supported configuration activation", "exact instance/source", "saved and active evidence", "indeterminate post-dispatch outcome", "completion/quiescence", "existing task pins"]
     },
     {
       "path": "skills/delegation-executor/SKILL.md",
       "heading": "MCP registration and delegation",
       "end_heading": "Implement and validate",
-      "required": ["client connection settings", "canonical root", "no-op", "`repo_list_roots`", "owner-only"]
+      "required": ["client connection settings", "canonical root", "no-op", "`repo_list_roots`", "owner-only", "supported configuration activation", "running process", "saved and active state", "indeterminate outcome after possible dispatch", "already-saved mutation", "existing task pins"]
     },
     {
       "path": "skills/delegation-executor/SKILL.md",
@@ -88,6 +92,9 @@
         "after an owner handoff, verify the running instance and its backing file again",
         "recheck disk and active absence immediately before deleting the exact task worktree",
         "verify offline validation still applies to the current file",
+        "supported configuration activation",
+        "active absence alone does not prove",
+        "completion/quiescence",
         "MERGED — CLEANUP PENDING"
       ]
     },
@@ -101,6 +108,11 @@
         "after an owner handoff, verify the running instance and its backing file again",
         "recheck disk and active absence immediately before removing the exact worktree",
         "verify offline validation still applies to the current file",
+        "supported configuration activation",
+        "active absence alone does not prove",
+        "completion/quiescence",
+        "indeterminate outcome after possible dispatch",
+        "existing task pins",
         "MERGED — CLEANUP PENDING"
       ]
     }
