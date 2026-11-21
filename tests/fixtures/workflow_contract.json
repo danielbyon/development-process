@@ -63,7 +63,14 @@
         "after an owner handoff, verify again which backing file the now-running instance uses",
         "immediately before deletion, recheck absence in that verified registry and active instance",
         "confirm offline validation applies to the current registry contents",
-        "MERGED — CLEANUP PENDING"
+        "MERGED — CLEANUP PENDING",
+        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
+        "verify exact worktree root identity and canonical path containment",
+        "Do not inspect database contents or demand backups solely for identified disposable caches",
+        "preserve owner-designated durable files inside tool-state directories",
+        "unknown ignored data and `.chatgpt` task data remain protected",
+        "an open database handle alone does not prevent worktree removal",
+        "eligibility for cleanup does not establish successful filesystem removal"
       ]
     },
     {
@@ -88,7 +95,14 @@
         "after an owner handoff, verify the running instance and its backing file again",
         "recheck disk and active absence immediately before deleting the exact task worktree",
         "verify offline validation still applies to the current file",
-        "MERGED — CLEANUP PENDING"
+        "MERGED — CLEANUP PENDING",
+        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
+        "verify exact worktree root identity and canonical path containment",
+        "Do not inspect database contents or demand backups solely for identified disposable caches",
+        "preserve owner-designated durable files inside tool-state directories",
+        "unknown ignored data and `.chatgpt` task data remain protected",
+        "an open database handle alone does not prevent worktree removal",
+        "eligibility for cleanup does not establish successful filesystem removal"
       ]
     },
     {
@@ -101,7 +115,14 @@
         "after an owner handoff, verify the running instance and its backing file again",
         "recheck disk and active absence immediately before removing the exact worktree",
         "verify offline validation still applies to the current file",
-        "MERGED — CLEANUP PENDING"
+        "MERGED — CLEANUP PENDING",
+        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
+        "verify exact worktree root identity and canonical path containment",
+        "Do not inspect database contents or demand backups solely for identified disposable caches",
+        "preserve owner-designated durable files inside tool-state directories",
+        "unknown ignored data and `.chatgpt` task data remain protected",
+        "an open database handle alone does not prevent worktree removal",
+        "eligibility for cleanup does not establish successful filesystem removal"
       ]
     }
   ],
@@ -175,7 +196,14 @@
         "all other required closure checks pass",
         "LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION",
         "Never label this disposition `CLEANUP COMPLETE` or `MERGED — CLEANUP COMPLETE`",
-        "MCP RESTART REQUIRED — OWNER ACTION"
+        "MCP RESTART REQUIRED — OWNER ACTION",
+        "only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
+        "verify exact worktree root identity and canonical path containment",
+        "Do not inspect database contents or demand backups solely for identified disposable caches",
+        "preserve owner-designated durable files inside tool-state directories",
+        "unknown ignored data and `.chatgpt` task data remain protected",
+        "an open database handle alone does not prevent worktree removal",
+        "eligibility for cleanup does not establish successful filesystem removal"
       ],
       "forbidden": [
         "policy or Skill edits qualify solely because they are Markdown"
@@ -294,7 +322,14 @@
         "This qualifying disposition is distinct from `MERGED — CLEANUP PENDING`",
         "record the closeout result before discovery",
         "discovery retrieval failure does not reopen closeout",
-        "recorded policy pin and source identity"
+        "recorded policy pin and source identity",
+        "Only verified CodeGraph, TokenSave, and Serena-generated worktree-local state is disposable",
+        "verify exact worktree root identity and canonical path containment",
+        "Do not inspect database contents or demand backups solely for identified disposable caches",
+        "preserve owner-designated durable files inside tool-state directories",
+        "unknown ignored data and `.chatgpt` task data remain protected",
+        "an open database handle alone does not prevent worktree removal",
+        "Eligibility for cleanup does not establish successful filesystem removal"
       ],
       "forbidden": [
         "compatible Skill identity",
@@ -382,5 +417,57 @@
     "recorded_pin": "release_version",
     "failure": "fail_closed",
     "continuation": "preserve_existing_pin"
-  }
+  },
+  "scenario_contracts": [
+    {
+      "path": "skills/delegation-executor/tests/scenarios.md",
+      "required": [
+        "DISPOSABLE-TOOL-CACHE-ELIGIBILITY",
+        "DISPOSABLE-TOOL-CACHE-PRESERVATION",
+        "DISPOSABLE-TOOL-CACHE-REGISTRATION",
+        "DISPOSABLE-TOOL-CACHE-PATH-BOUNDARIES",
+        "DISPOSABLE-TOOL-CACHE-DELETION-FAILURE",
+        "CodeGraph",
+        "TokenSave",
+        "Serena",
+        "open SQLite handle",
+        "verified merge and checks",
+        "verified disk and active absence",
+        "current offline validation",
+        "unknown ignored file",
+        "uncommitted user-authored file",
+        "owner-designated durable file",
+        "`.chatgpt`",
+        "symlink resolves outside",
+        "unverified live instance",
+        "stale active registration",
+        "deletion command failed"
+      ]
+    },
+    {
+      "path": "skills/development-review/tests/scenarios.md",
+      "required": [
+        "DISPOSABLE-TOOL-CACHE-ELIGIBILITY",
+        "DISPOSABLE-TOOL-CACHE-PRESERVATION",
+        "DISPOSABLE-TOOL-CACHE-REGISTRATION",
+        "DISPOSABLE-TOOL-CACHE-PATH-BOUNDARIES",
+        "DISPOSABLE-TOOL-CACHE-DELETION-FAILURE",
+        "CodeGraph",
+        "TokenSave",
+        "Serena",
+        "open SQLite handle",
+        "verified merge and checks",
+        "verified disk and active absence",
+        "current offline validation",
+        "unknown ignored file",
+        "uncommitted user-authored file",
+        "owner-designated durable file",
+        "`.chatgpt`",
+        "symlink resolves outside",
+        "unverified live instance",
+        "stale active registration",
+        "deletion command failed"
+      ]
+    }
+  ]
 }
