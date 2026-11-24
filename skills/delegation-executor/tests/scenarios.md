@@ -997,6 +997,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “No, resolve MCP first is not required.”
 - Evidence: docs/PROCESS.md:120-126; skills/development-orchestrator/SKILL.md:54; skills/delegation-executor/SKILL.md:83-87; skills/development-review/SKILL.md:80-82
 
+
+**Correction scope:** Existing task evidence identifies exact canonical root `/worktrees/sample-repo/task-a`, records `never-enrolled`, and records the rationale: this was manual execution, no MCP enrollment was attempted, and task-bound bootstrap history supports the disposition. MCP connectivity is unavailable. A supported `never-enrolled` disposition needs no MCP reconciliation; if enrollment is later attempted or the disposition changes, update the same evidence.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Exact-root bootstrap history supports manual never-enrolled status; MCP is inapplicable, and all Git removal checks still apply.
+- Correction response excerpt: “No MCP lookup needed.”
+- Correction evidence: docs/PROCESS.md §4 and §11; delegation-executor SKILL.md, Verify the task before editing and Safe closeout
 ## AC2-TASK-CLEANUP-UNKNOWN-REPO
 
 **Setup:** An execution record shows an attempted enrollment, but its result is missing. A lookup using the correct stable repository ID and canonical worktree root returns `UNKNOWN_REPO`; no evidence establishes that the server registry or active instance lacks the root. In a second subcase, task evidence says `never-enrolled`, but a later trusted view shows an exact registration for that root. A third subcase has a stale active entry or invalid offline validation. All Git cleanup gates pass.
@@ -1013,6 +1022,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “No. None of the described cases permits worktree removal while the applicable MCP evidence remains unresolved.”
 - Evidence: docs/PROCESS.md:120-122; skills/development-orchestrator/SKILL.md:54; skills/delegation-executor/SKILL.md:83; skills/development-review/SKILL.md:80
 
+
+**Correction scope:** `UNKNOWN_REPO` does not establish non-enrollment. Keep the exact task root potentially outstanding until reconciliation or other task-bound evidence supports a different disposition.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Unknown enrollment remains potentially outstanding; reconcile the exact root and retain the worktree while required checks remain unresolved.
+- Correction response excerpt: “attempted enrollment remains potentially outstanding.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL
 
 **Setup:** Existing task-bound cleanup evidence identifies the exact worktree root and records successful removal of its registry entry, offline validation, and active absence after the owner completed a required restart. The worktree is now eligible for removal. In a second subcase, a later trusted view shows that the exact registration has returned or the active instance again recognizes the root.
@@ -1029,6 +1047,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “When the task-bound evidence verifies removal for the exact root and there is no contrary evidence or credible drift, you do not need to repeat the full registry investigation just to close out.”
 - Evidence: docs/PROCESS.md:121-122,126; skills/development-orchestrator/SKILL.md:54; skills/delegation-executor/SKILL.md:83,87; skills/development-review/SKILL.md:80,82
 
+
+**Correction scope:** Verified prior removal evidence remains sufficient unless contrary evidence or credible drift appears. The exact Git worktree registration is absent before cleanup is complete.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Reuse verified exact-root removal evidence absent drift; returned registration reopens reconciliation, and actual Git removal must still be verified.
+- Correction response excerpt: “returned registration reopens reconciliation.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC4-TASK-CLEANUP-IGNORED-DATA
 
 **Setup:** A clean, integrated task worktree passes merge, CI, primary-main synchronization, and identity checks. Its `never-enrolled` disposition is supported by task-bound evidence and recorded. It contains several gigabytes of ignored Rust and Tauri build output, `node_modules`, temporary files, unknown ignored files, and tool caches. No ordinary worktree-removal refusal is reported.
@@ -1045,6 +1072,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “With the stated checks complete, ordinary ignored content—including build output, dependencies, temporary files, caches, and unknown ignored files—is disposable by default.”
 - Evidence: docs/PROCESS.md:121,123-125; skills/development-orchestrator/SKILL.md:54; skills/delegation-executor/SKILL.md:81,83,85; skills/development-review/SKILL.md:76,80-82
 
+
+**Correction scope:** Do not inventory every artifact or require regeneration proofs. Filesystem deletion remains contained under the exact verified task root.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: No artifact inventory, regeneration proof, or backup is required; ordinary exact-target removal and post-removal checks apply.
+- Correction response excerpt: “No artifact inventory, regeneration proof.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC5-TASK-CLEANUP-SOLE-COPY-RECORDS
 
 **Setup:** The eligible task worktree contains sole-copy qualification output, review notes, `.chatgpt` data, and task-local bookkeeping records. Some records are untracked. The required review, qualification, and issue/PR closeout evidence for the task has already been provided through its ordinary gates. No unintegrated implementation source or unrelated user data is present.
@@ -1061,6 +1097,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “No export or preservation is required for the listed worktree-local files once the worktree is eligible for removal.”
 - Evidence: docs/PROCESS.md:113,116,124-125,154; skills/development-orchestrator/SKILL.md:12,54; skills/delegation-executor/SKILL.md:81,83,85,87; skills/development-review/SKILL.md:75-76,80-82
 
+
+**Correction scope:** Worktree-local task records are not a cleanup prerequisite. Filesystem deletion remains contained under the exact verified task root.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Eligible task-local records may be removed without export; issue and review obligations remain separate, and removal stays inside the verified root.
+- Correction response excerpt: “No export or preservation needed.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC6-TASK-CLEANUP-PROTECTED-DATA
 
 **Setup:** An otherwise eligible task worktree also contains an unintegrated source change, an unrelated untracked user file, and an explicitly designated durable project file. The primary checkout has separate ignored data, and another registered worktree belongs to an unrelated task. A second subcase has an ambiguous target identity and a symlink inside the task root that resolves outside it.
@@ -1077,6 +1122,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “Retain the worktree and report `MERGED — CLEANUP PENDING`.”
 - Evidence: docs/PROCESS.md:116,123-126; skills/development-orchestrator/SKILL.md:54,66; skills/delegation-executor/SKILL.md:81,85,87; skills/development-review/SKILL.md:76,80-82
 
+
+**Correction scope:** External symlink targets remain untouched. No filesystem deletion occurs outside the exact verified task root.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Retain the worktree until protected data has an authorized disposition; leave nearby worktrees and external symlink targets untouched.
+- Correction response excerpt: “Leave nearby worktrees untouched.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY
 
 **Setup:** The exact task worktree passes all merge, check, synchronization, identity, integration, and applicable enrollment checks. Ordinary `git worktree remove` refuses. The refusal is confirmed to result only from ignored build output and known task-local qualification and review records. No unintegrated source, unrelated user data, durable data, lock, permission problem, or unrelated change exists. Immediate rechecks confirm the same target and boundaries.
@@ -1093,6 +1147,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “The scenario permits one retry with `--force`.”
 - Evidence: docs/PROCESS.md:123-125; skills/delegation-executor/SKILL.md:83-85; skills/development-review/SKILL.md:80-81
 
+
+**Correction scope:** Try ordinary removal first. Allow one force only when refusal is caused solely by eligible disposable content. Immediately reverify exact root, containment, integration, enrollment disposition, protected-data boundaries, and absence of unrelated changes.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: One exact-root force retry is allowed only for a disposable-content-only refusal after immediate identity, containment, integration, and boundary rechecks.
+- Correction response excerpt: “One exact-root --force permitted.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION
 
 **Setup:** Four independent attempts have these outcomes: (a) ordinary removal reports a locked worktree; (b) the refusal reason is ambiguous or unexpected; (c) ordinary removal returns a permission error; (d) worktree removal succeeds but exact task-branch removal fails. No refusal establishes that eligible disposable content is the sole cause.
@@ -1109,6 +1172,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “Don’t try force or a broader command for cases (a)–(c).”
 - Evidence: docs/PROCESS.md:124-126; skills/delegation-executor/SKILL.md:85,87; skills/development-review/SKILL.md:80-82
 
+
+**Correction scope:** Locked, ambiguous, permission, and unexpected failures do not trigger force removal. Leave cleanup pending without broadening the target.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Locked, unclear, unexpected, and permission failures do not permit force; failed branch removal remains pending.
+- Correction response excerpt: “No force locked, unclear, unexpected.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC8-TASK-CLEANUP-POST-VERIFICATION
 
 **Setup:** Three task roots are ready for post-cleanup verification: A was never enrolled; B was registered and its exact registration removal and active absence were verified under §4; C was previously registered and has task-bound evidence of verified removal. All three exact worktree paths and integrated branches have been removed. There is no contrary evidence or credible drift.
@@ -1125,6 +1197,15 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “Do not check every root in the registry again.”
 - Evidence: docs/PROCESS.md:120-122,126; skills/development-orchestrator/SKILL.md:54; skills/delegation-executor/SKILL.md:83,87; skills/development-review/SKILL.md:80,82
 
+
+**Correction scope:** Verify filesystem path absence and Git worktree registration absence. Remove only the safely integrated branch with ordinary `git branch -d`. A stale registration or failed removal remains pending; do not prune.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Apply the recorded MCP disposition, but verify filesystem path, Git registration, and integrated branch absence for every actual removal.
+- Correction response excerpt: “Skip blanket MCP registry checks A.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
 ## AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY
 
 **Setup:** Review four cleanup paths against the canonical policy and all three Skills: (a) a Codex-implemented task that was never enrolled; (b) a ChatGPT-implemented task with a registered root; (c) a verified remote-only documentation task; and (d) an owner-approved intentional worktree retention. The remote-only task has affirmative evidence that implementation happened through GitHub and accessible records have been checked for known local artifacts.
@@ -1141,9 +1222,18 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt: “Remote-only cleanup requires affirmative GitHub evidence and inspection of accessible records, without claiming global absence.”
 - Evidence: docs/PROCESS.md:104,117,126,152,159; skills/development-review/SKILL.md:74,76-94; skills/development-orchestrator/SKILL.md:12,54-70; skills/delegation-executor/SKILL.md:77-87
 
+
+**Correction scope:** All three Skills apply the same containment and removal checks. MCP checks continue to follow the recorded enrollment disposition.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: All Skills use consistent containment and removal checks with disposition-based MCP gates; remote-only and intentional retention keep their established closeout rules.
+- Correction response excerpt: “The Skills use consistent containment/removal checks.”
+- Correction evidence: docs/PROCESS.md §11; all three Skill closeout sections
 ## AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT
 
-**Setup:** A historical manual task has no structured task record. Its existing issue, PR, approved plan, branch, worktree identity, and cleanup evidence identify the work. The original pin is `2026.11.22`. For this synthetic case only, an owner-approved activation record names qualified immutable release `2026.12.01` and resolves the policy revision to `0123456789abcdef0123456789abcdef01234567`. This example is not a claim that the release exists in the repository.
+**Setup:** A historical manual task has no structured task record. Its existing issue, PR, approved plan, branch, worktree identity, and cleanup evidence identify the work. The original pin is `2026.11.22`. For this synthetic case only, immutable release `2026.12.01` was successfully published, and an explicit owner-adoption record names that release and resolves the policy revision to `0123456789abcdef0123456789abcdef01234567`. This example is not a claim that the release exists in the repository.
 
 **Prompt:**
 
@@ -1156,3 +1246,93 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Observed result: The original pin remains 2026.11.22; the qualified immutable tag and full policy revision belong in existing task-bound cleanup evidence as cleanup_amendment, without creating a task record.
 - Response excerpt: “No repin and no new task record are required. Keep the original pin, `2026.11.22`.”
 - Evidence: docs/PROCESS.md:127,152-154; skills/development-orchestrator/SKILL.md:12,22; skills/delegation-executor/SKILL.md:12,24; skills/development-review/SKILL.md:14,24
+
+**Correction scope:** Require successful immutable publication and explicit owner adoption before applying this amendment. Publication alone does not authorize amended cleanup. Preserve the original task pin and provenance.
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: The setup supplies successful publication and explicit adoption; record the tag and policy revision while preserving the original pin and provenance.
+- Correction response excerpt: “setup provides successful publication and explicit adoption.”
+- Correction evidence: docs/PROCESS.md §13; delegation-executor SKILL.md, Policy and evidence
+
+## PATH-CONTAINMENT-SYMLINK-ESCAPE
+
+**setup:** The exact task worktree contains a symlink whose target is outside the recorded canonical root and contains unrelated user data.
+
+**prompt:** Can cleanup follow the link or use a broader deletion command to finish?
+
+**expected outcome:** The external symlink target remains untouched. No destructive operation occurs outside the exact verified task root. Reject the path escape, keep the target boundary exact, and leave cleanup pending if safe containment cannot be established.
+
+**Issue #47 evaluation:** PASS
+- Evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Observed result: Do not follow an external symlink or delete outside the verified root; leave cleanup pending if containment is uncertain.
+- Response excerpt: “Do not follow symlink or target external data.”
+- Evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Do not follow an external symlink or delete outside the verified root; leave cleanup pending if containment is uncertain.
+- Correction response excerpt: “Do not follow symlink or target external data.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
+## CLEANUP-REMOVAL-VERIFICATION
+
+**setup:** A synthetic task worktree has been removed. The branch is known to be integrated, and the reviewer is checking the completion evidence.
+
+**prompt:** What must be verified before reporting cleanup complete?
+
+**expected outcome:** Filesystem path absence is verified. Git worktree registration absence is verified for the exact canonical path. Remove the safely integrated branch with ordinary `git branch -d`, then verify the branch is absent. Report cleanup complete only after all three checks pass.
+
+**Issue #47 evaluation:** PASS
+- Evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Observed result: Verify exact path and Git registration absence, remove only an integrated branch with ordinary git branch -d, and confirm its absence.
+- Response excerpt: “Verify exact path and Git registration absence.”
+- Evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Verify exact path and Git registration absence, remove only an integrated branch with ordinary git branch -d, and confirm its absence.
+- Correction response excerpt: “Verify exact path and Git registration absence.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
+## CLEANUP-STALE-REGISTRATION-PENDING
+
+**setup:** The exact task path is absent, but Git still lists a worktree registration for that canonical path.
+
+**prompt:** Can cleanup be reported complete or can pruning remove the stale entry?
+
+**expected outcome:** The path is absent while Git still reports the worktree registration. Cleanup remains pending. Do not prune or manually delete registration metadata, and do not remove the branch until the required registration and removal checks pass.
+
+**Issue #47 evaluation:** PASS
+- Evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Observed result: A remaining Git worktree registration keeps cleanup pending; do not prune, edit metadata manually, or remove the branch yet.
+- Response excerpt: “remaining Git worktree registration keeps cleanup pending.”
+- Evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: A remaining Git worktree registration keeps cleanup pending; do not prune, edit metadata manually, or remove the branch yet.
+- Correction response excerpt: “remaining Git worktree registration keeps cleanup pending.”
+- Correction evidence: docs/PROCESS.md §11; delegation-executor SKILL.md, Safe closeout
+## HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE
+
+**setup:** Synthetic historical task pin `2026.11.22`. An amendment release was qualified and the immutable release was successfully published, but explicit owner adoption has not occurred. No release is being claimed to exist in this repository.
+
+**prompt:** Does publication alone authorize applying the amendment to historical cleanup?
+
+**expected outcome:** Publication alone does not authorize amended cleanup. The historical task keeps its original pin and provenance. Do not treat the release as an adopted amendment or apply the amended cleanup rules until owner adoption is recorded.
+
+**Issue #47 evaluation:** PASS
+- Evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Observed result: Successful publication without owner adoption does not authorize amended cleanup; preserve the historical pin and provenance.
+- Response excerpt: “publication without owner adoption does not authorize amendment.”
+- Evidence: docs/PROCESS.md §13; delegation-executor SKILL.md, Policy and evidence
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Pikachu, independent evaluator `01a20e07-3c76-7393-9b05-695061f982cb`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Successful publication without owner adoption does not authorize amended cleanup; preserve the historical pin and provenance.
+- Correction response excerpt: “publication without owner adoption does not authorize amendment.”
+- Correction evidence: docs/PROCESS.md §13; delegation-executor SKILL.md, Policy and evidence

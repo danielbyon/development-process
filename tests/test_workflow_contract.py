@@ -304,11 +304,20 @@ class WorkflowContractTests(unittest.TestCase):
                 for forbidden in contract["forbidden"]:
                     self.assertNotIn(forbidden.casefold(), section)
 
-    def test_issue_47_cleanup_amendment_contract_covers_policy_and_skills(self) -> None:
+    def test_cleanup_amendment_contract_covers_policy_and_skills(self) -> None:
         fixture = json.loads(
             (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
         )
         contract = fixture["cleanup_amendment_contract"]
+        bootstrap = self._markdown_section(
+            (ROOT / "docs" / "PROCESS.md").read_text(),
+            contract["bootstrap"]["heading"],
+            contract["bootstrap"]["end_heading"],
+        )
+        for required in contract["bootstrap"]["required"]:
+            with self.subTest(surface="bootstrap", required=required):
+                self.assertIn(required.casefold(), bootstrap)
+
         policy = self._markdown_section(
             (ROOT / "docs" / "PROCESS.md").read_text(),
             contract["policy"]["heading"],
@@ -327,6 +336,16 @@ class WorkflowContractTests(unittest.TestCase):
             with self.subTest(surface="adoption", required=required):
                 self.assertIn(required.casefold(), adoption)
 
+        decision_contract = contract["decision_provenance"]
+        decision = self._markdown_section(
+            (ROOT / "docs" / "DECISIONS.md").read_text(),
+            decision_contract["heading"],
+            decision_contract["end_heading"],
+        )
+        for required in decision_contract["required"]:
+            with self.subTest(surface="decision provenance", required=required):
+                self.assertIn(required.casefold(), decision)
+
         for skill_contract in contract["skill_contracts"]:
             skill = (
                 ROOT / "skills" / skill_contract["skill"] / "SKILL.md"
@@ -344,7 +363,7 @@ class WorkflowContractTests(unittest.TestCase):
                 ):
                     self.assertIn(required.casefold(), section)
 
-    def test_issue_47_cleanup_scenarios_have_fresh_independent_evaluations(self) -> None:
+    def test_task_worktree_cleanup_scenarios_have_fresh_independent_evaluations(self) -> None:
         fixture = json.loads(
             (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
         )
@@ -356,7 +375,9 @@ class WorkflowContractTests(unittest.TestCase):
         )
         registered_scenarios = {
             scenario_id
-            for scenario_contract in cleanup_contract["issue_47_scenario_contracts"]
+            for scenario_contract in cleanup_contract[
+                "task_worktree_cleanup_scenario_contracts"
+            ]
             for scenario_id in scenario_contract["scenario_ids"]
         }
         for criterion, details in acceptance_criteria.items():
@@ -384,7 +405,7 @@ class WorkflowContractTests(unittest.TestCase):
             r"[0-9a-f]{12}`"
         )
         for contract in fixture["cleanup_amendment_contract"][
-            "issue_47_scenario_contracts"
+            "task_worktree_cleanup_scenario_contracts"
         ]:
             scenarios = (ROOT / contract["path"]).read_text().casefold()
             sections = {}
@@ -401,6 +422,30 @@ class WorkflowContractTests(unittest.TestCase):
                     self.assertIn("- observed result:", section)
                     self.assertIn("- response excerpt:", section)
                     self.assertIn("- evidence:", section)
+
+        for contract in cleanup_contract["correction_scenario_contracts"]:
+            scenarios = (ROOT / contract["path"]).read_text().casefold()
+            sections = {}
+            for section in scenarios.split("\n## "):
+                heading, _, body = section.partition("\n")
+                sections[heading] = body
+            for correction in contract["scenarios"]:
+                scenario_id = correction["id"]
+                with self.subTest(path=contract["path"], correction=scenario_id):
+                    self.assertIn(scenario_id.casefold(), sections)
+                    section = sections[scenario_id.casefold()]
+                    for required in correction["required"]:
+                        self.assertIn(required.casefold(), section)
+                    self.assertIn("**issue #47 correction evaluation:** pass", section)
+                    self.assertRegex(section, run_id_pattern)
+                    self.assertRegex(
+                        section,
+                        r"- correction candidate diff sha-256: [0-9a-f]{64}",
+                    )
+                    self.assertIn("- correction evaluator:", section)
+                    self.assertIn("- correction observed result:", section)
+                    self.assertIn("- correction response excerpt:", section)
+                    self.assertIn("- correction evidence:", section)
 
     def test_cleanup_scenarios_cover_disposable_cache_boundaries(self) -> None:
         fixture = json.loads(

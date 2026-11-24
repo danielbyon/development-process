@@ -619,3 +619,24 @@ Setup. The release list contains numeric CalVer candidates, including an older v
 | No eligible release | No published CalVer candidate exists. | Return `NO_IMMUTABLE_RELEASE`; do not choose a static SHA. |
 | Continuing task | The task record contains a historical SHA or CalVer and policy identity. A newer release is available. | Keep the recorded identities. Do not reselect or repeat release qualification. |
 | Installation | The release is qualified but has not been installed in ChatGPT or Codex. | Task resolution still reports release qualification. The user manually installs and updates Skills; publication does not install or activate them. |
+
+## BOOTSTRAP-TASK-ROOT-ENROLLMENT
+
+**setup:** Manual execution in a verified, isolated task worktree with canonical root `/worktrees/sample-repo/task-a` and branch `codex/task-a`. No MCP enrollment is attempted. Existing task evidence records `never-enrolled` and the rationale: execution is manual, enrollment was not attempted, and task-bound bootstrap history supports the disposition. MCP connectivity is unavailable.
+
+**prompt:** What must bootstrap record, and may it proceed without MCP connectivity?
+
+**expected outcome:** Record the exact task root, enrollment disposition, supporting evidence, and rationale at bootstrap in existing task evidence. For this case, preserve the documented manual execution and non-enrollment rationale. A supported never-enrolled disposition does not require MCP connectivity. Update the same evidence if enrollment is attempted later or the disposition changes; do not infer non-enrollment from `UNKNOWN_REPO` or add a task-record schema.
+
+**Issue #47 evaluation:** PASS
+- Evaluator: Eevee, independent evaluator `01a20e07-3c4a-7361-b358-bb658bfce8c6`
+- Observed result: Bootstrap records the exact root, never-enrolled disposition, supporting manual no-attempt rationale, and later evidence update; MCP connectivity and a new schema are unnecessary.
+- Response excerpt: “MCP connectivity is unavailable but is not required.”
+- Evidence: docs/PROCESS.md §4 and §11; development-orchestrator SKILL.md, Policy and evidence
+
+**Issue #47 correction evaluation:** PASS
+- Correction evaluator: Eevee, independent evaluator `01a20e07-3c4a-7361-b358-bb658bfce8c6`
+- Correction candidate diff SHA-256: 3a52bd0f0674ca58b679fbd46d25c9e41a2a84a63e82e211fd3c27a53912f526
+- Correction observed result: Bootstrap records the exact root, never-enrolled disposition, supporting manual no-attempt rationale, and later evidence update; MCP connectivity and a new schema are unnecessary.
+- Correction response excerpt: “MCP connectivity is unavailable but is not required.”
+- Correction evidence: docs/PROCESS.md §4 and §11; development-orchestrator SKILL.md, Policy and evidence

@@ -56,7 +56,7 @@
         "repos[]",
         "`repo_list_roots`",
         "ownership and access permissions",
-        "MCP RESTART REQUIRED \u2014 OWNER ACTION"
+        "MCP RESTART REQUIRED — OWNER ACTION"
       ]
     },
     {
@@ -205,18 +205,18 @@
         "Use existing task-bound evidence such as the issue, PR, approved plan, branch, and worktree identity",
         "a structured task record may not exist for a historical manual task",
         "Do not require creating, migrating, exporting, or preserving a worktree-local task record for cleanup",
-        "If task identity or provenance remains unclear, report `MERGED \u2014 CLEANUP PENDING`",
+        "If task identity or provenance remains unclear, report `MERGED — CLEANUP PENDING`",
         "If the owner approves retention of a verified task worktree for future work",
         "Record the reason and deferred cleanup, keep the worktree intentionally retained, and run discovery immediately",
         "Defer only its eventual removal and cleanup prompt",
-        "Do not report `MERGED \u2014 CLEANUP PENDING` or wait for worktree removal solely because it is retained",
-        "Reserve `MERGED \u2014 CLEANUP PENDING` for unsafe or unverified retention, unknown provenance, or other unresolved required verification",
+        "Do not report `MERGED — CLEANUP PENDING` or wait for worktree removal solely because it is retained",
+        "Reserve `MERGED — CLEANUP PENDING` for unsafe or unverified retention, unknown provenance, or other unresolved required verification",
         "Explicitly keep the issue open until required primary-main synchronization is completed and verified",
         "verified already-current no-op is recorded",
         "all other required closure checks pass",
-        "LOCAL CLEANUP INAPPLICABLE \u2014 REMOTE-ONLY DISPOSITION",
-        "Never label this disposition `CLEANUP COMPLETE` or `MERGED \u2014 CLEANUP COMPLETE`",
-        "MCP RESTART REQUIRED \u2014 OWNER ACTION",
+        "LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION",
+        "Never label this disposition `CLEANUP COMPLETE` or `MERGED — CLEANUP COMPLETE`",
+        "MCP RESTART REQUIRED — OWNER ACTION",
         "Worktree-local qualification, review, `.chatgpt`, and bookkeeping records are disposable",
         "Record the exact task worktree's enrollment disposition, supporting evidence, and rationale in cleanup evidence",
         "`UNKNOWN_REPO` is not evidence of non-enrollment",
@@ -288,8 +288,8 @@
       "heading": "Response format",
       "end_heading": "Release readiness evidence",
       "required": [
-        "For a verified remote-only disposition, state `LOCAL CLEANUP INAPPLICABLE \u2014 REMOTE-ONLY DISPOSITION`",
-        "never label it `CLEANUP COMPLETE` or `MERGED \u2014 CLEANUP COMPLETE`",
+        "For a verified remote-only disposition, state `LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION`",
+        "never label it `CLEANUP COMPLETE` or `MERGED — CLEANUP COMPLETE`",
         "For closeout-triggered discovery, this terminal rule overrides the generic next-action field",
         "omit any next action that would propose planning or implementation",
         "Do not offer or recommend preparing a task, plan, or bootstrap",
@@ -335,13 +335,13 @@
       "required": [
         "The owner's cleanup-completion report triggers applicable verification before discovery",
         "a verified remote-only disposition that makes local cleanup inapplicable",
-        "LOCAL CLEANUP INAPPLICABLE \u2014 REMOTE-ONLY DISPOSITION",
-        "Never label this disposition `CLEANUP COMPLETE` or `MERGED \u2014 CLEANUP COMPLETE`",
+        "LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION",
+        "Never label this disposition `CLEANUP COMPLETE` or `MERGED — CLEANUP COMPLETE`",
         "owner-approved intentional retention",
         "Once all other required checks pass, run post-closeout discovery immediately without waiting for removal",
-        "This is a qualifying closeout disposition, not `MERGED \u2014 CLEANUP PENDING`",
+        "This is a qualifying closeout disposition, not `MERGED — CLEANUP PENDING`",
         "For retention, run discovery immediately while the worktree remains intentionally retained",
-        "This qualifying disposition is distinct from `MERGED \u2014 CLEANUP PENDING`",
+        "This qualifying disposition is distinct from `MERGED — CLEANUP PENDING`",
         "Record the closeout result before discovery",
         "A discovery retrieval failure does not reopen closeout",
         "Keep the task's recorded policy pin and source identity as discovery context",
@@ -520,33 +520,29 @@
       "heading": "11. Merge/closeout/cleanup",
       "end_heading": "12. Distribution/pinning",
       "required": [
-        "Use three dispositions: `never-enrolled`, `registered-or-potentially-outstanding`, and `previously-registered-with-verified-removal`",
-        "`UNKNOWN_REPO` is not evidence of non-enrollment",
-        "When reconciliation applies, use the correct stable repository ID and canonical root",
-        "Record the exact task worktree's enrollment disposition, supporting evidence, and rationale in cleanup evidence",
-        "Reuse verified prior removal evidence when it identifies the exact task root and no contrary evidence or credible drift has appeared",
-        "Try ordinary exact-target removal first with `git worktree remove",
-        "A single `--force` is permitted only when ordinary removal refuses exclusively because of eligible disposable content",
-        "Immediately before that command, reverify the target identity and canonical path, integration, applicable enrollment disposition and registration state, protected-data boundaries, and absence of unrelated changes",
-        "Do not force-remove a locked worktree or act on an ambiguous refusal, permission error, or other unexpected condition",
-        "Never use double force, `git clean`, or broader filesystem deletion",
-        "Post-cleanup verification follows the recorded enrollment disposition",
-        "ordinary ignored content in that worktree is disposable by default",
-        "Worktree-local qualification, review, `.chatgpt`, and other task bookkeeping records are disposable even when they are sole copies or untracked",
-        "Preserve actual unintegrated source changes, identified unrelated user data, and explicitly designated durable project or user data",
-        "Do not require artifact-by-artifact proof, backup, export, database inspection, or preservation of disposable task data"
+        "immediately before that command, reverify the target identity and canonical path, path-component containment within the exact task root",
+        "no filesystem deletion may target a path outside the exact verified task root",
+        "do not follow symlinks into external resources",
+        "verify the exact canonical filesystem path entry is absent",
+        "no git worktree registration remains for that path",
+        "remove only that exact branch with ordinary `git branch -d <branch>`",
+        "report cleanup complete only after all three outcomes pass",
+        "a stale registration, failed path or branch removal, or uncertain integration remains",
+        "do not use `git worktree prune`"
       ]
     },
     "adoption": {
       "heading": "13. Adoption and vocabulary",
       "end_heading": null,
       "required": [
+        "successful immutable publication",
+        "explicit owner adoption",
+        "publication alone does not authorize amended cleanup",
+        "qualified but not adopted",
         "qualified immutable CalVer release tag and the full policy revision resolved from that tag",
-        "Record both in existing task-bound cleanup evidence as the `cleanup_amendment` reference",
-        "Apply it only to cleanup provisions superseded by the amendment",
-        "Keep the original task pin, source, policy, builder, plan, implementation, review, validation, merge, and unrelated release requirements unchanged",
-        "For a historical manual task without a structured task record, use existing task-bound evidence",
-        "Creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite"
+        "record both in existing task-bound cleanup evidence as the `cleanup_amendment` reference",
+        "keep the original task pin, source, policy, builder, plan, implementation, review, validation, merge, and unrelated release requirements unchanged",
+        "preserve their provenance"
       ]
     },
     "skill_contracts": [
@@ -560,7 +556,14 @@
           "only to the historical pin's superseded cleanup provisions",
           "the original task pin, provenance, and unrelated gates remain unchanged",
           "historical manual task without a structured record, use existing task-bound evidence",
-          "creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite"
+          "creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite",
+          "record exact task root enrollment disposition and rationale at bootstrap",
+          "manual execution without enrollment",
+          "update the evidence if enrollment is attempted later or the disposition changes",
+          "require successful immutable publication and explicit owner adoption",
+          "publication alone does not authorize amended cleanup",
+          "after adoption, record its qualified immutable release tag and the resolved policy revision in existing task-bound cleanup evidence as `cleanup_amendment`",
+          "preserve the original task pin and provenance"
         ]
       },
       {
@@ -573,7 +576,14 @@
           "only to the historical pin's superseded cleanup provisions",
           "the original task pin, provenance, and unrelated gates remain unchanged",
           "historical manual task without a structured record, use existing task-bound evidence",
-          "creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite"
+          "creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite",
+          "record exact task root enrollment disposition and rationale at bootstrap",
+          "manual execution without enrollment",
+          "update the evidence if enrollment is attempted later or the disposition changes",
+          "require successful immutable publication and explicit owner adoption",
+          "publication alone does not authorize amended cleanup",
+          "after adoption, record its qualified immutable release tag and the resolved policy revision in existing task-bound cleanup evidence as `cleanup_amendment`",
+          "preserve the original task pin and provenance"
         ]
       },
       {
@@ -586,7 +596,26 @@
           "only to the historical pin's superseded cleanup provisions",
           "the original task pin, provenance, and unrelated gates remain unchanged",
           "historical manual task without a structured record, use existing task-bound evidence",
-          "creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite"
+          "creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite",
+          "verify bootstrap evidence records the exact task root enrollment disposition and rationale",
+          "manual execution without enrollment",
+          "require successful immutable publication and explicit owner adoption",
+          "publication alone does not authorize amended cleanup",
+          "after adoption, record its qualified immutable release tag and the resolved policy revision in existing task-bound cleanup evidence as `cleanup_amendment`",
+          "preserve the original task pin and provenance"
+        ]
+      },
+      {
+        "skill": "delegation-executor",
+        "heading": "Verify the task before editing",
+        "end_heading": "Xcode MCP workspace targeting",
+        "required": [
+          "At execution-mode bootstrap, record the exact canonical task root's enrollment disposition, supporting evidence, and rationale in existing task-bound evidence",
+          "including manual execution without an mcp enrollment attempt",
+          "A supported `never-enrolled` disposition does not require mcp connectivity",
+          "`UNKNOWN_REPO` is not proof of non-enrollment",
+          "Update the same evidence if enrollment is attempted later or the disposition changes",
+          "Do not add a task-record schema"
         ]
       },
       {
@@ -601,7 +630,15 @@
           "Immediately before force removal, reverify target identity, integration, applicable registration disposition, protected-data boundaries, and the absence of unrelated changes",
           "Locked worktrees, ambiguous refusals, permission errors, and unexpected conditions do not permit force removal",
           "Post-cleanup verification follows the recorded enrollment disposition",
-          "Worktree-local qualification, review, `.chatgpt`, and bookkeeping records are disposable"
+          "Worktree-local qualification, review, `.chatgpt`, and bookkeeping records are disposable",
+          "verify the resolved target remains inside the exact task root before destructive operations",
+          "do not follow symlinks into external resources",
+          "verify filesystem-path absence and git worktree-registration absence",
+          "remove only an integrated local branch with ordinary `git branch -d`",
+          "leave cleanup pending while a registration remains",
+          "integration is unverified",
+          "do not run `git worktree prune`",
+          "reuse verified prior removal evidence unless contrary evidence or credible drift appears"
         ]
       },
       {
@@ -619,7 +656,15 @@
           "Immediately before force removal, reverify target identity, integration, applicable registration disposition, protected-data boundaries, and the absence of unrelated changes",
           "Locked worktrees, ambiguous refusals, permission errors, and unexpected conditions do not permit force removal",
           "Post-cleanup verification follows the recorded enrollment disposition",
-          "Worktree-local qualification, review, `.chatgpt`, and bookkeeping records are disposable"
+          "Worktree-local qualification, review, `.chatgpt`, and bookkeeping records are disposable",
+          "verify the resolved target remains inside the exact task root before destructive operations",
+          "do not follow symlinks into external resources",
+          "verify filesystem-path absence and git worktree-registration absence",
+          "verify that only an integrated local branch was removed with ordinary `git branch -d`",
+          "leave cleanup pending while a registration remains",
+          "integration is unverified",
+          "do not run `git worktree prune`",
+          "reuse verified prior removal evidence unless contrary evidence or credible drift appears"
         ]
       },
       {
@@ -642,11 +687,111 @@
           "A never-enrolled root needs no registry check",
           "A registered or potentially outstanding root uses the existing registration-removal checks",
           "Reuse verified prior removal evidence unless contrary evidence or credible drift appears",
-          "Eligibility does not establish successful removal"
+          "Eligibility does not establish successful removal",
+          "before accepting a cleanup-complete report, verify exact canonical filesystem path absence and git worktree registration absence for every task worktree",
+          "verify that an integrated task branch was removed with ordinary `git branch -d` and is absent",
+          "leave cleanup pending if registration remains, integration is unverified, or removal fails",
+          "do not add unconditional registry or active-root checks for never-enrolled",
+          "use existing checks for registered or potentially outstanding roots",
+          "reuse verified prior removal evidence unless contrary evidence or credible drift appears"
         ]
       }
     ],
-    "issue_47_scenario_contracts": [
+    "acceptance_criteria": {
+      "AC1": {
+        "scenarios": [
+          "AC1-TASK-CLEANUP-NEVER-ENROLLED",
+          "BOOTSTRAP-TASK-ROOT-ENROLLMENT"
+        ]
+      },
+      "AC2": {
+        "scenarios": [
+          "AC2-TASK-CLEANUP-UNKNOWN-REPO"
+        ]
+      },
+      "AC3": {
+        "scenarios": [
+          "AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL"
+        ]
+      },
+      "AC4": {
+        "scenarios": [
+          "AC4-TASK-CLEANUP-IGNORED-DATA"
+        ]
+      },
+      "AC5": {
+        "scenarios": [
+          "AC5-TASK-CLEANUP-SOLE-COPY-RECORDS"
+        ]
+      },
+      "AC6": {
+        "scenarios": [
+          "AC6-TASK-CLEANUP-PROTECTED-DATA",
+          "PATH-CONTAINMENT-SYMLINK-ESCAPE"
+        ]
+      },
+      "AC7": {
+        "scenarios": [
+          "AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY",
+          "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION"
+        ]
+      },
+      "AC8": {
+        "scenarios": [
+          "AC8-TASK-CLEANUP-POST-VERIFICATION",
+          "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
+          "CLEANUP-REMOVAL-VERIFICATION",
+          "CLEANUP-STALE-REGISTRATION-PENDING"
+        ]
+      },
+      "AC9": {
+        "scenarios": [
+          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT",
+          "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE"
+        ]
+      },
+      "AC10": {
+        "scenarios": [
+          "AC1-TASK-CLEANUP-NEVER-ENROLLED",
+          "AC2-TASK-CLEANUP-UNKNOWN-REPO",
+          "AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL",
+          "AC4-TASK-CLEANUP-IGNORED-DATA",
+          "AC5-TASK-CLEANUP-SOLE-COPY-RECORDS",
+          "AC6-TASK-CLEANUP-PROTECTED-DATA",
+          "AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY",
+          "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION",
+          "AC8-TASK-CLEANUP-POST-VERIFICATION",
+          "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
+          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT",
+          "PATH-CONTAINMENT-SYMLINK-ESCAPE",
+          "CLEANUP-REMOVAL-VERIFICATION",
+          "CLEANUP-STALE-REGISTRATION-PENDING",
+          "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE",
+          "BOOTSTRAP-TASK-ROOT-ENROLLMENT"
+        ],
+        "qualification_suites": [
+          "test_workflow_contract.py",
+          "test_skill_distribution.py",
+          "test_distribution_smoke.py",
+          "test_primary_main_fast_forward.py",
+          "test_skill_releases.py",
+          "test_github_releases.py"
+        ],
+        "independent_review": "Independent local Cubic or a separate non-authoring Codex review, including correction deltas"
+      }
+    },
+    "bootstrap": {
+      "heading": "4. Worktrees and Delegation v3",
+      "end_heading": "5. Validation and coverage",
+      "required": [
+        "record the exact canonical task root's enrollment disposition, supporting evidence, and rationale in existing task-bound evidence",
+        "including manual execution that does not attempt mcp enrollment",
+        "a supported `never-enrolled` disposition does not require mcp connectivity",
+        "`unknown_repo` is not proof of non-enrollment",
+        "if enrollment is attempted later or the disposition changes, update the same evidence"
+      ]
+    },
+    "task_worktree_cleanup_scenario_contracts": [
       {
         "path": "skills/delegation-executor/tests/scenarios.md",
         "scenario_ids": [
@@ -660,7 +805,11 @@
           "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION",
           "AC8-TASK-CLEANUP-POST-VERIFICATION",
           "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
-          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT"
+          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT",
+          "PATH-CONTAINMENT-SYMLINK-ESCAPE",
+          "CLEANUP-REMOVAL-VERIFICATION",
+          "CLEANUP-STALE-REGISTRATION-PENDING",
+          "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE"
         ]
       },
       {
@@ -676,54 +825,297 @@
           "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION",
           "AC8-TASK-CLEANUP-POST-VERIFICATION",
           "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
-          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT"
+          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT",
+          "PATH-CONTAINMENT-SYMLINK-ESCAPE",
+          "CLEANUP-REMOVAL-VERIFICATION",
+          "CLEANUP-STALE-REGISTRATION-PENDING",
+          "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE"
+        ]
+      },
+      {
+        "path": "skills/development-orchestrator/tests/scenarios.md",
+        "scenario_ids": [
+          "BOOTSTRAP-TASK-ROOT-ENROLLMENT"
         ]
       }
     ],
-    "acceptance_criteria": {
-      "AC1": {"scenarios": ["AC1-TASK-CLEANUP-NEVER-ENROLLED"]},
-      "AC2": {"scenarios": ["AC2-TASK-CLEANUP-UNKNOWN-REPO"]},
-      "AC3": {"scenarios": ["AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL"]},
-      "AC4": {"scenarios": ["AC4-TASK-CLEANUP-IGNORED-DATA"]},
-      "AC5": {"scenarios": ["AC5-TASK-CLEANUP-SOLE-COPY-RECORDS"]},
-      "AC6": {"scenarios": ["AC6-TASK-CLEANUP-PROTECTED-DATA"]},
-      "AC7": {
+    "correction_scenario_contracts": [
+      {
+        "path": "skills/development-orchestrator/tests/scenarios.md",
         "scenarios": [
-          "AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY",
-          "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION"
+          {
+            "id": "BOOTSTRAP-TASK-ROOT-ENROLLMENT",
+            "required": [
+              "canonical root `/worktrees/sample-repo/task-a`",
+              "existing task evidence records `never-enrolled` and the rationale",
+              "execution is manual, enrollment was not attempted",
+              "record the exact task root, enrollment disposition, supporting evidence, and rationale at bootstrap",
+              "preserve the documented manual execution and non-enrollment rationale",
+              "update the same evidence if enrollment is attempted later or the disposition changes",
+              "a supported never-enrolled disposition does not require mcp connectivity"
+            ]
+          }
         ]
       },
-      "AC8": {
+      {
+        "path": "skills/delegation-executor/tests/scenarios.md",
         "scenarios": [
-          "AC8-TASK-CLEANUP-POST-VERIFICATION",
-          "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY"
+          {
+            "id": "AC1-TASK-CLEANUP-NEVER-ENROLLED",
+            "required": [
+              "exact canonical root `/worktrees/sample-repo/task-a`",
+              "records `never-enrolled`, and records the rationale",
+              "manual execution, no mcp enrollment was attempted",
+              "task-bound bootstrap history supports the disposition",
+              "mcp connectivity is unavailable",
+              "a supported `never-enrolled` disposition needs no mcp reconciliation"
+            ]
+          },
+          {
+            "id": "AC2-TASK-CLEANUP-UNKNOWN-REPO",
+            "required": [
+              "`unknown_repo` does not establish non-enrollment",
+              "keep the exact task root potentially outstanding"
+            ]
+          },
+          {
+            "id": "AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL",
+            "required": [
+              "verified prior removal evidence remains sufficient unless contrary evidence or credible drift appears",
+              "the exact git worktree registration is absent before cleanup is complete"
+            ]
+          },
+          {
+            "id": "AC4-TASK-CLEANUP-IGNORED-DATA",
+            "required": [
+              "do not inventory every artifact or require regeneration proofs",
+              "filesystem deletion remains contained under the exact verified task root"
+            ]
+          },
+          {
+            "id": "AC5-TASK-CLEANUP-SOLE-COPY-RECORDS",
+            "required": [
+              "worktree-local task records are not a cleanup prerequisite",
+              "filesystem deletion remains contained under the exact verified task root"
+            ]
+          },
+          {
+            "id": "AC6-TASK-CLEANUP-PROTECTED-DATA",
+            "required": [
+              "external symlink targets remain untouched",
+              "no filesystem deletion occurs outside the exact verified task root"
+            ]
+          },
+          {
+            "id": "AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY",
+            "required": [
+              "try ordinary removal first",
+              "allow one force only when refusal is caused solely by eligible disposable content",
+              "immediately reverify exact root, containment, integration, enrollment disposition, protected-data boundaries, and absence of unrelated changes"
+            ]
+          },
+          {
+            "id": "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION",
+            "required": [
+              "locked, ambiguous, permission, and unexpected failures do not trigger force removal",
+              "leave cleanup pending without broadening the target"
+            ]
+          },
+          {
+            "id": "AC8-TASK-CLEANUP-POST-VERIFICATION",
+            "required": [
+              "verify filesystem path absence and git worktree registration absence",
+              "remove only the safely integrated branch with ordinary `git branch -d`",
+              "a stale registration or failed removal remains pending"
+            ]
+          },
+          {
+            "id": "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
+            "required": [
+              "all three skills apply the same containment and removal checks",
+              "mcp checks continue to follow the recorded enrollment disposition"
+            ]
+          },
+          {
+            "id": "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT",
+            "required": [
+              "immutable release `2026.12.01` was successfully published",
+              "an explicit owner-adoption record names that release",
+              "require successful immutable publication and explicit owner adoption",
+              "publication alone does not authorize amended cleanup",
+              "preserve the original task pin and provenance"
+            ]
+          },
+          {
+            "id": "PATH-CONTAINMENT-SYMLINK-ESCAPE",
+            "required": [
+              "the external symlink target remains untouched",
+              "no destructive operation occurs outside the exact verified task root"
+            ]
+          },
+          {
+            "id": "CLEANUP-REMOVAL-VERIFICATION",
+            "required": [
+              "filesystem path absence is verified",
+              "git worktree registration absence is verified",
+              "remove the safely integrated branch with ordinary `git branch -d`",
+              "report cleanup complete only after all three checks pass"
+            ]
+          },
+          {
+            "id": "CLEANUP-STALE-REGISTRATION-PENDING",
+            "required": [
+              "the path is absent while git still reports the worktree registration",
+              "cleanup remains pending",
+              "do not prune or manually delete registration metadata"
+            ]
+          },
+          {
+            "id": "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE",
+            "required": [
+              "the immutable release was successfully published",
+              "explicit owner adoption has not occurred",
+              "publication alone does not authorize amended cleanup",
+              "the historical task keeps its original pin and provenance"
+            ]
+          }
         ]
       },
-      "AC9": {"scenarios": ["AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT"]},
-      "AC10": {
+      {
+        "path": "skills/development-review/tests/scenarios.md",
         "scenarios": [
-          "AC1-TASK-CLEANUP-NEVER-ENROLLED",
-          "AC2-TASK-CLEANUP-UNKNOWN-REPO",
-          "AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL",
-          "AC4-TASK-CLEANUP-IGNORED-DATA",
-          "AC5-TASK-CLEANUP-SOLE-COPY-RECORDS",
-          "AC6-TASK-CLEANUP-PROTECTED-DATA",
-          "AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY",
-          "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION",
-          "AC8-TASK-CLEANUP-POST-VERIFICATION",
-          "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
-          "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT"
-        ],
-        "qualification_suites": [
-          "test_workflow_contract.py",
-          "test_skill_distribution.py",
-          "test_distribution_smoke.py",
-          "test_primary_main_fast_forward.py",
-          "test_skill_releases.py",
-          "test_github_releases.py"
-        ],
-        "independent_review": "Independent local Cubic or a separate non-authoring Codex review, including correction deltas"
+          {
+            "id": "AC1-TASK-CLEANUP-NEVER-ENROLLED",
+            "required": [
+              "exact canonical root `/worktrees/sample-repo/task-a`",
+              "records `never-enrolled`, and records the rationale",
+              "manual execution, no mcp enrollment was attempted",
+              "task-bound bootstrap history supports the disposition",
+              "mcp connectivity is unavailable",
+              "a supported `never-enrolled` disposition needs no mcp reconciliation"
+            ]
+          },
+          {
+            "id": "AC2-TASK-CLEANUP-UNKNOWN-REPO",
+            "required": [
+              "`unknown_repo` does not establish non-enrollment",
+              "keep the exact task root potentially outstanding"
+            ]
+          },
+          {
+            "id": "AC3-TASK-CLEANUP-VERIFIED-PRIOR-REMOVAL",
+            "required": [
+              "verified prior removal evidence remains sufficient unless contrary evidence or credible drift appears",
+              "the exact git worktree registration is absent before cleanup is complete"
+            ]
+          },
+          {
+            "id": "AC4-TASK-CLEANUP-IGNORED-DATA",
+            "required": [
+              "do not inventory every artifact or require regeneration proofs",
+              "filesystem deletion remains contained under the exact verified task root"
+            ]
+          },
+          {
+            "id": "AC5-TASK-CLEANUP-SOLE-COPY-RECORDS",
+            "required": [
+              "worktree-local task records are not a cleanup prerequisite",
+              "filesystem deletion remains contained under the exact verified task root"
+            ]
+          },
+          {
+            "id": "AC6-TASK-CLEANUP-PROTECTED-DATA",
+            "required": [
+              "external symlink targets remain untouched",
+              "no filesystem deletion occurs outside the exact verified task root"
+            ]
+          },
+          {
+            "id": "AC7-TASK-CLEANUP-FORCE-DISPOSABLE-ONLY",
+            "required": [
+              "try ordinary removal first",
+              "allow one force only when refusal is caused solely by eligible disposable content",
+              "immediately reverify exact root, containment, integration, enrollment disposition, protected-data boundaries, and absence of unrelated changes"
+            ]
+          },
+          {
+            "id": "AC7-TASK-CLEANUP-FORCE-LOCKED-AMBIGUOUS-PERMISSION",
+            "required": [
+              "locked, ambiguous, permission, and unexpected failures do not trigger force removal",
+              "leave cleanup pending without broadening the target"
+            ]
+          },
+          {
+            "id": "AC8-TASK-CLEANUP-POST-VERIFICATION",
+            "required": [
+              "verify filesystem path absence and git worktree registration absence",
+              "remove only the safely integrated branch with ordinary `git branch -d`",
+              "a stale registration or failed removal remains pending"
+            ]
+          },
+          {
+            "id": "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
+            "required": [
+              "all three skills apply the same containment and removal checks",
+              "mcp checks continue to follow the recorded enrollment disposition"
+            ]
+          },
+          {
+            "id": "AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT",
+            "required": [
+          "immutable release `2026.12.01` was successfully published",
+          "an explicit owner-adoption record names that release",
+              "require successful immutable publication and explicit owner adoption",
+              "publication alone does not authorize amended cleanup",
+              "preserve the original task pin and provenance"
+            ]
+          },
+          {
+            "id": "PATH-CONTAINMENT-SYMLINK-ESCAPE",
+            "required": [
+              "the external symlink target remains untouched",
+              "no destructive operation occurs outside the exact verified task root"
+            ]
+          },
+          {
+            "id": "CLEANUP-REMOVAL-VERIFICATION",
+            "required": [
+              "filesystem path absence is verified",
+              "git worktree registration absence is verified",
+              "remove the safely integrated branch with ordinary `git branch -d`",
+              "report cleanup complete only after all three checks pass"
+            ]
+          },
+          {
+            "id": "CLEANUP-STALE-REGISTRATION-PENDING",
+            "required": [
+              "the path is absent while git still reports the worktree registration",
+              "cleanup remains pending",
+              "do not prune or manually delete registration metadata"
+            ]
+          },
+          {
+            "id": "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE",
+            "required": [
+              "the immutable release was successfully published",
+              "explicit owner adoption has not occurred",
+              "publication alone does not authorize amended cleanup",
+              "the historical task keeps its original pin and provenance"
+            ]
+          }
+        ]
       }
+    ],
+    "decision_provenance": {
+      "heading": "Issue #47: conditional task-worktree cleanup",
+      "end_heading": null,
+      "required": [
+        "conflicting cleanup provisions from issues #29 and #38",
+        "issue #40 is the separate evidence-only connector identity investigation",
+        "not a source of conflicting cache-preservation rules",
+        "preserve its historical outcome, rationale, evidence, source revision, and evaluation disposition",
+        "do not reclassify it as qualification for this amendment"
+      ]
     }
   }
 }
