@@ -9,6 +9,8 @@ This Skill helps ChatGPT sessions select approved work, prepare task handoffs, a
 
 ## Policy and evidence
 
+For a historical task that adopts a cleanup amendment, use its qualified immutable release tag and the full policy revision resolved from that tag. Record both in existing task-bound cleanup evidence as the `cleanup_amendment` reference. Apply the amendment only to the historical pin's superseded cleanup provisions; the original task pin, provenance, and unrelated gates remain unchanged. For a historical manual task without a structured record, use existing task-bound evidence such as the issue, PR, approved plan, branch, and worktree identity. Creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite; no new task-record schema or migration framework is required.
+
 For a new task, select the newest eligible qualified immutable published CalVer release and record its tag and policy identity once. Read [the canonical policy for this release](https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md) before applying it. The packager replaces the token in this policy link; an unresolved template is not an approved distribution.
 
 Successful release workflow execution and immutable publication qualify the release after its changes have merged into protected `main` through review and CI and the owner dispatches the workflow against that revision. The resolver checks the published release, tag, frozen context, provenance sidecars and successful workflow identity. Record the existing `task_pin` and `provenance` fields, including source, policy, builder, owner and payload identities. Ignore GitHub's `latest` designation. Missing or inconsistent evidence for the newest eligible release blocks selection without fallback. If no qualified immutable release exists, return `NO_IMMUTABLE_RELEASE`.
@@ -48,6 +50,12 @@ When asked to find or prepare the next task:
 For new-project planning, design decisions, or delegation preparation, gather repository evidence first. Ask only about choices that materially affect scope, architecture, security, or acceptance; resolve routine technical choices within the approved design and leave material owner decisions with the owner.
 
 ## Post-closeout issue discovery
+
+Record the exact task worktree's enrollment disposition, supporting evidence, and rationale in cleanup evidence. Use three dispositions: `never-enrolled`, `registered-or-potentially-outstanding`, and `previously-registered-with-verified-removal`. `UNKNOWN_REPO` is not evidence of non-enrollment. An enrollment attempt with an unknown outcome remains potentially outstanding. A trusted registration for the exact task root overrides a prior `never-enrolled` finding. When reconciliation applies, use the correct stable repository ID and canonical root.
+
+When local cleanup is the closeout disposition, verify that the exact worktree path and integrated task branch are absent. Follow the recorded enrollment disposition for post-cleanup verification. A never-enrolled root needs no registry check. A registered or potentially outstanding root uses the existing registration-removal checks. Reuse verified prior removal evidence unless contrary evidence or credible drift appears.
+
+A verified remote-only disposition makes local cleanup inapplicable; do not require a local worktree, branch, or MCP registration for that path. For owner-approved intentional retention, verify the exact worktree identity, record the reason and deferred cleanup, and keep the worktree intentionally present. Run discovery after other required checks pass; retention alone is not `MERGED — CLEANUP PENDING`. Eligibility does not establish successful removal.
 
 When `development-review` invokes post-closeout discovery after an eligible verified closeout, reuse Approved backlog qualification and return one report. Include named active work in concurrency checks, while continuing to assess other candidates even when work is active.
 

@@ -304,6 +304,104 @@ class WorkflowContractTests(unittest.TestCase):
                 for forbidden in contract["forbidden"]:
                     self.assertNotIn(forbidden.casefold(), section)
 
+    def test_issue_47_cleanup_amendment_contract_covers_policy_and_skills(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+        contract = fixture["cleanup_amendment_contract"]
+        policy = self._markdown_section(
+            (ROOT / "docs" / "PROCESS.md").read_text(),
+            contract["policy"]["heading"],
+            contract["policy"]["end_heading"],
+        )
+        for required in contract["policy"]["required"]:
+            with self.subTest(surface="policy", required=required):
+                self.assertIn(required.casefold(), policy)
+
+        adoption = self._markdown_section(
+            (ROOT / "docs" / "PROCESS.md").read_text(),
+            contract["adoption"]["heading"],
+            contract["adoption"]["end_heading"],
+        )
+        for required in contract["adoption"]["required"]:
+            with self.subTest(surface="adoption", required=required):
+                self.assertIn(required.casefold(), adoption)
+
+        for skill_contract in contract["skill_contracts"]:
+            skill = (
+                ROOT / "skills" / skill_contract["skill"] / "SKILL.md"
+            ).read_text()
+            section = self._markdown_section(
+                skill,
+                skill_contract["heading"],
+                skill_contract["end_heading"],
+            )
+            for required in skill_contract["required"]:
+                with self.subTest(
+                    skill=skill_contract["skill"],
+                    heading=skill_contract["heading"],
+                    required=required,
+                ):
+                    self.assertIn(required.casefold(), section)
+
+    def test_issue_47_cleanup_scenarios_have_fresh_independent_evaluations(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+        cleanup_contract = fixture["cleanup_amendment_contract"]
+        acceptance_criteria = cleanup_contract["acceptance_criteria"]
+        self.assertEqual(
+            {f"AC{number}" for number in range(1, 11)},
+            set(acceptance_criteria),
+        )
+        registered_scenarios = {
+            scenario_id
+            for scenario_contract in cleanup_contract["issue_47_scenario_contracts"]
+            for scenario_id in scenario_contract["scenario_ids"]
+        }
+        for criterion, details in acceptance_criteria.items():
+            with self.subTest(criterion=criterion):
+                self.assertTrue(set(details["scenarios"]) <= registered_scenarios)
+        self.assertEqual(
+            {
+                "test_workflow_contract.py",
+                "test_skill_distribution.py",
+                "test_distribution_smoke.py",
+                "test_primary_main_fast_forward.py",
+                "test_skill_releases.py",
+                "test_github_releases.py",
+            },
+            set(acceptance_criteria["AC10"]["qualification_suites"]),
+        )
+        self.assertIn(
+            "independent",
+            acceptance_criteria["AC10"]["independent_review"].casefold(),
+        )
+        run_id_pattern = (
+            r"independent evaluator `"
+            r"[0-9a-f]{8}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{12}`"
+        )
+        for contract in fixture["cleanup_amendment_contract"][
+            "issue_47_scenario_contracts"
+        ]:
+            scenarios = (ROOT / contract["path"]).read_text().casefold()
+            sections = {}
+            for section in scenarios.split("\n## "):
+                heading, _, body = section.partition("\n")
+                sections[heading] = body
+            for scenario_id in contract["scenario_ids"]:
+                with self.subTest(path=contract["path"], scenario=scenario_id):
+                    self.assertIn(scenario_id.casefold(), sections)
+                    section = sections[scenario_id.casefold()]
+                    self.assertIn("**issue #47 evaluation:** pass", section)
+                    self.assertRegex(section, run_id_pattern)
+                    self.assertIn("- evaluator:", section)
+                    self.assertIn("- observed result:", section)
+                    self.assertIn("- response excerpt:", section)
+                    self.assertIn("- evidence:", section)
+
     def test_cleanup_scenarios_cover_disposable_cache_boundaries(self) -> None:
         fixture = json.loads(
             (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
