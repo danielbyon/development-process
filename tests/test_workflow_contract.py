@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from unittest.mock import patch
@@ -32,6 +33,24 @@ class WorkflowContractTests(unittest.TestCase):
         except ValueError:
             raise AssertionError(f"Markdown section boundary not found: {end_title}")
         return "\n".join(lines[target_index + 1:end_index]).casefold()
+
+    @staticmethod
+    def _latest_scenario_evaluation_status(section: str) -> str | None:
+        statuses = re.findall(
+            r"(?im)^\*\*issue #47 .*evaluation:\*\*\s*(pass|revise|blocked|fail)\s*$",
+            section,
+        )
+        return statuses[-1].upper() if statuses else None
+
+    def test_latest_scenario_evaluation_overrides_historical_pass(self) -> None:
+        history = "\n".join(
+            (
+                "**Issue #47 correction evaluation:** PASS",
+                "**Issue #47 isolated re-evaluation:** REVISE",
+            )
+        )
+
+        self.assertEqual(self._latest_scenario_evaluation_status(history), "REVISE")
 
     def test_ci_packages_from_the_exact_pr_source_commit(self) -> None:
         workflow = yaml.safe_load(
@@ -416,12 +435,20 @@ class WorkflowContractTests(unittest.TestCase):
                 with self.subTest(path=contract["path"], scenario=scenario_id):
                     self.assertIn(scenario_id.casefold(), sections)
                     section = sections[scenario_id.casefold()]
-                    self.assertIn("**issue #47 evaluation:** pass", section)
+                    self.assertEqual(
+                        self._latest_scenario_evaluation_status(section), "PASS"
+                    )
                     self.assertRegex(section, run_id_pattern)
-                    self.assertIn("- evaluator:", section)
-                    self.assertIn("- observed result:", section)
-                    self.assertIn("- response excerpt:", section)
-                    self.assertIn("- evidence:", section)
+                    for field in (
+                        "evaluator",
+                        "observed result",
+                        "response excerpt",
+                        "evidence",
+                    ):
+                        self.assertTrue(
+                            f"- {field}:" in section
+                            or f"- correction {field}:" in section
+                        )
 
         for contract in cleanup_contract["correction_scenario_contracts"]:
             scenarios = (ROOT / contract["path"]).read_text().casefold()
@@ -436,7 +463,9 @@ class WorkflowContractTests(unittest.TestCase):
                     section = sections[scenario_id.casefold()]
                     for required in correction["required"]:
                         self.assertIn(required.casefold(), section)
-                    self.assertIn("**issue #47 correction evaluation:** pass", section)
+                    self.assertEqual(
+                        self._latest_scenario_evaluation_status(section), "PASS"
+                    )
                     self.assertRegex(section, run_id_pattern)
                     self.assertRegex(
                         section,
@@ -446,6 +475,85 @@ class WorkflowContractTests(unittest.TestCase):
                     self.assertIn("- correction observed result:", section)
                     self.assertIn("- correction response excerpt:", section)
                     self.assertIn("- correction evidence:", section)
+
+    def test_remote_only_synchronization_evaluations_are_fresh_and_isolated(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+        cleanup_contract = fixture["cleanup_amendment_contract"]
+        review_contract = next(
+            contract
+            for contract in cleanup_contract["correction_scenario_contracts"]
+            if contract["path"]
+            == "skills/development-review/tests/scenarios.md"
+        )
+        case_ids = [
+            scenario["id"]
+            for scenario in review_contract["scenarios"]
+            if scenario["id"].startswith("REMOTE-ONLY-")
+        ]
+        self.assertEqual(
+            set(case_ids),
+            {
+                "REMOTE-ONLY-NO-PRIMARY-CHECKOUT",
+                "REMOTE-ONLY-PRIMARY-CHECKOUT-SYNC",
+                "REMOTE-ONLY-PRIMARY-SYNC-UNVERIFIED",
+            },
+        )
+
+        markdown = (
+            ROOT / "skills" / "development-review" / "tests" / "scenarios.md"
+        ).read_text().casefold()
+        sections = {}
+        for item in markdown.split("\n## "):
+            heading, _, body = item.partition("\n")
+            sections[heading] = body
+
+        cross_surface_id = "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY"
+        scenario_ids = [cross_surface_id, *case_ids]
+        evaluator_ids = []
+        evaluator_id_pattern = (
+            r"independent evaluator `"
+            r"([0-9a-f]{8}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{12})`"
+        )
+        f7_status_pattern = re.compile(
+            r"(?im)^\*\*issue #47 f7 evaluation:\*\*\s*(pass|revise|blocked|fail)\s*$"
+        )
+        for scenario_id in scenario_ids:
+            with self.subTest(scenario=scenario_id):
+                self.assertIn(scenario_id.casefold(), sections)
+                section = sections[scenario_id.casefold()]
+                self.assertEqual(
+                    self._latest_scenario_evaluation_status(section), "PASS"
+                )
+                f7_records = list(f7_status_pattern.finditer(section))
+                self.assertTrue(f7_records)
+                record_start = f7_records[-1].start()
+                record_end = section.find("\n\n", record_start)
+                record = section[record_start:record_end if record_end >= 0 else None]
+                self.assertIn("no other case or expected outcome was supplied", record)
+                record_ids = re.findall(evaluator_id_pattern, record)
+                self.assertEqual(len(record_ids), 1)
+                self.assertIn("runner did not expose an execution uuid", record)
+                evaluator_ids.extend(record_ids)
+
+        self.assertEqual(len(evaluator_ids), len(scenario_ids))
+        self.assertEqual(len(set(evaluator_ids)), len(scenario_ids))
+
+        cross_surface = sections[cross_surface_id.casefold()]
+        historical, separator, _ = cross_surface.partition(
+            "**issue #47 f7 evaluation:**"
+        )
+        self.assertTrue(separator)
+        self.assertIn(
+            "oddish; execution id `01a210a4-74de-7400-9281-6b2338ef3b3e`",
+            historical,
+        )
+        self.assertEqual(
+            self._latest_scenario_evaluation_status(historical), "REVISE"
+        )
 
     def test_cleanup_scenarios_cover_disposable_cache_boundaries(self) -> None:
         fixture = json.loads(
@@ -499,6 +607,75 @@ class WorkflowContractTests(unittest.TestCase):
                     self.assertIn("- observed result:", current_record)
                     self.assertIn("- evidence:", current_record)
                     self.assertRegex(current_record, run_id_pattern)
+
+    def test_cache_preservation_corrections_use_latest_isolated_evaluations(self) -> None:
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
+        )
+        contracts = [
+            contract
+            for contract in fixture["scenario_contracts"]
+            if contract["path"]
+            in {
+                "skills/development-review/tests/scenarios.md",
+                "skills/delegation-executor/tests/scenarios.md",
+            }
+        ]
+        self.assertEqual(len(contracts), 2)
+        historical_ids = {
+            "skills/development-review/tests/scenarios.md":
+                "01a1fe00-5594-7fc2-b361-f32790543e77",
+            "skills/delegation-executor/tests/scenarios.md":
+                "01a1fdde-edf8-7e11-b0f1-c71162f0f445",
+        }
+        run_record_pattern = re.compile(
+            r"(?im)^\*\*(?:correction )?run record:\*\*\s*"
+            r"(pass|revise|blocked|fail)\b"
+        )
+        evaluator_id_pattern = re.compile(
+            r"independent evaluator `"
+            r"([0-9a-f]{8}-[0-9a-f]{4}-"
+            r"[0-9a-f]{4}-[0-9a-f]{4}-"
+            r"[0-9a-f]{12})`"
+        )
+        correction_ids = []
+
+        for contract in contracts:
+            with self.subTest(path=contract["path"]):
+                markdown = (ROOT / contract["path"]).read_text().casefold()
+                sections = {}
+                for item in markdown.split("\n## "):
+                    heading, _, body = item.partition("\n")
+                    sections[heading.strip()] = body
+                section = sections["disposable-tool-cache-preservation"]
+
+                current_expectation = section.split("**run record:**", maxsplit=1)[0]
+                for required in contract["preservation_expected_outcome"]:
+                    self.assertIn(required.casefold(), current_expectation)
+                self.assertIn("historical evidence note", current_expectation)
+                self.assertIn(historical_ids[contract["path"]], section)
+
+                records = list(run_record_pattern.finditer(section))
+                self.assertGreaterEqual(len(records), 2)
+                latest = records[-1]
+                self.assertEqual(latest.group(1).upper(), "PASS")
+                record_end = section.find("\n\n", latest.end())
+                current_record = section[
+                    latest.end():record_end if record_end >= 0 else None
+                ]
+                self.assertIn("fresh isolated agent id", current_record)
+                self.assertIn("runner did not expose an execution uuid", current_record)
+                self.assertIn("only this scenario's setup and prompt", current_record)
+                self.assertIn(
+                    "no other case or expected outcome was supplied", current_record
+                )
+                ids = evaluator_id_pattern.findall(current_record)
+                self.assertEqual(len(ids), 1)
+                self.assertNotIn(historical_ids[contract["path"]], ids)
+                correction_ids.extend(ids)
+
+        self.assertEqual(len(correction_ids), 2)
+        self.assertEqual(len(set(correction_ids)), 2)
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):

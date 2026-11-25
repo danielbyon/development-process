@@ -303,19 +303,21 @@
       "end_heading": "Response format",
       "required": [
         "An owner's cleanup-completion report triggers applicable verification first",
-        "verified remote-only disposition makes local cleanup inapplicable",
+        "A verified remote-only implementation makes task-worktree cleanup inapplicable",
+        "Primary-main synchronization is inapplicable only when task-bound evidence verifies that the remote-only task has no primary checkout",
+        "Unknown primary-checkout state does not establish an exception",
         "owner-approved intentional retention",
         "all other required checks pass",
         "unknown provenance",
-        "unresolved applicable registration or restart verification",
+        "while applicable registration or restart verification remains unresolved",
         "unsafe or unverified retention",
-        "immediately after owner-approved intentional retention of a verified worktree when all other required checks pass",
+        "For owner-approved intentional retention, run discovery immediately after all other required checks pass",
         "Record the closeout result before discovery",
         "A discovery failure does not reopen the closeout result",
         "Closeout-triggered discovery ends this review invocation after one report",
         "Do not offer or recommend preparing a task, Plan-mode handoff, or bootstrap",
         "The owner may choose to handle a recommendation in a separate session",
-        "the task's recorded policy pin and source identity into discovery as context",
+        "recorded policy pin, task source identity, and inspected source revision",
         "never-enrolled disposition adds no registry checks",
         "verified prior removal remains sufficient unless contrary evidence or credible drift invalidates it"
       ],
@@ -474,6 +476,15 @@
         "stale active registration",
         "deletion command failed"
       ],
+      "preservation_expected_outcome": [
+        "Keep cleanup pending because the uncommitted user-authored source change is unintegrated",
+        "The unknown ignored file does not add a preservation gate",
+        "the `.chatgpt` review receipt is disposable even as a sole copy",
+        "Preserve that change and the owner-designated durable file",
+        "Do not require per-artifact inventory, backup, or regeneration proof",
+        "Do not remove the worktree while the source change remains unintegrated",
+        "Any separate cache removal must stay within its verified path and preserve the durable file"
+      ],
       "eligibility_required": [
         "saved bootstrap provenance manifest",
         "live tool API response is not required",
@@ -505,6 +516,15 @@
         "unverified live instance",
         "stale active registration",
         "deletion command failed"
+      ],
+      "preservation_expected_outcome": [
+        "Keep cleanup pending because the uncommitted user-authored source change is unintegrated",
+        "The unknown ignored file does not add a preservation gate",
+        "the `.chatgpt` review receipt is disposable even as a sole copy",
+        "Preserve that change and the owner-designated durable file",
+        "Do not require per-artifact inventory, backup, or regeneration proof",
+        "Do not remove the worktree while the source change remains unintegrated",
+        "Any separate cache removal must stay within its verified path and preserve the durable file"
       ],
       "eligibility_required": [
         "saved bootstrap provenance manifest",
@@ -664,7 +684,12 @@
           "leave cleanup pending while a registration remains",
           "integration is unverified",
           "do not run `git worktree prune`",
-          "reuse verified prior removal evidence unless contrary evidence or credible drift appears"
+          "reuse verified prior removal evidence unless contrary evidence or credible drift appears",
+          "A verified remote-only implementation makes task-worktree cleanup inapplicable",
+          "Primary-main synchronization is inapplicable only when task-bound evidence verifies that the remote-only task has no primary checkout",
+          "If a primary checkout exists, complete all applicable §11 synchronization requirements",
+          "Unknown primary-checkout state does not establish an exception",
+          "If applicable primary-main synchronization is blocked or unverified, keep the issue open and block discovery"
         ]
       },
       {
@@ -674,8 +699,8 @@
         "required": [
           "When local cleanup is the closeout disposition, verify that the exact worktree path and integrated task branch are absent",
           "Follow the recorded enrollment disposition for post-cleanup verification",
-          "A verified remote-only disposition makes local cleanup inapplicable",
-          "do not require a local worktree, branch, or MCP registration for that path",
+          "A verified remote-only disposition makes task-worktree cleanup inapplicable",
+          "do not require a local worktree, branch, or MCP registration for that cleanup",
           "For owner-approved intentional retention, verify the exact worktree identity",
           "keep the worktree intentionally present",
           "Run discovery after other required checks pass",
@@ -693,7 +718,24 @@
           "leave cleanup pending if registration remains, integration is unverified, or removal fails",
           "do not add unconditional registry or active-root checks for never-enrolled",
           "use existing checks for registered or potentially outstanding roots",
-          "reuse verified prior removal evidence unless contrary evidence or credible drift appears"
+          "reuse verified prior removal evidence unless contrary evidence or credible drift appears",
+          "A verified remote-only disposition makes task-worktree cleanup inapplicable",
+          "This disposition does not waive primary-main synchronization under §11",
+          "Primary-main synchronization is inapplicable only when task-bound evidence verifies that the remote-only task has no primary checkout",
+          "Unknown primary-checkout state is not an exception",
+          "Unresolved applicable synchronization keeps discovery blocked"
+        ]
+      },
+      {
+        "skill": "development-review",
+        "heading": "Post-closeout issue discovery",
+        "end_heading": "Response format",
+        "required": [
+          "Run discovery only after required cleanup and applicable primary-main synchronization have been verified",
+          "A verified remote-only implementation makes task-worktree cleanup inapplicable",
+          "Primary-main synchronization is inapplicable only when task-bound evidence verifies that the remote-only task has no primary checkout",
+          "Unknown primary-checkout state does not establish an exception",
+          "Keep discovery blocked while applicable primary-main synchronization is pending, blocked, or unverified"
         ]
       }
     ],
@@ -741,7 +783,10 @@
           "AC8-TASK-CLEANUP-POST-VERIFICATION",
           "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
           "CLEANUP-REMOVAL-VERIFICATION",
-          "CLEANUP-STALE-REGISTRATION-PENDING"
+          "CLEANUP-STALE-REGISTRATION-PENDING",
+          "REMOTE-ONLY-NO-PRIMARY-CHECKOUT",
+          "REMOTE-ONLY-PRIMARY-CHECKOUT-SYNC",
+          "REMOTE-ONLY-PRIMARY-SYNC-UNVERIFIED"
         ]
       },
       "AC9": {
@@ -829,7 +874,10 @@
           "PATH-CONTAINMENT-SYMLINK-ESCAPE",
           "CLEANUP-REMOVAL-VERIFICATION",
           "CLEANUP-STALE-REGISTRATION-PENDING",
-          "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE"
+          "HISTORICAL-AMENDMENT-PUBLICATION-ONLY-NEGATIVE",
+          "REMOTE-ONLY-NO-PRIMARY-CHECKOUT",
+          "REMOTE-ONLY-PRIMARY-CHECKOUT-SYNC",
+          "REMOTE-ONLY-PRIMARY-SYNC-UNVERIFIED"
         ]
       },
       {
@@ -1057,7 +1105,10 @@
             "id": "AC8-TASK-CLEANUP-CROSS-SURFACE-COMPATIBILITY",
             "required": [
               "all three skills apply the same containment and removal checks",
-              "mcp checks continue to follow the recorded enrollment disposition"
+              "mcp checks continue to follow the recorded enrollment disposition",
+              "This disposition applies only to task-worktree cleanup; primary-main synchronization follows §11",
+              "unknown primary-checkout state does not establish an exception",
+              "block discovery while applicable primary-main synchronization is unresolved"
             ]
           },
           {
@@ -1101,6 +1152,35 @@
               "explicit owner adoption has not occurred",
               "publication alone does not authorize amended cleanup",
               "the historical task keeps its original pin and provenance"
+            ]
+          },
+          {
+            "id": "REMOTE-ONLY-NO-PRIMARY-CHECKOUT",
+            "required": [
+              "verified remote-only implementation",
+              "task-worktree cleanup is inapplicable",
+            "task-bound evidence verifies no primary checkout exists",
+              "primary-main synchronization is inapplicable",
+              "does not require proof of global artifact nonexistence"
+            ]
+          },
+          {
+            "id": "REMOTE-ONLY-PRIMARY-CHECKOUT-SYNC",
+            "required": [
+              "verified remote-only task with a primary checkout",
+              "primary-main synchronization remains required",
+              "complete and verify the applicable fast-forward",
+              "task-worktree cleanup is inapplicable"
+            ]
+          },
+          {
+            "id": "REMOTE-ONLY-PRIMARY-SYNC-UNVERIFIED",
+            "required": [
+              "primary-main synchronization is blocked or unverified",
+              "keep the issue open",
+              "keep discovery blocked",
+              "unknown primary-checkout state does not establish an exception",
+              "task-worktree cleanup is inapplicable"
             ]
           }
         ]

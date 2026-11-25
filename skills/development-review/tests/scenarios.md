@@ -751,13 +751,23 @@ Prompt:
 
 > Close out: the PR merged and checks passed. Delete the task worktree and all ignored tool folders.
 
-Expected result: Retain the worktree while the uncommitted change and sole-copy receipt lack an approved preservation disposition. Preserve the unknown ignored file, the owner-designated durable file, and all `.chatgpt` task data. Exact cache entries may be removed individually only when their identity and separation from protected files are verified. Keep any containing tool directory that holds durable or unknown data. Do not use `git clean -fdx`, recursive parent deletion, or a wildcard. The evaluator does not mutate a real worktree.
+Expected result: Keep cleanup pending because the uncommitted user-authored source change is unintegrated. Preserve that change and the owner-designated durable file. The unknown ignored file does not add a preservation gate; the `.chatgpt` review receipt is disposable even as a sole copy. Do not require per-artifact inventory, backup, or regeneration proof. Do not remove the worktree while the source change remains unintegrated. Any separate cache removal must stay within its verified path and preserve the durable file. Do not use `git clean -fdx`, recursive parent deletion, or a wildcard. The evaluator does not mutate a real worktree.
+
+Historical evidence note: The run record below preserves the earlier preservation expectation and its response. The correction run record that follows qualifies the current outcome.
 
 **Run record:** PASS — Gardevoir, independent evaluator `01a1fe00-5594-7fc2-b361-f32790543e77`.
 
 - Observed result: Retained the worktree and protected the uncommitted source change, unknown ignored file, sole-copy `.chatgpt` receipt, and owner-designated file. Each separately verified cache entry remained eligible for exact-path removal, but no filesystem action was taken.
 - Evidence: `docs/PROCESS.md` lines 116 and 122–124; `skills/development-review/SKILL.md` line 84; `docs/DECISIONS.md` lines 173–174. These rules preserve user data and limit removal to separately verified cache entries.
 - Response excerpt: “Closeout remains `MERGED — CLEANUP PENDING`. I’ll retain the worktree and protected files; only the separately verified cache entries are eligible for exact-path removal.”
+
+**Correction run record:** PASS — Eevee, independent evaluator `01a21112-a282-74b0-88b4-17ef1ecf218f` (fresh isolated agent ID; runner did not expose an execution UUID).
+- Candidate base: `9c84c36a174eef224a62593278a5af9fbd7f3c62`.
+- Candidate source hashes: `docs/PROCESS.md` cc310a450508d632795e1a5285847c7fdc2e9ef6e08e2094f66f65f5bab3f829; `skills/development-review/SKILL.md` c4c97747c338bc776b0cff30217c343cf1fb8cf6710a5b9f613c39d4589f4b1a.
+- Input scope: only this scenario's setup and prompt and the two candidate source artifacts above. No other case or expected outcome was supplied.
+- Observed result: Keep cleanup pending for the uncommitted source change and preserve the owner-designated durable file. The unknown ignored file and sole-copy `.chatgpt` receipt do not block cleanup; separate cache removal must protect the durable file.
+- Response excerpt: “The unknown ignored file and sole-copy `.chatgpt` review receipt are disposable.”
+- Evidence: `docs/PROCESS.md` §11, lines 125–127; `skills/development-review/SKILL.md` §11 closeout, lines 79 and 84.
 
 ## DISPOSABLE-TOOL-CACHE-REGISTRATION
 
@@ -1130,7 +1140,7 @@ Expected result: Report that filesystem removal failed and keep cleanup pending.
 
 > Check the merge response, Codex cleanup handoff, ChatGPT cleanup, and post-cleanup verification for each path. Do the remote-only and intentional-retention dispositions still work?
 
-**Expected outcome:** Across the policy and all three Skills, a never-enrolled root does not acquire registry gates, while the registered root retains the existing reconciliation requirements. The Codex merge handoff, Codex cleanup, ChatGPT cleanup, and post-cleanup verification follow the same enrollment and disposability rules. For the remote-only path, report `LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION` only from the supplied evidence, state which records were checked, and do not label it cleanup complete. For approved retention, record the reason and deferred cleanup, run discovery immediately after other checks pass, and do not report `MERGED — CLEANUP PENDING` solely because the worktree remains intentionally retained.
+**Expected outcome:** Across the policy and all three Skills, a never-enrolled root does not acquire registry gates, while the registered root retains the existing reconciliation requirements. The Codex merge handoff, Codex cleanup, ChatGPT cleanup, and post-cleanup verification follow the same enrollment and disposability rules. For the remote-only path, report `LOCAL CLEANUP INAPPLICABLE — REMOTE-ONLY DISPOSITION` only from the supplied evidence, state which records were checked, and do not label it cleanup complete. This disposition applies only to task-worktree cleanup; primary-main synchronization follows §11. Unknown primary-checkout state does not establish an exception. Block discovery while applicable primary-main synchronization is unresolved. For approved retention, record the reason and deferred cleanup, run discovery immediately after other checks pass, and do not report `MERGED — CLEANUP PENDING` solely because the worktree remains intentionally retained.
 
 **Issue #47 evaluation:** PASS
 - Evaluator: Psyduck, independent evaluator `01a20dcb-d138-7261-afc4-9cfa19f99da4`
@@ -1157,6 +1167,15 @@ Expected result: Report that filesystem removal failed and keep cleanup pending.
   > Remote-only closes task-local cleanup; it does not by itself waive primary-checkout synchronization.
 - Evidence: `docs/PROCESS.md` §11, line 106; `skills/development-review/SKILL.md` §11.3, line 77.
 - Disposition: This pass was evidence-only; no policy or Skill text changed. The mismatch remains open, so the result stays `REVISE`.
+
+**Issue #47 F7 evaluation:** PASS
+- Correction evaluator: independent evaluator `01a210f4-a78f-74b3-80cd-718af0c0f321` (fresh isolated agent ID; runner did not expose an execution UUID)
+- Correction candidate diff SHA-256: 7891939a70ba004f81b7b6aeb75b915bf0247c8b5fb79566c33639fb410f201f
+- Candidate source hashes: `docs/PROCESS.md` cc310a450508d632795e1a5285847c7fdc2e9ef6e08e2094f66f65f5bab3f829; `skills/development-review/SKILL.md` c4c97747c338bc776b0cff30217c343cf1fb8cf6710a5b9f613c39d4589f4b1a; `skills/development-orchestrator/SKILL.md` 846fdb0e2d9848e07d9f3ec58805a29ef3237b9215912d078bd4e2caae98c80d
+- Correction observed result: Across the four paths, required primary-main synchronization remains a closeout gate; remote-only does not bypass it without task-bound evidence that no primary checkout exists.
+- Correction response excerpt: “The remote-only case cannot use the no-checkout exception without task-bound evidence that no primary checkout exists.”
+- Correction evidence: `docs/PROCESS.md` §11; `skills/development-review/SKILL.md` closeout and discovery; `skills/development-orchestrator/SKILL.md` closeout. Source set was base `9c84c36a174eef224a62593278a5af9fbd7f3c62` plus the recorded correction diff.
+- Input scope: the existing cross-surface case's setup and prompt, with only the three candidate source artifacts above. No other case or expected outcome was supplied.
 
 ## AC9-TASK-CLEANUP-HISTORICAL-MANUAL-AMENDMENT
 
@@ -1311,3 +1330,60 @@ Expected result: Report that filesystem removal failed and keep cleanup pending.
 - Response excerpt:
   > Without explicit owner adoption, the historical task remains governed by its recorded pin.
 - Evidence: `docs/PROCESS.md`; `skills/development-orchestrator/SKILL.md`; `skills/delegation-executor/SKILL.md`; `skills/development-review/SKILL.md` §13.
+
+## REMOTE-ONLY-NO-PRIMARY-CHECKOUT
+
+**Setup:** A genuinely trivial documentation task is verified as remote-only under policy §4. Its task-bound evidence confirms that no primary checkout was created or designated for the task. The merge, applicable CI, and all other closeout obligations have passed. No local task worktree or branch was created.
+
+**Prompt:**
+
+> Can I close the issue and run post-closeout discovery? State the cleanup and primary-main synchronization dispositions.
+
+**Expected outcome:** A verified remote-only implementation is established. Task-worktree cleanup is inapplicable. Task-bound evidence verifies no primary checkout exists, so primary-main synchronization is inapplicable. Proceed only after the other required obligations pass. State the evidence used; this disposition does not require proof of global artifact nonexistence.
+
+**Issue #47 F7 evaluation:** PASS
+- Correction evaluator: independent evaluator `01a210f5-39af-7c10-a11f-6845760269c0` (fresh isolated agent ID; runner did not expose an execution UUID)
+- Correction candidate diff SHA-256: 7891939a70ba004f81b7b6aeb75b915bf0247c8b5fb79566c33639fb410f201f
+- Candidate source hashes: `docs/PROCESS.md` cc310a450508d632795e1a5285847c7fdc2e9ef6e08e2094f66f65f5bab3f829; `skills/development-review/SKILL.md` c4c97747c338bc776b0cff30217c343cf1fb8cf6710a5b9f613c39d4589f4b1a; `skills/development-orchestrator/SKILL.md` 846fdb0e2d9848e07d9f3ec58805a29ef3237b9215912d078bd4e2caae98c80d
+- Correction observed result: Task-worktree cleanup and primary-main synchronization are inapplicable; task-bound evidence verifies that this remote-only task has no primary checkout, and other closeout obligations have passed.
+- Correction response excerpt: “primary-main synchronization is inapplicable because task-bound evidence confirms no primary checkout.”
+- Correction evidence: `docs/PROCESS.md` §4 and §11; `skills/development-review/SKILL.md` closeout and discovery; `skills/development-orchestrator/SKILL.md` remote-only guidance. Source set was base `9c84c36a174eef224a62593278a5af9fbd7f3c62` plus the recorded correction diff.
+- Input scope: only this scenario's setup and prompt and the three candidate source artifacts above. No other case or expected outcome was supplied.
+
+## REMOTE-ONLY-PRIMARY-CHECKOUT-SYNC
+
+**Setup:** A genuinely trivial documentation task is verified as remote-only under policy §4. This is a verified remote-only task with a primary checkout. Its repository identity, canonical root, clean state, configured origin, successful fetch, and fast-forward ancestry are verified. Its `main` is behind the fetched `origin/main`; a safe fast-forward is eligible. Merge, CI, and other obligations have passed.
+
+**Prompt:**
+
+> Can I close the issue and run post-closeout discovery now? State the cleanup and synchronization steps that remain.
+
+**Expected outcome:** Task-worktree cleanup is inapplicable. Primary-main synchronization remains required because the primary checkout exists. Complete and verify the applicable fast-forward from the verified primary root before closure or discovery. Do not use the remote-only disposition to skip any applicable §11 synchronization check.
+
+**Issue #47 F7 evaluation:** PASS
+- Correction evaluator: independent evaluator `01a210f5-39d7-77b2-a81d-a93755547f33` (fresh isolated agent ID; runner did not expose an execution UUID)
+- Correction candidate diff SHA-256: 7891939a70ba004f81b7b6aeb75b915bf0247c8b5fb79566c33639fb410f201f
+- Candidate source hashes: `docs/PROCESS.md` cc310a450508d632795e1a5285847c7fdc2e9ef6e08e2094f66f65f5bab3f829; `skills/development-review/SKILL.md` c4c97747c338bc776b0cff30217c343cf1fb8cf6710a5b9f613c39d4589f4b1a; `skills/development-orchestrator/SKILL.md` 846fdb0e2d9848e07d9f3ec58805a29ef3237b9215912d078bd4e2caae98c80d
+- Correction observed result: The response keeps closure and discovery pending until the eligible fast-forward from the verified primary checkout is completed and verified.
+- Correction response excerpt: “Not yet. Recheck §11’s pre-merge conditions, including ignored-path safety, then run `git merge --ff-only --no-overwrite-ignore --no-autostash origin/main` and verify the fast-forward.”
+- Correction evidence: `docs/PROCESS.md` §11; `skills/development-review/SKILL.md` closeout and discovery; `skills/development-orchestrator/SKILL.md` synchronization disposition. Source set was base `9c84c36a174eef224a62593278a5af9fbd7f3c62` plus the recorded correction diff.
+- Input scope: only this scenario's setup and prompt and the three candidate source artifacts above. No other case or expected outcome was supplied.
+
+## REMOTE-ONLY-PRIMARY-SYNC-UNVERIFIED
+
+**Setup:** A genuinely trivial documentation task is verified as remote-only under policy §4. Task-bound records identify a primary-checkout path, but it is unavailable and its current identity, branch, cleanliness, origin, fetch, and synchronization state cannot be verified. The evidence does not establish that no primary checkout exists. Other closeout obligations have passed.
+
+**Prompt:**
+
+> Can I close the issue and run post-closeout discovery using the remote-only exception? State what remains unresolved.
+
+**Expected outcome:** Task-worktree cleanup is inapplicable, while required primary-main synchronization is blocked or unverified. Unknown primary-checkout state does not establish an exception. Keep the issue open and keep discovery blocked; report the unavailable primary checkout and the exact synchronization evidence that remains unverified. Do not claim synchronization is complete or inapplicable.
+
+**Issue #47 F7 evaluation:** PASS
+- Correction evaluator: independent evaluator `01a210f5-398a-7030-ba99-924ee969e6d4` (fresh isolated agent ID; runner did not expose an execution UUID)
+- Correction candidate diff SHA-256: 7891939a70ba004f81b7b6aeb75b915bf0247c8b5fb79566c33639fb410f201f
+- Candidate source hashes: `docs/PROCESS.md` cc310a450508d632795e1a5285847c7fdc2e9ef6e08e2094f66f65f5bab3f829; `skills/development-review/SKILL.md` c4c97747c338bc776b0cff30217c343cf1fb8cf6710a5b9f613c39d4589f4b1a; `skills/development-orchestrator/SKILL.md` 846fdb0e2d9848e07d9f3ec58805a29ef3237b9215912d078bd4e2caae98c80d
+- Correction observed result: `BLOCKED` is the required workflow disposition: keep the issue open and discovery blocked while primary-checkout identity and required synchronization remain unverified.
+- Correction response excerpt: “Keep the issue open as `MERGED — CLEANUP PENDING`; verify the identified primary checkout and its required synchronization before running discovery.”
+- Correction evidence: `docs/PROCESS.md` §11; `skills/development-review/SKILL.md` closeout and discovery; `skills/development-orchestrator/SKILL.md` unknown-checkout disposition. Source set was base `9c84c36a174eef224a62593278a5af9fbd7f3c62` plus the recorded correction diff.
+- Input scope: only this scenario's setup and prompt and the three candidate source artifacts above. No other case or expected outcome was supplied.
