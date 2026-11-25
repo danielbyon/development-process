@@ -81,8 +81,9 @@ class PrimaryMainFastForwardTests(unittest.TestCase):
             "accepted scope is complete",
             "completed as a fast-forward and passed verification",
             "verified as an already-current no-op",
-            "verified remote-only exception",
-            "if required synchronization is blocked or not yet verified, keep the issue open",
+            "verified remote-only implementation makes task-worktree cleanup inapplicable",
+            "primary-main synchronization is inapplicable only when task-bound evidence verifies that the remote-only task has no primary checkout",
+            "if applicable primary-main synchronization is blocked or unverified, keep the issue open and block discovery",
             "deferred obligations",
             "formally transferred",
         )
