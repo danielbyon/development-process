@@ -111,21 +111,31 @@ class WorkflowContractTests(unittest.TestCase):
         generator = step["run"].split("python3 - <<'CONTEXT'\n", 1)[1].split("\nCONTEXT", 1)[0]
         with tempfile.TemporaryDirectory(prefix="candidate-context-") as temporary:
             context_path = Path(temporary) / "context.json"
+            source_root = Path(temporary) / "source"
+            (source_root / "skills").mkdir(parents=True)
+            manifest_path = source_root / "skills" / "distribution.json"
             environment = {
                 "CANDIDATE_CONTEXT": str(context_path),
+                "PACKAGE_SOURCE_ROOT": str(source_root),
                 "EXPECTED_SOURCE_SHA": "a" * 40,
                 "POLICY_REVISION": "b" * 40,
                 "EXPECTED_BUILDER_SHA": "c" * 40,
             }
             with patch.dict(os.environ, environment):
-                exec(compile(generator, "<CI candidate context>", "exec"), {})
-            self.assertEqual(json.loads(context_path.read_text()), {
-                "release_version": "2000.01.01",
-                "source_revision": "a" * 40,
-                "policy_revision": "b" * 40,
-                "builder_revision": "c" * 40,
-                "qualification_only": True,
-            })
+                for transform_version in (1, 2):
+                    manifest_path.write_text(json.dumps({
+                        "schema_version": 2,
+                        "transform_version": transform_version,
+                    }))
+                    exec(compile(generator, "<CI candidate context>", "exec"), {})
+                    self.assertEqual(json.loads(context_path.read_text()), {
+                        "release_version": "2000.01.01",
+                        "source_revision": "a" * 40,
+                        "policy_revision": "b" * 40,
+                        "builder_revision": "c" * 40,
+                        "transform_version": transform_version,
+                        "qualification_only": True,
+                    })
 
     def test_ci_retains_required_check_and_mandatory_suites(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
