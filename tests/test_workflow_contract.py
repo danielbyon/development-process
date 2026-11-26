@@ -145,7 +145,7 @@ class WorkflowContractTests(unittest.TestCase):
             (ROOT / "tests" / "fixtures" / "workflow_contract.json").read_text()
         )
         self.assertEqual(fixture["new_task_resolution"], {
-            "selector": "newest_qualified_immutable_release",
+            "selector": "active_skill_identity",
             "recorded_pin": "release_version",
             "failure": "fail_closed",
             "continuation": "preserve_existing_pin",
@@ -170,7 +170,7 @@ class WorkflowContractTests(unittest.TestCase):
             if scenario["kind"] == "new-task":
                 self.assertEqual(
                     scenario["expected"],
-                    "qualified_release_version",
+                    "active_skill_identity",
                 )
             elif scenario["kind"] == "in-flight-task":
                 self.assertIn(scenario["existing_pin"], HISTORICAL_POLICY_REVISIONS)

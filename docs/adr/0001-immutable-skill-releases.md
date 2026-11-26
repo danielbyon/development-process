@@ -27,3 +27,9 @@ GitHub mutable presentation metadata requires repeated resolver checks. Reposito
 ## Amendment for Issue #42 (2026-11-20)
 
 A successful owner-triggered release workflow on merged `main`, followed by immutable publication, is sufficient release qualification. The workflow retains its six suites, deterministic packaging, provenance, signed attestation and publication checks. Ordinary new-task resolution matches the published manifest, tag, sidecars and successful workflow identity. It does not run `verify-release`, reconstruct attestations or require hosted installation and session-revision evidence. The explicit full audit remains available. Existing SHA and CalVer pins retain their recorded identities. The user installs and updates Skills manually; release publication does not install or activate them.
+
+## Amendment for Issue #49 (2026-11-26)
+
+Task policy follows the identity embedded in the Skill active when the task begins. Each distributed Skill records its release CalVer and source, policy, and builder revisions, and links to the canonical policy at the recorded policy revision. Read that exact policy file. Do not select a newer published release or require release-asset, workflow-attempt, or attestation retrieval for ordinary task admission. Missing or conflicting identity references block policy-dependent work.
+
+This amendment changes task admission only. Keep release qualification, immutable publication, provenance, signed attestation, all six qualification suites, and explicit `verify-release` audits. Preserve an existing task's pin and provenance during continuation. `resolve-task --existing-pin` remains a pass-through; explicit Codex installation verification is a separate local safety check. A manual Codex execution does not require resolver admission. Publication never installs or activates a Skill.

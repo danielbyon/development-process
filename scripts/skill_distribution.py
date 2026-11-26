@@ -105,6 +105,20 @@ def load_manifest(root: Path) -> dict[str, Any]:
     return _read_json(root / MANIFEST_PATH.as_posix(), "Skill distribution manifest")
 
 
+def release_transform_version(manifest: Any) -> int:
+    """Return the supported transform version declared by a committed manifest."""
+    if (not isinstance(manifest, dict) or
+            type(manifest.get("schema_version")) is not int or
+            manifest["schema_version"] not in (1, 2)):
+        raise DistributionError("Unsupported committed manifest.")
+    schema = manifest["schema_version"]
+    transform_version = manifest.get("transform_version", 1) if schema == 1 else manifest.get("transform_version")
+    if (type(transform_version) is not int or transform_version not in (1, 2) or
+            (schema == 1 and transform_version != 1)):
+        raise DistributionError("Unsupported transformation version in committed manifest.")
+    return transform_version
+
+
 def _relative_path(value: Any, description: str) -> PurePosixPath:
     if not isinstance(value, str) or not value or "\\" in value:
         raise DistributionError(f"{description} must be a relative POSIX path.")
@@ -173,11 +187,12 @@ def _validate_links(skill_md: Path, included_files: set[str]) -> None:
 def _skill_entries(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     manifest = load_manifest(root)
     schema = manifest.get("schema_version")
-    if schema not in (1, 2):
+    if type(schema) is not int or schema not in (1, 2):
         raise DistributionError("Unsupported distribution manifest schema_version.")
     revision = manifest.get("policy_revision")
     if schema == 1:
-        if manifest.get("transform_version", 1) != 1:
+        transform_version = manifest.get("transform_version", 1)
+        if type(transform_version) is not int or transform_version != 1:
             raise DistributionError("Unsupported release template contract.")
         _policy_file_exists(root, revision)
     else:
@@ -897,18 +912,7 @@ def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
         manifest = json.loads(_regular_blob(root, source, MANIFEST_PATH.as_posix()))
     except (ValueError, UnicodeDecodeError) as error:
         raise DistributionError("Invalid committed manifest.") from error
-    if not isinstance(manifest, dict) or manifest.get("schema_version") not in (1, 2):
-        raise DistributionError("Unsupported committed manifest.")
-    if manifest["schema_version"] == 1:
-        manifest_transform_version = manifest.get("transform_version", 1)
-    else:
-        manifest_transform_version = manifest.get("transform_version")
-    if (
-        type(manifest_transform_version) is not int
-        or manifest_transform_version not in (1, 2)
-        or (manifest["schema_version"] == 1 and manifest_transform_version != 1)
-    ):
-        raise DistributionError("Unsupported transformation version in committed manifest.")
+    manifest_transform_version = release_transform_version(manifest)
     if transform_version != manifest_transform_version:
         raise DistributionError("Release context transform_version disagrees with committed manifest.")
     bundle = {}

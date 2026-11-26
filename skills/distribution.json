@@ -26,6 +26,6 @@
       ]
     }
   ],
-  "policy_reference": "{{release_tag}}",
-  "transform_version": 1
+  "policy_reference": "{{policy_revision}}",
+  "transform_version": 2
 }

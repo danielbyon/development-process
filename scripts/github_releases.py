@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import subprocess
+from datetime import date
 from pathlib import Path
 
 class APIError(RuntimeError):
@@ -48,6 +49,19 @@ class GitHubAPI:
     def releases(self): return self.pages(self.base+'/releases')
     def tags(self): return self.pages(self.base+'/git/matching-refs/tags/')
     def release(self, release_id): return self.request('GET',self.base+f'/releases/{int(release_id)}')
+    def release_by_tag(self, tag):
+        """Fetch a release by CalVer tag and reject mismatched API responses."""
+        if not isinstance(tag, str) or not re.fullmatch(r'[0-9]{4}\.[0-9]{2}\.[0-9]{2}', tag):
+            raise APIError('Release tag must use YYYY.MM.DD CalVer')
+        try:
+            date.fromisoformat(tag.replace('.', '-'))
+        except ValueError as error:
+            raise APIError('Release tag must be a valid CalVer date') from error
+        release = self.request('GET', self.base + '/releases/tags/' + tag)
+        if (not isinstance(release, dict) or type(release.get('id')) is not int or
+                release['id'] <= 0 or release.get('tag_name') != tag):
+            raise APIError('Release-by-tag response is malformed or mismatched')
+        return release
     def original_context(self, run_id):
         import io
         import zipfile

@@ -102,6 +102,29 @@ class SkillDistributionTests(unittest.TestCase):
             set(SKILL_NAMES),
         )
 
+    def test_schema1_transform_version_must_be_integer_one(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(manifest["schema_version"], 1)
+        manifest["transform_version"] = True
+        manifest_path.write_text(json.dumps(manifest))
+
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+    def test_manifest_schema_version_must_be_an_integer(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        original = json.loads(manifest_path.read_text())
+
+        for invalid_version in (True, 1.0):
+            with self.subTest(schema_version=invalid_version):
+                manifest = json.loads(json.dumps(original))
+                manifest["schema_version"] = invalid_version
+                manifest_path.write_text(json.dumps(manifest))
+
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
+
     def test_manifest_rejects_invalid_distribution_shapes(self) -> None:
         manifest_path = self.source_root / "skills" / "distribution.json"
         original = json.loads(manifest_path.read_text())
@@ -1122,6 +1145,26 @@ class ReleasePackageTests(unittest.TestCase):
             distribution_module.build_release_packages(
                 self.root, self.base / "mismatched-transform", self.context | {"transform_version": 1}
             )
+
+    def test_release_package_rejects_non_integer_manifest_schema_version(self):
+        manifest_path = self.root / "skills" / "distribution.json"
+        original = json.loads(manifest_path.read_text())
+
+        for label, invalid_version in (("boolean", True), ("float", 2.0)):
+            with self.subTest(schema_version=invalid_version):
+                manifest = json.loads(json.dumps(original))
+                manifest["schema_version"] = invalid_version
+                manifest_path.write_text(json.dumps(manifest))
+                git(self.root, "add", "skills/distribution.json")
+                git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+                    "user.email=skill-distribution-test@example.invalid", "commit", "-qm",
+                    f"Invalid {label} schema version")
+                context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+
+                with self.assertRaises(DistributionError):
+                    distribution_module.build_release_packages(
+                        self.root, self.base / f"invalid-schema-{label}", context
+                    )
 
     def test_transform2_rejects_a_policy_revision_with_different_source_bytes(self):
         self._prepare_transform2_source()

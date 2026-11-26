@@ -7,15 +7,21 @@ description: "Plan software-development work, produce read-only Codex Plan-mode 
 
 This Skill helps ChatGPT sessions select approved work, prepare task handoffs, and review Codex plans. Issues define accepted scope; the canonical policy defines authority and process.
 
+<!-- activated-policy-identity -->
+Release CalVer: {{release_tag}}
+Source revision: {{source_revision}}
+Policy revision: {{policy_revision}}
+Builder revision: {{builder_revision}}
+Canonical policy: [docs/PROCESS.md](https://github.com/danielbyon/development-process/blob/{{policy_revision}}/docs/PROCESS.md)
+<!-- /activated-policy-identity -->
+
 ## Policy and evidence
 
 For a historical task that adopts a cleanup amendment, use its qualified immutable release tag and the full policy revision resolved from that tag. Record both in existing task-bound cleanup evidence as the `cleanup_amendment` reference. Apply the amendment only to the historical pin's superseded cleanup provisions; the original task pin, provenance, and unrelated gates remain unchanged. For a historical manual task without a structured record, use existing task-bound evidence such as the issue, PR, approved plan, branch, and worktree identity. Creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite; no new task-record schema or migration framework is required.
 
-For a new task, select the newest eligible qualified immutable published CalVer release and record its tag and policy identity once. Read [the canonical policy for this release](https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md) before applying it. The packager replaces the token in this policy link; an unresolved template is not an approved distribution.
+For a new task, use the identity embedded in this Skill when it is active. Read the canonical policy at its recorded policy revision before applying it. Do not select a newer release or resolve GitHub's `latest` label. Stop if the identity is missing, malformed, or conflicts with another required reference.
 
-Successful release workflow execution and immutable publication qualify the release after its changes have merged into protected `main` through review and CI and the owner dispatches the workflow against that revision. The resolver checks the published release, tag, frozen context, provenance sidecars and successful workflow identity. Record the existing `task_pin` and `provenance` fields, including source, policy, builder, owner and payload identities. Ignore GitHub's `latest` designation. Missing or inconsistent evidence for the newest eligible release blocks selection without fallback. If no qualified immutable release exists, return `NO_IMMUTABLE_RELEASE`.
-
-The workflow remains responsible for its six qualification suites, deterministic packaging, provenance, signed attestation and immutable publication. Task resolution does not run `verify-release`, rebuild assets, reconstruct attestations or require a hosted installation or session revision check. Keep `verify-release` available for explicit audits and diagnostics.
+Release qualification remains separate from task admission. A successful owner-triggered workflow on reviewed and CI-approved merged `main`, followed by immutable publication, qualifies a release. The workflow retains its six qualification suites, deterministic packaging, provenance, signed attestation, and publication checks. Ordinary admission uses the active Skill identity and exact policy file; it does not inspect release assets, workflow records, or hosted session revision. It does not rebuild packages or reconstruct attestations. Keep `verify-release` for explicit audits and diagnostics.
 
 Successful release qualification does not install this Skill. The user manually installs and updates `development-orchestrator` and `development-review` in ChatGPT and Codex. Publication does not upload or activate Skills.
 

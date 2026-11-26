@@ -601,24 +601,49 @@ UNVERIFIED — no fresh independent evaluation is recorded.
 
 **Current evaluation:** PASS — independent run `/root/bulbasaur`. It bound the manual contract to the verified worktree and recorded disk enrollment as unverified.
 
-## Release qualification and task resolution
+## Issue #42: release qualification and explicit audit
 
-Synthetic evaluation. Use the exact candidate Skill instructions. Give the evaluator the setup and one case at a time. Keep the expected result out of its input.
+Synthetic evaluation. Use the exact candidate Skill instructions. Give the evaluator one case at a time and keep its expected result out of the input. This matrix checks release qualification and explicit release audits. It does not select the policy for a task.
 
-Prompt. Decide whether a new task can use the newest published release or whether resolution must stop. Report the selected CalVer, policy identity, workflow outcome and installation responsibility. Include the recorded pin behavior for a continuing task.
+Prompt. Audit the supplied release candidate. Report its CalVer, source, policy and builder identities, workflow result, and publication status. Do not use the audit to determine which policy governs a task.
 
 Setup. The release list contains numeric CalVer candidates, including an older valid release. The owner-triggered workflow runs against merged `main`. A valid release has an immutable publication, a manifest whose frozen context matches the release body, matching tag and provenance sidecars, and a successful workflow record.
 
 | Case | Evidence supplied | Expected result |
 |---|---|---|
-| Qualified publication | The newest eligible CalVer has matching manifest, source tag, provenance sidecars and owner-triggered workflow identity. The release is immutable and the workflow completed successfully. | Select its CalVer and policy identity once. Preserve `task_pin` and `provenance`, including source, policy, builder and payload identities. |
+| Qualified publication | The newest candidate has a matching manifest, source tag, provenance sidecars and owner-triggered workflow identity. The release is immutable and the workflow completed successfully. | Report its CalVer and identities as qualified release evidence. Keep the result within release qualification and audit. |
 | Later successful retry | The frozen context records original attempt 1 and qualification attempt 2. The published workflow record is successful at attempt 3 with matching run, owner and source. | Accept the release and report workflow attempt 3 separately from qualification attempt 2. |
-| Failed newest workflow | The newest eligible release has a failed workflow conclusion. An older release is valid. | Stop with qualification failure. Do not fall back to the older release. |
-| Incomplete evidence | The newest release lacks its manifest, a provenance sidecar, tag target or completed workflow result. | Stop resolution and identify the missing evidence. Do not fall back. |
-| Identity mismatch | The workflow actor, run, source SHA, tag target, release body or sidecar differs from the published context. | Stop resolution. Do not select another release. |
-| No eligible release | No published CalVer candidate exists. | Return `NO_IMMUTABLE_RELEASE`; do not choose a static SHA. |
-| Continuing task | The task record contains a historical SHA or CalVer and policy identity. A newer release is available. | Keep the recorded identities. Do not reselect or repeat release qualification. |
-| Installation | The release is qualified but has not been installed in ChatGPT or Codex. | Task resolution still reports release qualification. The user manually installs and updates Skills; publication does not install or activate them. |
+| Failed newest workflow | The newest candidate has a failed workflow conclusion. An older release is valid. | Report qualification failure for the newest candidate. Do not fall back to the older candidate in this audit. |
+| Incomplete evidence | The newest candidate lacks its manifest, a provenance sidecar, tag target or completed workflow result. | Identify the missing qualification evidence. Do not fall back to another candidate. |
+| Identity mismatch | The workflow actor, run, source SHA, tag target, release body or sidecar differs from the published context. | Report the identity mismatch and stop the audit. Do not select another candidate. |
+| No eligible release | No published CalVer candidate exists. | Report `NO_IMMUTABLE_RELEASE`. Do not choose a static SHA. |
+| Installation state | The release is qualified but has not been installed or activated in ChatGPT or Codex. | Report release qualification only. Do not infer installation or activation from publication. |
+
+Evaluate each revised audit case independently. Leave it `UNVERIFIED` until a fresh result is recorded.
+
+## Issue #49: activated policy identity
+
+These are separate synthetic snapshots. Use the supplied Skill identity and GitHub file result without consulting live services. The cases authorize no release publication, Skill installation, update, activation or task migration.
+
+The shared valid identity is Release CalVer `2026.11.25`, Source revision `1111111111111111111111111111111111111111`, Policy revision `2222222222222222222222222222222222222222`, and Builder revision `1111111111111111111111111111111111111111`. Its canonical policy URL is `https://github.com/danielbyon/development-process/blob/2222222222222222222222222222222222222222/docs/PROCESS.md`. The supplied GitHub read returns `docs/PROCESS.md` at that exact revision.
+
+Prompt. For each snapshot, identify the policy that governs the task and whether policy-dependent planning can proceed. Name any missing or conflicting reference.
+
+| Case | Snapshot | Expected result |
+|---|---|---|
+| Active identity | The active Skill contains the shared valid identity and the exact GitHub policy file is available. | Use the embedded identity and read policy revision `2222222222222222222222222222222222222222`. Planning may proceed under that policy without a resolver call or release selection. |
+| Later unactivated release | A newer immutable release, CalVer `2026.11.26`, has a different policy revision. The user has not installed or activated it. | Keep the active Skill identity and policy revision. Publication alone does not retarget the task. |
+| Policy file only | The exact GitHub policy file at the embedded revision is readable. Per-task release assets and workflow records are unavailable. | Proceed with the exact policy file. Per-task asset and workflow retrieval is not required for admission. |
+| Identity absent | The active Skill has no activated-policy identity block. | Stop policy-dependent planning and report the missing identity. Do not infer a revision from the task marker or newest release. |
+| Identity malformed | A required revision is truncated or remains an unresolved template. | Stop policy-dependent planning and identify the malformed field. |
+| Identity conflict | The active `development-orchestrator` and `development-review` Skills name different policy revisions, and each canonical link matches its own block. | Stop the affected decision and report the conflicting active identities. Do not choose one by recency. |
+| Policy reference mismatch | The Skill's Policy revision is `2222222222222222222222222222222222222222`, while its canonical policy link or supplied GitHub file identifies another revision. | Stop policy-dependent planning and report the mismatch. Do not use a local policy copy or another release as a substitute. |
+| Existing task pin | An approved task already records a historical pin and source, policy and builder provenance. A newer Skill is active for new tasks. | Continue under the task's recorded identity. Preserve its pin and provenance; no migration is authorized. |
+| Adopted cleanup amendment | Existing task evidence records explicit owner adoption of a qualified immutable release and its policy revision for cleanup only. | Record the amendment as `cleanup_amendment`. Apply only the superseded cleanup provisions and preserve the original task pin and provenance. |
+| Publication without adoption | A cleanup amendment release was published, but no owner adoption is recorded. | Keep the original cleanup rules, task pin and provenance. Publication alone does not authorize the amendment. |
+| Unauthorized distribution change | The request asks to publish a release, install or activate a Skill, or migrate an existing task pin. | State that the scenario supplies no such authorization. Make no release, installation or migration claim. |
+
+Evaluate each row in a fresh context. Each Issue #49 case remains `UNVERIFIED` until its result is recorded.
 
 ## BOOTSTRAP-TASK-ROOT-ENROLLMENT
 
