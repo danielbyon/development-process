@@ -702,7 +702,7 @@ def _resolve_pinned_release(api, tag, source_revision, policy_revision, builder_
             sidecar.get('archive_sha256') == asset_hashes.get(zip_name) == zip_digest and
             asset_hashes.get(sidecar_name) == digest(sidecar_bytes),
             'Pinned executor provenance identity or manifest binding mismatch')
-    return {
+    return ({
         **context,
         'verified_payload_identities': {
             skill: {
@@ -710,7 +710,7 @@ def _resolve_pinned_release(api, tag, source_revision, policy_revision, builder_
                 for member, value in hashes.items()
             }
         },
-    }
+    }, asset_hashes[zip_name])
 
 
 def resolve_task(api, existing_pin=None, compatibility=None, *, task_pin=None,
@@ -777,7 +777,7 @@ def resolve_task(api, existing_pin=None, compatibility=None, *, task_pin=None,
         )
 
     try:
-        context = _resolve_pinned_release(
+        context, archive_sha256 = _resolve_pinned_release(
             api, task_pin, source_revision, policy_revision, builder_revision
         )
     except (APIError, MissingEvidenceError) as error:
@@ -788,7 +788,8 @@ def resolve_task(api, existing_pin=None, compatibility=None, *, task_pin=None,
     expected = context['verified_payload_identities']['delegation-executor']
     try:
         _verify_local_installation(
-            api, context, 'delegation-executor', expected, directory, compatibility
+            api, context, 'delegation-executor', expected, directory, compatibility,
+            archive_sha256=archive_sha256,
         )
     except MissingEvidenceError as error:
         raise ReleaseError(f'LOCAL_INSTALLATION_UNAVAILABLE: {error}') from error
@@ -801,8 +802,16 @@ def resolve_task(api, existing_pin=None, compatibility=None, *, task_pin=None,
     }
 
 
-def _verify_local_installation(api, context, skill, expected, installed_path, compatibility):
-    """Inspect the files loaded by Codex and authenticate any compatibility record."""
+def _verify_local_installation(api, context, skill, expected, installed_path, compatibility,
+                               *, archive_sha256=None):
+    """Verify installed files against an authenticated release or compatibility report.
+
+    Exact file matches are valid without a marker. When present, the marker's
+    source, policy, and archive identities must match the authenticated release.
+    For a compatible older installation, its marker describes that installation.
+    The compatibility report's installed_source must match the marker's source;
+    revision and policy_revision identify the selected target.
+    """
     if installed_path is None:
         raise MissingEvidenceError('Pass --installed-path for the installed Codex delegation-executor.')
     directory = Path(installed_path)
@@ -823,6 +832,7 @@ def _verify_local_installation(api, context, skill, expected, installed_path, co
         inspected[member]=digest(path.read_bytes())
     files={path.relative_to(directory).as_posix() for path in directory.rglob('*') if path.is_file() or path.is_symlink()}
     marker_name='.skill-distribution.json'
+    marker=None
     if marker_name in files:
         marker_path=directory/marker_name
         require(marker_path.is_file() and not marker_path.is_symlink(),'Unsafe installed metadata')
@@ -838,6 +848,11 @@ def _verify_local_installation(api, context, skill, expected, installed_path, co
                 re.fullmatch(r'[0-9a-f]{64}',marker['archive_sha256']),
                 'Invalid installed metadata provenance')
         require(marker['payload_sha256']==inspected,'Installed metadata does not match inspected bytes')
+        if inspected==expected:
+            require(marker['source_revision']==context['source_revision'] and
+                    marker['policy_revision']==context['policy_revision'] and
+                    marker['archive_sha256']==archive_sha256,
+                    'Installed metadata does not match authenticated release identity')
         files.remove(marker_name)
     require(files==set(expected),'Unexpected installed Skill files')
     installed_payload=digest(canonical(inspected))
@@ -848,12 +863,15 @@ def _verify_local_installation(api, context, skill, expected, installed_path, co
         user = record.get('user') if isinstance(record, dict) else None
         require(isinstance(user, dict) and user.get('id') == context.get('owner_id'),
                 'Compatibility author unverified')
-        marker='<!-- release-evidence\n'; body=record.get('body','')
-        require(isinstance(body, str) and marker in body,'Inspectable compatibility report required')
-        report=json.loads(body.split(marker,1)[1].split('\n-->',1)[0])
+        evidence_marker='<!-- release-evidence\n'; body=record.get('body','')
+        require(isinstance(body, str) and evidence_marker in body,'Inspectable compatibility report required')
+        report=json.loads(body.split(evidence_marker,1)[1].split('\n-->',1)[0])
         require(isinstance(report, dict), 'Malformed compatibility report')
         require(report.get('gate')=='compatibility' and report.get('skill')==skill and report.get('revision')==context['source_revision'] and report.get('policy_revision')==context['policy_revision'],'Compatibility target mismatch')
         require(report.get('installed_payload')==installed_payload and SHA.fullmatch(report.get('installed_source','')) and report.get('differences') and report.get('validation') and report.get('execution_id') and report.get('verdict')=='pass','Incomplete compatibility inspection')
+        if marker is not None:
+            require(report['installed_source']==marker['source_revision'],
+                    'Compatibility report does not match installed marker identity')
 
 
 def main(argv=None):

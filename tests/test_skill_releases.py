@@ -1343,6 +1343,29 @@ class ExplicitNativeResolutionTests(unittest.TestCase):
         self.api.tags.assert_called_once()
         self._assert_no_qualification_calls()
 
+    def test_exact_installation_rejects_well_formed_wrong_marker_identity(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory, marker=True)
+            marker_path = Path(directory) / '.skill-distribution.json'
+            original = json.loads(marker_path.read_text())
+            self.assertTrue(self._resolve(directory)['local_installation_verified'])
+            wrong_values = {
+                'source_revision': 'f' * 40,
+                'policy_revision': 'e' * 40,
+                'archive_sha256': 'c' * 64,
+            }
+            for key, value in wrong_values.items():
+                marker = {**original, key: value}
+                marker_path.write_text(json.dumps(marker))
+                with self.subTest(key=key), self.assertRaisesRegex(
+                    release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'
+                ):
+                    self._resolve(directory)
+
     def test_sequenced_calver_uses_exact_release_by_tag_endpoint(self):
         import tempfile
 
@@ -1628,10 +1651,19 @@ class ExplicitNativeResolutionTests(unittest.TestCase):
     def test_changed_payload_needs_authenticated_compatibility_evidence(self):
         import json
         import tempfile
+        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as directory:
             changed = {**self.payload_bytes, 'SKILL.md': b'older instructions'}
             self._install(directory, payload_bytes=changed, marker=True)
+            marker_path = Path(directory) / '.skill-distribution.json'
+            marker = json.loads(marker_path.read_text())
+            marker.update(
+                source_revision='c' * 40,
+                policy_revision='d' * 40,
+                archive_sha256='e' * 64,
+            )
+            marker_path.write_text(json.dumps(marker))
             with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
                 self._resolve(directory)
 
@@ -1642,7 +1674,7 @@ class ExplicitNativeResolutionTests(unittest.TestCase):
                 'revision': self.context['source_revision'],
                 'policy_revision': self.context['policy_revision'],
                 'installed_payload': release.digest(release.canonical(inspected)),
-                'installed_source': 'c' * 40,
+                'installed_source': 'f' * 40,
                 'differences': 'older executor instructions',
                 'validation': 'compatibility checks passed',
                 'execution_id': 'inspection',
@@ -1654,8 +1686,16 @@ class ExplicitNativeResolutionTests(unittest.TestCase):
             }
             self.api.record.return_value = record
             evidence = {'ref': 'issue-comment', 'sha256': release.digest(release.canonical(record))}
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory, compatibility=evidence)
+
+            report['installed_source'] = marker['source_revision']
+            record['body'] = '<!-- release-evidence\n' + json.dumps(report) + '\n-->'
+            evidence['sha256'] = release.digest(release.canonical(record))
             result = self._resolve(directory, compatibility=evidence)
             self.assertTrue(result['local_installation_verified'])
+            self.assertEqual(report['revision'], self.context['source_revision'])
+            self.assertEqual(report['policy_revision'], self.context['policy_revision'])
 
     def test_historical_sha_pin_uses_manual_fallback_without_release_lookup(self):
         import tempfile
@@ -1797,7 +1837,11 @@ class ManagedInstallationTests(unittest.TestCase):
             original = marker.read_text()
             metadata = json.loads(original)
             expected = metadata["payload_sha256"]
-            release._verify_local_installation(api, context, skill, expected, installed, None)
+            archive_sha256 = release.digest((bundle / "delegation-executor.zip").read_bytes())
+            release._verify_local_installation(
+                api, context, skill, expected, installed, None,
+                archive_sha256=archive_sha256,
+            )
 
             for key, value in (
                 ("skill_name", "development-review"),
