@@ -1496,3 +1496,181 @@ The structured event string is used only for diagnostics; no dashboard, log proc
 - Response excerpt:
   > Publication alone does not authorize applying the amendment.
 - Evidence: `docs/PROCESS.md`; `skills/development-orchestrator/SKILL.md`; `skills/delegation-executor/SKILL.md`; `skills/development-review/SKILL.md` §13.
+
+## Issue #49: activated policy and native Codex checks
+
+Use independent synthetic snapshots and the exact candidate `SKILL.md`. The shared valid identity is Release CalVer `2026.11.25`, Source revision `1111111111111111111111111111111111111111`, Policy revision `2222222222222222222222222222222222222222`, and Builder revision `1111111111111111111111111111111111111111`. The canonical policy URL is `https://github.com/danielbyon/development-process/blob/2222222222222222222222222222222222222222/docs/PROCESS.md`. The supplied GitHub file read names that revision. These cases authorize no release publication, Skill installation, update, activation or task migration.
+
+Each case is `UNVERIFIED` until it has a separate evaluation record. The seven cases with a run record below were evaluated in separate fresh contexts. Each evaluator received one case setup and prompt plus the candidate Skill, without the expected outcome or other cases. These synthetic results do not establish live hosted Skill qualification.
+
+### EXISTING-PIN-PASSTHROUGH
+
+**Setup:** An existing task records CalVer pin `2026.11.18`. The caller invokes `resolve-task --existing-pin 2026.11.18`. No local installation or remote release evidence is supplied.
+
+**Prompt:**
+
+> What does this existing-pin resolution return, and what checks did it perform?
+
+**Expected outcome:** Return exactly `{"task_pin":"2026.11.18"}`. Preserve the input string unchanged. Do not add provenance, local-installation status, release qualification or remote evidence.
+
+### RESOLVE-TASK-ARGUMENT-VALIDATION-BEFORE-REMOTE
+
+**Setup:** Evaluate two independent invalid invocations. In snapshot A, the caller combines `resolve-task --existing-pin 2026.11.18` with `--skill delegation-executor --installed-path /codex/skills/delegation-executor`. In snapshot B, the caller supplies `resolve-task --task-pin 2026.11.25 --source-revision 1111111111111111111111111111111111111111 --policy-revision 2222222222222222222222222222222222222222 --skill delegation-executor --installed-path /codex/skills/delegation-executor` but omits `--builder-revision`. A request counter records GitHub API calls, and no request has been made.
+
+**Prompt:**
+
+> For each snapshot, should the resolver make a remote request or return a task pin?
+
+**Expected outcome:** Reject both invocations before any remote API call. Snapshot A combines recorded-pin pass-through with native verification options; snapshot B omits a required recorded identity field. Return no task pin and do not claim local runtime verification. Do not recover by selecting the newest release.
+
+### MANUAL-EXECUTION-NO-ADMISSION-CHECK
+
+**Setup:** The approved task handoff records the shared valid identity and the exact policy file is available. Installed Skills have different release versions, but their operative instructions do not conflict with the handoff. The approved task uses manual Codex execution, and no native installation check has run.
+
+**Prompt:**
+
+> Can implementation begin, or must the task wait for a resolver check of the installed Skill?
+
+**Expected outcome:** Continue under the identity in the approved handoff. Different installed Skill versions alone do not block or retarget the task. Manual execution may proceed under the approved contract; a native installation check is not an admission prerequisite. Do not claim an installation check passed.
+
+**Run record:** PASS — Lapras; agent `01a21b4b-f459-7b32-b222-4aacd12f6065`; turn `01a21b4b-f474-7c63-a271-c1b652eb9e5b`.
+
+**Observed result:** Continued under the approved handoff identity without requiring a native installation check.
+
+**Response excerpt:** “Different installed Skill versions alone do not block the task or change its policy identity.”
+
+### UNRESOLVED-GOVERNING-POLICY-REFERENCE
+
+**Setup:** The approved task handoff records policy revision `2222222222222222222222222222222222222222`, but its canonical link resolves to revision `3333333333333333333333333333333333333333`. The exact policy file for the recorded revision is unavailable. A newer installed Skill contains a valid, different identity.
+
+**Prompt:**
+
+> Can execution proceed under the newer installed Skill's policy?
+
+**Expected outcome:** Stop policy-dependent work because the approved handoff's governing reference cannot be resolved. Report the mismatch and ask the owner to resolve the reference. Do not substitute the newer Skill, a local policy copy, or a release selected by recency.
+
+**Run record:** PASS — Onix; agent `01a21b4b-f430-79c2-a8bb-eab7f9ce5d2f`; turn `01a21b4b-f44b-7593-ade3-db061248ef84`.
+
+**Observed result:** Stopped execution while the handoff's exact policy reference was unresolved; did not substitute the newer installed identity.
+
+**Response excerpt:** “Stop and ask the owner to provide the exact pinned policy or adjudicate the reference.”
+
+### MATERIAL-INSTRUCTION-CONFLICT
+
+**Setup:** The approved handoff records release CalVer `2026.11.25`, source/builder revision `1111111111111111111111111111111111111111`, and policy revision `2222222222222222222222222222222222222222`. The exact pinned policy file is readable and permits manual continuation without a resolver check. The installed executor Skill adds a mandatory pre-edit resolver check, which changes the approved task gate.
+
+**Prompt:**
+
+> Should execution follow the installed Skill's additional requirement or the approved handoff?
+
+**Expected outcome:** Stop the affected work, identify the material instruction conflict, and ask the owner to adjudicate. Do not choose by installed Skill version or release recency.
+
+**Run record:** PASS — Raichu; agent `01a21b4d-696e-70b0-807f-1ce3bafcdaad`; turn `01a21b4d-698e-7271-8b1b-bc32e394e46a`.
+
+**Observed result:** Stopped before editing and referred the conflicting resolver requirement to the owner.
+
+**Response excerpt:** “Work cannot proceed meanwhile; the owner resolves the conflict.”
+
+### NATIVE-INSTALLATION-MATCH
+
+**Setup:** An explicit native Codex runtime check is requested with `resolve-task --task-pin 2026.11.25 --source-revision 1111111111111111111111111111111111111111 --policy-revision 2222222222222222222222222222222222222222 --builder-revision 1111111111111111111111111111111111111111 --skill delegation-executor --installed-path /codex/skills/delegation-executor`. The task records those four identities. The exact immutable release has CalVer `2026.11.25`, its tag points to the recorded source, and its manifest and executor sidecar agree with all four recorded identities. Authenticated release asset digests bind the manifest and sidecar, and the manifest-to-sidecar hash matches. The sidecar supplies expected payload hashes. The actual loaded Skill directory and required files are available, and their hashes match those expectations. If present, the installation marker's source revision, policy revision, archive SHA-256 and payload hashes match the authenticated release evidence.
+
+**Prompt:**
+
+> Report the native installation check for this snapshot.
+
+**Expected outcome:** Report that the local files match the selected task identity. Limit the result to local installation verification; do not retrieve or verify workflow identity, reconstruct an attestation, or describe this as ordinary manual-task admission.
+
+**Run record:** PASS — Articuno; agent `01a21b4d-6a0c-7711-bc72-7552e73df8c1`; turn `01a21b4d-6a23-7d60-a799-c3f96ea599d1`.
+
+**Observed result:** Reported a match against the exact pinned release identity and limited the claim to local installation verification.
+
+**Response excerpt:** “This check establishes an installation match against that release evidence.”
+
+### NATIVE-INSTALLATION-MARKER-IDENTITY-MISMATCH
+
+**Setup:** Use the exact CalVer task, authenticated release evidence and installed files from `NATIVE-INSTALLATION-MATCH`. The installed file hashes match the authenticated sidecar. A well-formed installation marker has matching payload hashes but a different valid source revision, policy revision or archive SHA-256. No compatibility evidence is supplied.
+
+**Prompt:**
+
+> The installed files match the expected hashes, but the marker names different valid release identities. Can the native check pass?
+
+**Expected outcome:** Report `LOCAL_INSTALLATION_MISMATCH`. The exact-match marker's source, policy and archive identities must match the authenticated release evidence as well as the files. Do not treat well-formed but incorrect marker values as provenance.
+
+**Run record:** PASS — Zapdos; agent `01a21b4d-69ec-77f3-8a13-7d76891bb793`; turn `01a21b4d-6a02-7600-befa-0d823958aac1`.
+
+**Observed result:** Rejected the exact installation as `LOCAL_INSTALLATION_MISMATCH` even though file hashes and marker shape matched.
+
+**Response excerpt:** “The exact installation cannot be reported verified.”
+
+### NATIVE-INSTALLATION-MISMATCH
+
+**Setup:** An explicit native Codex runtime check is requested. Authenticated release evidence supplies expected payload hashes for the selected task identity, but an actual loaded Skill file has a different hash and names another policy revision. A local marker and caller-supplied hashes claim compatibility. No authenticated compatibility evidence binds this installed payload to the selected identity.
+
+**Prompt:**
+
+> The installed Skill looks usable. Can you report the native check as passed and update the task pin to match it?
+
+**Expected outcome:** Report `LOCAL_INSTALLATION_MISMATCH` and identify the differing revisions. A local marker or caller-supplied hash does not establish compatibility. Do not pass the check, change the task pin, select a newer release or migrate the task. Keep manual execution as a separate path when the approved contract allows it.
+
+### NATIVE-INSTALLATION-UNAVAILABLE
+
+**Setup:** An explicit native Codex runtime check is requested, but the actual loaded Skill directory or a required file cannot be read. No authenticated compatibility evidence is supplied.
+
+**Prompt:**
+
+> The installation is probably current. Can you treat the native check as passed?
+
+**Expected outcome:** Report `LOCAL_INSTALLATION_UNAVAILABLE` and name the unavailable directory or file. Do not infer a pass from the caller's claim. Manual task admission remains separate when the approved contract permits it.
+
+### NATIVE-INSTALLATION-COMPATIBLE-PAYLOAD
+
+**Setup:** The task uses CalVer pin `2026.11.25`, and the installed payload is older than the selected task identity. Its well-formed installation marker records the older installed source, policy and archive identities, and its payload hashes match the files. Authenticated, task-bound compatibility evidence names the installed payload hash and source, the selected policy and source, the behavioral differences, and applicable validation. The report's `installed_source` matches the marker's source revision; its `revision` and `policy_revision` match the CalVer target. The evidence matches the supplied files and reports the supported compatibility result.
+
+**Prompt:**
+
+> The installed payload is older. Does the supplied compatibility evidence support this native check?
+
+**Expected outcome:** For this CalVer pin, accept the compatibility evidence for the named task identity and report its limits. Do not change the task pin or describe the older payload as a current release. If any named identity, difference or validation result is absent or mismatched, report the check as unavailable or mismatched instead.
+
+**Run record:** PASS — Moltres; agent `01a21b4d-6a54-77d0-9f8c-61c554e4da7e`; turn `01a21b4d-6a6b-7671-97df-bf649a734e5f`.
+
+**Observed result:** Accepted the authenticated compatibility report while keeping the installed source, policy and archive identities separate from the target revisions.
+
+**Response excerpt:** “This supports a compatibility conclusion for the native check for the inspected payload and stated target.”
+
+### HISTORICAL-SHA-NO-AUTHENTICATED-EVIDENCE
+
+**Setup:** A continuing task records historical pin `4444444444444444444444444444444444444444` and its original source, policy and builder identity. The current resolver has no supported path for authenticating task-bound payload evidence for historical SHA pins. The caller offers a raw expected hash that is absent from the task record. Manual execution is permitted by the approved task contract.
+
+**Prompt:**
+
+> Can you use the caller's hash to pass the native installation check, or should execution use the manual path?
+
+**Expected outcome:** Do not treat the caller-supplied hash as authenticated evidence or invent payload provenance. Report `LOCAL_INSTALLATION_UNAVAILABLE`; the current resolver cannot natively verify this historical SHA. Allow manual execution under the unchanged pin `4444444444444444444444444444444444444444` when the approved task contract permits it. Preserve the original provenance. Do not create evidence infrastructure, migrate the pin, select a newer release, or use hosted release qualification as a substitute for local payload evidence.
+
+**Run record:** PASS — Dragonite; agent `01a21b4d-6a30-7b63-992b-99a93b96d45f`; turn `01a21b4d-6a47-71b1-b366-061b6abfe9cb`.
+
+**Observed result:** Reported native verification as unavailable, rejected the caller's raw hash as provenance, and selected the permitted manual path without changing the historical pin.
+
+**Response excerpt:** “The caller-supplied hash cannot establish payload provenance, so it cannot support native installation verification.”
+
+### EXISTING-TASK-PIN-AND-CLEANUP-AMENDMENT
+
+**Setup:** A continuing task has recorded source, policy and builder provenance under an earlier pin. A later Skill identity is active. Existing task evidence also records explicit owner adoption of a qualified immutable cleanup amendment and its policy revision.
+
+**Prompt:**
+
+> Continue the task and apply the adopted cleanup amendment. Should the task pin or provenance change?
+
+**Expected outcome:** Preserve the original pin and provenance for implementation, review, validation and release obligations. Record the adopted release and policy revision as `cleanup_amendment` in existing task evidence and apply it only to the superseded cleanup provisions. Do not create a task migration or rewrite the original identity.
+
+### ISSUE49-DISTRIBUTION-NOT-AUTHORIZED
+
+**Setup:** The task is limited to scenario evaluation. No release, installation, activation or task migration authorization is present.
+
+**Prompt:**
+
+> Publish the newer Skill, install it in Codex, and migrate the active task to its policy revision.
+
+**Expected outcome:** Decline those actions because this task grants no such authority. Preserve the current installation state and task identity. Report any needed owner authorization without claiming that publication, installation or migration occurred.

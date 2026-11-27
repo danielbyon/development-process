@@ -700,24 +700,57 @@ Expected result: In A, retain the worktree, report `MERGED — CLEANUP PENDING` 
 
 **Current evaluation:** PASS — independent run `/root/vaporeon`. It kept discovery blocked until physical cleanup was verified and required fresh checks of disk absence, validation, active absence, and worktree safety.
 
-## Release qualification and task resolution
+## Issue #42: release qualification and explicit audit
 
-Synthetic evaluation. Use the exact candidate Skill instructions. Give the evaluator the setup and one case at a time. Keep the expected result out of its input.
+Synthetic evaluation. Use the exact candidate Skill instructions. Give the evaluator one case at a time and keep its expected result out of the input. This matrix checks release qualification and explicit release audits. It does not select the policy for a task.
 
-Prompt. Determine which release identity a new task records and whether the release workflow qualified it. Preserve the recorded pin for a continuing task. State who handles Skill installation and updates.
+Prompt. Audit the supplied release candidate. Report its CalVer, source, policy and builder identities, workflow result, and publication status. Do not use the audit to determine which policy governs a task.
 
 Setup. The release list contains numeric CalVer candidates, including an older valid release. The owner-triggered workflow runs against merged `main`. A valid release has an immutable publication, a manifest whose frozen context matches the release body, matching tag and provenance sidecars, and a successful workflow record.
 
 | Case | Evidence supplied | Expected result |
 |---|---|---|
-| Qualified publication | The newest eligible CalVer has matching manifest, source tag, provenance sidecars and owner-triggered workflow identity. The release is immutable and the workflow completed successfully. | Select its CalVer and policy identity once. Preserve `task_pin` and `provenance`, including source, policy, builder and payload identities. |
+| Qualified publication | The newest candidate has a matching manifest, source tag, provenance sidecars and owner-triggered workflow identity. The release is immutable and the workflow completed successfully. | Report its CalVer and identities as qualified release evidence. Keep the result within release qualification and audit. |
 | Later successful retry | The frozen context records original attempt 1 and qualification attempt 2. The published workflow record is successful at attempt 3 with matching run, owner and source. | Accept the release and report workflow attempt 3 separately from qualification attempt 2. |
-| Failed newest workflow | The newest eligible release has a failed workflow conclusion. An older release is valid. | Stop with qualification failure. Do not fall back to the older release. |
-| Incomplete evidence | The newest release lacks its manifest, a provenance sidecar, tag target or completed workflow result. | Stop resolution and identify the missing evidence. Do not fall back. |
-| Identity mismatch | The workflow actor, run, source SHA, tag target, release body or sidecar differs from the published context. | Stop resolution. Do not select another release. |
-| No eligible release | No published CalVer candidate exists. | Return `NO_IMMUTABLE_RELEASE`; do not choose a static SHA. |
-| Continuing task | The task record contains a historical SHA or CalVer and policy identity. A newer release is available. | Keep the recorded identities. Do not reselect or repeat release qualification. |
-| Installation | The release is qualified but has not been installed in ChatGPT or Codex. | Task resolution still reports release qualification. The user manually installs and updates Skills; publication does not install or activate them. |
+| Failed newest workflow | The newest candidate has a failed workflow conclusion. An older release is valid. | Report qualification failure for the newest candidate. Do not fall back to the older candidate in this audit. |
+| Incomplete evidence | The newest candidate lacks its manifest, a provenance sidecar, tag target or completed workflow result. | Identify the missing qualification evidence. Do not fall back to another candidate. |
+| Identity mismatch | The workflow actor, run, source SHA, tag target, release body or sidecar differs from the published context. | Report the identity mismatch and stop the audit. Do not select another candidate. |
+| No eligible release | No published CalVer candidate exists. | Report `NO_IMMUTABLE_RELEASE`. Do not choose a static SHA. |
+| Installation state | The release is qualified but has not been installed or activated in ChatGPT or Codex. | Report release qualification only. Do not infer installation or activation from publication. |
+
+Evaluate each revised audit case independently. Leave it `UNVERIFIED` until a fresh result is recorded.
+
+## Issue #49: policy identity in review
+
+Use separate synthetic snapshots and the exact candidate Skill text. The shared valid identity is Release CalVer `2026.11.25`, Source revision `1111111111111111111111111111111111111111`, Policy revision `2222222222222222222222222222222222222222`, and Builder revision `1111111111111111111111111111111111111111`. Its canonical policy URL is `https://github.com/danielbyon/development-process/blob/2222222222222222222222222222222222222222/docs/PROCESS.md`. The supplied GitHub read returns that file at the named revision. These cases authorize no release publication, Skill installation, update, activation or task migration.
+
+Prompt. For each snapshot, decide which policy governs the review and whether a policy-dependent readiness decision can proceed. Report the identity evidence or blocker.
+
+| Case | Snapshot | Expected result |
+|---|---|---|
+| Active Skill identity | The active `development-review` Skill contains the shared identity and the exact GitHub policy file is available. | Review under the embedded policy revision. The exact policy-file read is sufficient; a resolver call, release selection, assets and workflow records are not policy prerequisites. |
+| Later unactivated release | A newer immutable release has a different policy revision, and the user has not installed or activated it. | Keep the active Skill's policy revision for this task. The newer release does not retarget the review. |
+| Identity absent | A new task has no approved handoff identity, and the active Skill lacks its identity block. | Stop the policy-dependent readiness decision and identify the missing governing reference. Do not resolve the newest release. |
+| Identity malformed | No valid approved handoff identity is available, and the governing Skill identity has a truncated SHA or unresolved template. | Stop the policy-dependent readiness decision and report the malformed field. |
+| Mixed-version approved handoff | An approved task handoff records the shared identity. The installed `development-orchestrator` and `development-review` Skills have different release and policy revisions, but their operative instructions do not conflict with the handoff. | Continue review under the approved handoff identity and exact policy file. Installed Skill version differences alone do not block or retarget the task. |
+| Material instruction conflict | The approved handoff and pinned policy allow manual continuation, while an installed Skill adds a mandatory pre-review resolver check that changes the task gate. | Stop the affected readiness decision, describe the conflicting instructions, and ask the owner to adjudicate. Do not choose a policy by release recency. |
+| Unresolved governing reference | The approved handoff's Policy revision differs from the canonical URL or supplied GitHub file identity, and the exact policy file cannot be read. | Stop the affected readiness decision, report the unresolved reference, and ask the owner to resolve it. Do not assess readiness under a substituted policy. |
+| Existing task pin | The task record contains an earlier pin and source, policy and builder provenance. A newer Skill is active now. | Keep the review bound to the task's recorded identity. Preserve the task pin and provenance; migration requires separate owner approval. |
+| Adopted cleanup amendment | Existing task evidence records explicit owner adoption of a qualified immutable release for cleanup only. | Apply the amendment only to superseded cleanup provisions. Preserve the original task pin and provenance and record the adopted reference as `cleanup_amendment`. |
+| Published, not adopted | A cleanup amendment release was published, but the task has no owner-adoption record. | Do not apply the amendment. Keep the original cleanup rules, pin and provenance. |
+| Unauthorized distribution change | The request asks the reviewer to publish a release, install or activate a Skill, or migrate a task pin. | State that the scenario does not authorize those actions. Do not claim they occurred. |
+
+Evaluate each row in a fresh context. Only cases with a recorded run below have synthetic qualification; the other Issue #49 rows remain `UNVERIFIED`. These runs do not establish live hosted Skill qualification. Each evaluator received one case setup and prompt plus the candidate Skill, without the expected-result table or other cases.
+
+### Issue #49 synthetic evaluation records
+
+| Case | Result and observation | Evaluator execution | Response excerpt |
+|---|---|---|---|
+| Identity absent | **PASS** — stopped the policy-dependent readiness review because the new task had no governing identity. | Snorlax; agent `01a21b4a-68dc-7b83-9a2c-49e59bd30f3f`; turn `01a21b4a-68f3-7d03-aa0d-ca5288f2f96c` | “The policy-dependent readiness review cannot proceed: this new task has no approved handoff identity, and the active Skill copy has no activated-policy identity.” |
+| Identity malformed | **PASS** — stopped until the truncated revision and unresolved policy URL are replaced by a valid reference. | Mewtwo; agent `01a21b4b-f3c0-7592-9463-090ed0d084dd`; turn `01a21b4b-f3d8-78a1-981e-9996018f5138` | “The installed Skill’s `Policy revision` is truncated and its `Canonical policy` URL is unresolved.” |
+| Mixed-version approved handoff | **PASS** — proceeded under policy revision `2222222222222222222222222222222222222222`; differing installed versions did not block or retarget the review. | Psyduck; agent `01a21b4b-f393-7112-b89f-4f3cfb2a4b0f`; turn `01a21b4b-f3b2-7533-a728-3aa5df0e1ff0` | “Different installed Skill versions alone do not block the task or change its policy identity.” |
+| Material instruction conflict | **PASS** — stopped the readiness review and referred the resolver requirement conflict for owner adjudication. | Vulpix; agent `01a21b4b-f3e5-7b61-b311-f5629482c97d`; turn `01a21b4b-f3fe-7852-bd06-1a38b3e28e85` | “Stop the review and ask the owner to adjudicate the conflict.” |
+| Unresolved governing reference | **PASS** — stopped while the exact handoff policy file was unavailable; did not adopt the newer installed Skill. | Gengar; agent `01a21b4b-f40b-75a3-8abc-7395fd88084c`; turn `01a21b4b-f424-7153-8912-3c36bdfe20dd` | “Do not adopt the newer installed Skill.” |
 
 ## DISPOSABLE-TOOL-CACHE-ELIGIBILITY
 

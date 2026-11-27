@@ -7,15 +7,21 @@ description: "Plan software-development work, produce read-only Codex Plan-mode 
 
 This Skill helps ChatGPT sessions select approved work, prepare task handoffs, and review Codex plans. Issues define accepted scope; the canonical policy defines authority and process.
 
+<!-- activated-policy-identity -->
+Release CalVer: {{release_tag}}
+Source revision: {{source_revision}}
+Policy revision: {{policy_revision}}
+Builder revision: {{builder_revision}}
+Canonical policy: [docs/PROCESS.md](https://github.com/danielbyon/development-process/blob/{{policy_revision}}/docs/PROCESS.md)
+<!-- /activated-policy-identity -->
+
 ## Policy and evidence
 
 For a historical task that adopts a cleanup amendment, use its qualified immutable release tag and the full policy revision resolved from that tag. Record both in existing task-bound cleanup evidence as the `cleanup_amendment` reference. Apply the amendment only to the historical pin's superseded cleanup provisions; the original task pin, provenance, and unrelated gates remain unchanged. For a historical manual task without a structured record, use existing task-bound evidence such as the issue, PR, approved plan, branch, and worktree identity. Creating, migrating, exporting, or preserving a worktree-local task record is not a cleanup prerequisite; no new task-record schema or migration framework is required.
 
-For a new task, select the newest eligible qualified immutable published CalVer release and record its tag and policy identity once. Read [the canonical policy for this release](https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md) before applying it. The packager replaces the token in this policy link; an unresolved template is not an approved distribution.
+For a new task, use the identity embedded in this Skill when it is active. Read the canonical policy at its recorded policy revision before applying it. For an already approved task, the identity in its approved handoff governs continuation. Different installed Skill versions alone do not block the task or change its policy identity. Stop when the governing reference is missing, malformed, or unresolved. If instructions materially conflict with the approved handoff or pinned policy, stop the affected decision and ask the owner to adjudicate. Do not select a newer release or resolve GitHub's `latest` label.
 
-Successful release workflow execution and immutable publication qualify the release after its changes have merged into protected `main` through review and CI and the owner dispatches the workflow against that revision. The resolver checks the published release, tag, frozen context, provenance sidecars and successful workflow identity. Record the existing `task_pin` and `provenance` fields, including source, policy, builder, owner and payload identities. Ignore GitHub's `latest` designation. Missing or inconsistent evidence for the newest eligible release blocks selection without fallback. If no qualified immutable release exists, return `NO_IMMUTABLE_RELEASE`.
-
-The workflow remains responsible for its six qualification suites, deterministic packaging, provenance, signed attestation and immutable publication. Task resolution does not run `verify-release`, rebuild assets, reconstruct attestations or require a hosted installation or session revision check. Keep `verify-release` available for explicit audits and diagnostics.
+Release qualification remains separate from task admission. A successful owner-triggered workflow on reviewed and CI-approved merged `main`, followed by immutable publication, qualifies a release. The workflow retains its six qualification suites, deterministic packaging, provenance, signed attestation, and publication checks. Ordinary admission uses the active Skill identity and exact policy file; it does not inspect release assets, workflow records, or hosted session revision. It does not rebuild packages or reconstruct attestations. Keep `verify-release` for explicit audits and diagnostics.
 
 Successful release qualification does not install this Skill. The user manually installs and updates `development-orchestrator` and `development-review` in ChatGPT and Codex. Publication does not upload or activate Skills.
 
@@ -25,7 +31,7 @@ Continue an existing task with its recorded SHA or CalVer and source, policy and
 - Verify the repository root, read-only checkout revision, and active task identity from current evidence. If a task worktree exists, verify its path, branch, HEAD, and task identity; if none exists during planning, label any worktree/branch as proposed rather than verified. Inspect project instructions, accepted issues and specifications, decision records, source, tests, and active work as relevant.
 - Read the policy at the recorded task pin and verify its resolved immutable commit. Before relying on a local `docs/PROCESS.md`, verify that its source revision matches the pin; otherwise retrieve the exact commit through an available source or report that it is unavailable. Cite the immutable policy revision in the decision; never cite an unverified local copy as the pinned policy.
 - Separate verified facts from inferences. If the issue, source, policy pin, or task identity cannot be inspected, report the gap and stop at the affected decision.
-- Do not silently change the pinned policy. If the task cites another revision or the approved source has moved, identify the revisions and request owner adjudication.
+- Do not silently change the pinned policy. A newer installed Skill version alone does not change an approved handoff. If the governing reference cannot be resolved or instructions materially conflict with the approved handoff or pinned policy, stop the affected decision and request owner adjudication.
 
 - Record exact task root enrollment disposition and rationale at bootstrap in existing task evidence, including manual execution without enrollment. Do not require MCP connectivity for a supported `never-enrolled` disposition or treat `UNKNOWN_REPO` as proof. Update the evidence if enrollment is attempted later or the disposition changes. Do not add a task-record schema.
 - For a historical task, require successful immutable publication and explicit owner adoption before applying a cleanup amendment. A release that is qualified but not adopted is not an adopted amendment; publication alone does not authorize amended cleanup. After adoption, record its qualified immutable release tag and the resolved policy revision in existing task-bound cleanup evidence as `cleanup_amendment`. Preserve the original task pin and provenance.

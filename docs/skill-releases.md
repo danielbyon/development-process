@@ -6,7 +6,7 @@ A release distributes the policy and three Skills. It does not install or activa
 
 The owner is the repository's sole maintainer. The approved trust model treats an authenticated owner merge as sufficient; a compromised owner account is outside its scope.
 
-Before the first immutable release, new-task resolution returns `NO_IMMUTABLE_RELEASE`. Existing tasks keep their recorded pins. A release can run from trusted `main` without a promotion PR or an installed-Skill upgrade.
+Before the first immutable release, an explicit release audit reports `NO_IMMUTABLE_RELEASE`. New-task policy still comes from the active Skill identity and the policy file at its recorded revision. Existing tasks keep their recorded pins. A release can run from trusted `main` without a promotion PR or an installed-Skill upgrade.
 
 The PR #27 bootstrap at `e47c8882e590c3ec41d2d46f461d18ed73132534` is historical and is superseded as the proposed first-production-release source. Its review-provenance gap remains unresolved. That gap is part of the historical record; it is not a release gate for a corrected commit in trusted `main`, and no later statement should be presented as a review that did not occur.
 
@@ -38,7 +38,7 @@ Preflight freezes repository and run identity, original creation time, Pacific d
 
 Qualification runs all six required test suites against the checked-out source. A failed, skipped or empty suite blocks the release. Two independent builds must produce identical bytes, and the package verifier reconstructs and checks the same bundle before staging and publication.
 
-Read exact source Git objects, enforce allowed files and regular modes, and reconstruct transformed bytes independently. Source templates use `{{release_tag}}` only in the canonical policy binding. Replace it deterministically with the allocated tag. Supported legacy adapters replace only the exact canonical policy reference and associated revision label. Reject ambiguous substitutions and unknown formats. Preserve unrelated bytes and historical references.
+Read exact source Git objects, enforce allowed files and regular modes, and reconstruct transformed bytes independently. Transform version 2 requires one activated-policy identity block in each Skill. It fills the release CalVer and source, policy, and builder revisions from the frozen context and points the canonical policy link at the exact policy revision. Reject missing, duplicate, misplaced, conflicting, or unresolved fields. Keep transform version 1 available for historical packages and preserve all unrelated bytes and references.
 
 Exactly eight assets are required:
 
@@ -74,17 +74,11 @@ Correct published content with a new CalVer and supersession context. Never dele
 
 ## 6. Resolution, audits and staging
 
-### New task resolution
+### New task policy identity
 
-`resolve-task` selects the newest eligible published CalVer numerically. It ignores drafts, prereleases and GitHub's `latest` designation. It checks that the release is immutable, its tag points to the recorded source commit, the release body binds the frozen manifest context, and the manifest and three provenance sidecars agree on release, source, policy, builder and payload identities. It also checks that the original `workflow_dispatch` on `main` was owner-triggered and selects an owner-triggered successful publication attempt.
+New tasks use the identity embedded in the Skill active when the task begins. Read the canonical policy file at its recorded policy revision and confirm the link in the Skill names that same revision. Publishing a newer CalVer, including one marked `latest`, does not activate it. For an already approved task, the identity in its approved handoff governs continuation. Different installed Skill versions alone do not block continuation or change the policy identity in the approved handoff. Stop policy-dependent work when the governing reference is missing, malformed or unresolved. If instructions materially conflict with the approved handoff or pinned policy, stop the affected decision and ask the owner to adjudicate. Ordinary admission does not select a release or retrieve release assets and workflow records.
 
-The resolver reads `release-manifest.json` and the three provenance sidecars. It does not download ZIPs, rebuild packages, rerun qualification suites or verify attestations. Successful workflow execution and immutable publication qualify the release. The resolver reads attempt-specific workflow records and selects an owner-triggered successful publication attempt at or after the recorded qualification attempt. Later failed or in-progress reruns do not erase an already successful publication. A release with no successful publication attempt after qualification remains blocked.
-
-The result keeps the top-level `task_pin` and `provenance` fields and preserves source, policy, builder, owner and payload identities. Its `workflow_run` summary records the original, qualification, successful publication and latest attempt numbers; the status and conclusion describe the successful publication attempt. It adds `qualification_basis` set to `successful_release_workflow_and_immutable_publication`.
-
-The top-level `resolve-task` output shape is unchanged. Within `provenance.workflow_run`, `attempt`, `status`, and `conclusion` now describe the selected successful publication attempt; `latest_attempt` reports the newest attempt number. Consumers that treated the former fields as latest-run state must adjust. This candidate PR is still draft, so no published release depends on the nested field semantics.
-
-If the newest eligible release has missing, failed or inconsistent evidence, resolution stops without selecting an older release. The controller reports `RELEASE_QUALIFICATION_FAILED` for invalid records and `RELEASE_QUALIFICATION_UNAVAILABLE` when GitHub evidence cannot be read. An empty eligible set reports `NO_IMMUTABLE_RELEASE`.
+Use `resolve-task` only to return a recorded pin or check a Codex installation. Manual task admission needs no runtime check.
 
 ### Full release audit
 
@@ -92,15 +86,23 @@ If the newest eligible release has missing, failed or inconsistent evidence, res
 
 ### ChatGPT Skills
 
-`development-orchestrator` and `development-review` use the release qualification record during new-task selection. They do not require a hosted installation check, session revision evidence or a per-task `verify-release` run. A successful release does not mean the Skills are installed. The user manually installs and updates them in ChatGPT; publication does not upload or activate them. See [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt) for the upload interface.
+`development-orchestrator` and `development-review` use the identity embedded in the active Skill and the policy file at its exact revision. They do not resolve a release or require per-task asset, workflow, hosted installation or session revision evidence. A successful release does not mean the Skills are installed. The user manually installs and updates them in ChatGPT; publication does not upload or activate them. See [Skills in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt) for the upload interface.
 
 ### Local Codex Skill
 
-Run `python3 scripts/skill_release.py resolve-task --skill delegation-executor --installed-path <Codex Skill directory>`. The controller checks the files at that path against the release payload. These are runtime safety checks separate from release qualification. A missing directory or required file reports `LOCAL_INSTALLATION_UNAVAILABLE`. Drift, symlinks, unexpected files and invalid installation or compatibility evidence report `LOCAL_INSTALLATION_MISMATCH`. The existing `.skill-distribution.json` marker must agree with the inspected files. An older payload requires an authenticated compatibility record that identifies the inspected payload and source, selected policy and source, differences and applicable validation. The user manually installs and updates the Skill in Codex.
+For an explicit Codex runtime check, provide the recorded pin, all three recorded revisions, the Skill name and the actual loaded directory:
+
+```bash
+python3 scripts/skill_release.py resolve-task --task-pin <CalVer-or-existing-SHA> --source-revision <SHA> --policy-revision <SHA> --builder-revision <SHA> --skill delegation-executor --installed-path <Codex Skill directory>
+```
+
+The command rejects partial or incompatible argument combinations before making a remote API call. For a CalVer pin, it checks that exact immutable release and tag, verifies the tag target against the recorded source revision, authenticates the release manifest and executor sidecar using their asset digests, checks their binding and recorded identities, then compares the expected payload hashes with the files in the installed directory. The supplied pin fixes the release; the check does not search for the newest one. It skips workflow records, qualification runs, package rebuilds and attestation reconstruction. A successful native result preserves `task_pin` and `provenance` and may include `local_installation_verified`.
+
+Native verification of a historical SHA requires an existing authenticated task-bound payload evidence path. The current resolver has no supported path for that evidence and reports `LOCAL_INSTALLATION_UNAVAILABLE` for a historical SHA pin. Use the manual path when the approved task contract permits it, and preserve the recorded pin and provenance. Do not create evidence infrastructure or migrate the pin. Hosted release qualification remains a release-level check and does not establish the identity of a historical installed payload. A caller-supplied hash does not establish payload provenance. For a CalVer pin, an older installed payload may be checked only with existing authenticated compatibility evidence that matches the inspected files and task identity. A missing directory or required file also reports `LOCAL_INSTALLATION_UNAVAILABLE`. Drift, symlinks, unexpected files or invalid compatibility evidence report `LOCAL_INSTALLATION_MISMATCH`. If an exact payload match has an installation marker, its source revision, policy revision and archive SHA-256 must also match the authenticated release evidence. For a compatible older payload, keep the installed marker identity separate from the target release: the compatibility report's `installed_source` must match the marker's source revision, while its `revision` and `policy_revision` identify the target. The user manually installs and updates the Skill in Codex.
 
 ### Continuing tasks and installation
 
-Record the selected CalVer and policy identity once for a new task. `resolve-task --existing-pin <SHA-or-CalVer>` returns the recorded pin without release selection or qualification. Continuing tasks keep their recorded SHA or CalVer and source, policy and builder identities. Do not repin, force installation or updates, or repeat qualification unless the owner explicitly approves migration.
+Record the active Skill identity and exact policy revision for a new task. For an existing task, `python3 scripts/skill_release.py resolve-task --existing-pin <SHA-or-CalVer>` returns only the input pin unchanged; it does not inspect the installation or claim runtime verification. Do not combine `--existing-pin` with native verification options. Continuing tasks keep the identity in their approved handoff and the recorded SHA or CalVer and source, policy and builder identities. A different installed Skill version alone does not block continuation. Do not repin, force installation or updates, or repeat qualification unless the owner explicitly approves migration.
 
 Legacy schema-1 packages and explicit historical SHA pins remain supported. Preserve the serialized `issue5-codex-skill-staging` marker; changing it requires separate compatibility migration authorization. Temporary staging preserves unrelated Skills, verifies existing markers and files, refuses drift and cross-policy migration, and has no implicit production target.
 

@@ -34,6 +34,15 @@ SKILL_NAMES = {
     "delegation-executor",
 }
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+ACTIVATED_POLICY_IDENTITY_TEMPLATE = (
+    b"<!-- activated-policy-identity -->\n"
+    b"Release CalVer: {{release_tag}}\n"
+    b"Source revision: {{source_revision}}\n"
+    b"Policy revision: {{policy_revision}}\n"
+    b"Builder revision: {{builder_revision}}\n"
+    b"Canonical policy: [docs/PROCESS.md](https://github.com/danielbyon/development-process/blob/{{policy_revision}}/docs/PROCESS.md)\n"
+    b"<!-- /activated-policy-identity -->"
+)
 # Validate inline links and images; honor escaped brackets and even backslash runs.
 LOCAL_LINK_PATTERN = re.compile(
     r"(?<!\\)(?:\\\\)*(?:!\[[^\]]*\]|(?<!!)\[[^\]]*\])\(([^)]+)\)"
@@ -94,6 +103,20 @@ def _read_json(path: Path, description: str) -> dict[str, Any]:
 def load_manifest(root: Path) -> dict[str, Any]:
     """Read the distribution manifest without changing the repository."""
     return _read_json(root / MANIFEST_PATH.as_posix(), "Skill distribution manifest")
+
+
+def release_transform_version(manifest: Any) -> int:
+    """Return the supported transform version declared by a committed manifest."""
+    if (not isinstance(manifest, dict) or
+            type(manifest.get("schema_version")) is not int or
+            manifest["schema_version"] not in (1, 2)):
+        raise DistributionError("Unsupported committed manifest.")
+    schema = manifest["schema_version"]
+    transform_version = manifest.get("transform_version", 1) if schema == 1 else manifest.get("transform_version")
+    if (type(transform_version) is not int or transform_version not in (1, 2) or
+            (schema == 1 and transform_version != 1)):
+        raise DistributionError("Unsupported transformation version in committed manifest.")
+    return transform_version
 
 
 def _relative_path(value: Any, description: str) -> PurePosixPath:
@@ -164,15 +187,24 @@ def _validate_links(skill_md: Path, included_files: set[str]) -> None:
 def _skill_entries(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     manifest = load_manifest(root)
     schema = manifest.get("schema_version")
-    if schema not in (1, 2):
+    if type(schema) is not int or schema not in (1, 2):
         raise DistributionError("Unsupported distribution manifest schema_version.")
     revision = manifest.get("policy_revision")
     if schema == 1:
+        transform_version = manifest.get("transform_version", 1)
+        if type(transform_version) is not int or transform_version != 1:
+            raise DistributionError("Unsupported release template contract.")
         _policy_file_exists(root, revision)
     else:
-        if manifest.get("policy_reference") != "{{release_tag}}" or manifest.get("transform_version") != 1:
+        transform_version = manifest.get("transform_version")
+        expected_reference = "{{release_tag}}" if transform_version == 1 else "{{policy_revision}}"
+        if (
+            manifest.get("policy_reference") != expected_reference
+            or type(transform_version) is not int
+            or transform_version not in (1, 2)
+        ):
             raise DistributionError("Unsupported release template contract.")
-        revision = "{{release_tag}}"
+        revision = expected_reference
     raw_skills = manifest.get("skills")
     if not isinstance(raw_skills, list):
         raise DistributionError("The distribution manifest must list its Skills.")
@@ -221,11 +253,27 @@ def _skill_entries(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 f"{name}/SKILL.md policy reference differs from the manifest pin."
             )
         if schema == 2:
-            if skill_text.count(policy_url) != 1 or skill_text.count(revision) != 1:
-                raise DistributionError(f"{name} has an unexpected release token outside its canonical policy URL.")
+            expected_tokens = (
+                {b"{{release_tag}}": 1}
+                if transform_version == 1
+                else {
+                    b"{{release_tag}}": 1,
+                    b"{{source_revision}}": 1,
+                    b"{{policy_revision}}": 2,
+                    b"{{builder_revision}}": 1,
+                }
+            )
+            if skill_text.count(policy_url) != 1 or any(
+                skill_text.count(token.decode("ascii")) != count
+                for token, count in expected_tokens.items()
+            ):
+                raise DistributionError(f"{name} has an unexpected release template token.")
             for relative in files:
-                if relative.as_posix() != "SKILL.md" and b"{{release_tag}}" in (directory / relative).read_bytes():
-                    raise DistributionError(f"{name} has an unexpected release token in {relative}.")
+                if relative.as_posix() != "SKILL.md" and any(
+                    token in (directory / relative).read_bytes()
+                    for token in expected_tokens
+                ):
+                    raise DistributionError(f"{name} has an unexpected release template token in {relative}.")
         metadata_path = directory / "agents" / "openai.yaml"
         try:
             metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8"))
@@ -285,7 +333,7 @@ def resolve_task_policy(root: Path, task_policy_revision: str | None = None) -> 
         else task_policy_revision
     )
     if task_policy_revision is None and manifest.get("schema_version") == 2:
-        raise DistributionError("Use resolve-task to select a qualified immutable release.")
+        raise DistributionError("Use the activated Skill policy reference for new tasks.")
     _policy_file_exists(root, selected)
     return selected
 
@@ -794,6 +842,43 @@ def _regular_blob(root: Path, revision: str, path: str) -> bytes:
     return _committed_file(root, revision, path)
 
 
+def _materialize_activated_policy_identity(payload: bytes, context: dict) -> bytes:
+    """Fill the versioned identity fields in a Skill document."""
+    field_labels = (
+        b"Release CalVer:",
+        b"Source revision:",
+        b"Policy revision:",
+        b"Builder revision:",
+        b"Canonical policy:",
+    )
+    if any(payload.count(label) != 1 for label in field_labels):
+        raise DistributionError("Duplicate or misplaced activated-policy identity field.")
+    if (
+        payload.count(b"<!-- activated-policy-identity -->") != 1
+        or payload.count(b"<!-- /activated-policy-identity -->") != 1
+        or payload.count(ACTIVATED_POLICY_IDENTITY_TEMPLATE) != 1
+    ):
+        raise DistributionError("Missing or invalid activated-policy identity block.")
+    expected_tokens = {
+        b"{{release_tag}}": 1,
+        b"{{source_revision}}": 1,
+        b"{{policy_revision}}": 2,
+        b"{{builder_revision}}": 1,
+    }
+    if any(payload.count(token) != count for token, count in expected_tokens.items()):
+        raise DistributionError("Duplicate, misplaced, or unresolved activated-policy identity token.")
+    values = {
+        b"{{release_tag}}": context["release_version"].encode("ascii"),
+        b"{{source_revision}}": context["source_revision"].encode("ascii"),
+        b"{{policy_revision}}": context["policy_revision"].encode("ascii"),
+        b"{{builder_revision}}": context["builder_revision"].encode("ascii"),
+    }
+    block = ACTIVATED_POLICY_IDENTITY_TEMPLATE
+    for token, value in values.items():
+        block = block.replace(token, value)
+    return payload.replace(ACTIVATED_POLICY_IDENTITY_TEMPLATE, block)
+
+
 def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
     """Reconstruct the complete release using trusted code and committed data only.
 
@@ -814,7 +899,8 @@ def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
         _json_bytes(context)
     except (ValueError, TypeError) as error:
         raise DistributionError("Invalid release date or context.") from error
-    if context.get("transform_version", 1) != 1:
+    transform_version = context.get("transform_version", 1)
+    if type(transform_version) is not int or transform_version not in (1, 2):
         raise DistributionError("Unsupported transformation version.")
     for key in ("source_revision", "policy_revision", "builder_revision"):
         _require_revision(root, context.get(key))
@@ -826,8 +912,9 @@ def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
         manifest = json.loads(_regular_blob(root, source, MANIFEST_PATH.as_posix()))
     except (ValueError, UnicodeDecodeError) as error:
         raise DistributionError("Invalid committed manifest.") from error
-    if not isinstance(manifest, dict) or manifest.get("schema_version") not in (1, 2):
-        raise DistributionError("Unsupported committed manifest.")
+    manifest_transform_version = release_transform_version(manifest)
+    if transform_version != manifest_transform_version:
+        raise DistributionError("Release context transform_version disagrees with committed manifest.")
     bundle = {}
     # Materialize data for existing validators; never execute historical code.
     with tempfile.TemporaryDirectory(prefix="release-source-") as temporary:
@@ -862,11 +949,25 @@ def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
             member = f"{entry['name']}/SKILL.md"
             original = payloads[member]
             if manifest["schema_version"] == 2:
-                token = b"{{release_tag}}"
-                canonical = b"https://github.com/danielbyon/development-process/blob/" + token + b"/docs/PROCESS.md"
-                if original.count(canonical) != 1 or original.count(token) != 1:
-                    raise DistributionError("Missing or ambiguous policy template reference.")
-                payloads[member] = original.replace(canonical, canonical.replace(token, version.encode()))
+                if transform_version == 1:
+                    token = b"{{release_tag}}"
+                    canonical = b"https://github.com/danielbyon/development-process/blob/" + token + b"/docs/PROCESS.md"
+                    if original.count(canonical) != 1 or original.count(token) != 1:
+                        raise DistributionError("Missing or ambiguous policy template reference.")
+                    payloads[member] = original.replace(canonical, canonical.replace(token, version.encode()))
+                else:
+                    materialized = _materialize_activated_policy_identity(original, context)
+                    if any(
+                        token in materialized
+                        for token in (
+                            b"{{release_tag}}",
+                            b"{{source_revision}}",
+                            b"{{policy_revision}}",
+                            b"{{builder_revision}}",
+                        )
+                    ):
+                        raise DistributionError("Unresolved activated-policy identity field.")
+                    payloads[member] = materialized
             else:
                 pin = manifest["policy_revision"].encode()
                 url = b"https://github.com/danielbyon/development-process/blob/" + pin + b"/docs/PROCESS.md"
@@ -895,7 +996,7 @@ def _release_bundle(root: Path, context: dict) -> dict[str, bytes]:
             bundle[archive_name] = buffer.getvalue()
             provenance = dict(schema_version=2, skill_name=entry["name"], release_version=version,
                               source_revision=source, policy_revision=context["policy_revision"],
-                              builder_revision=context["builder_revision"], transform_version=1,
+                              builder_revision=context["builder_revision"], transform_version=transform_version,
                               source_files=mapping, original_sha256={k:hashlib.sha256(v).hexdigest() for k,v in originals.items()},
                               payload_sha256={k:hashlib.sha256(v).hexdigest() for k,v in payloads.items()},
                               archive_sha256=hashlib.sha256(bundle[archive_name]).hexdigest())

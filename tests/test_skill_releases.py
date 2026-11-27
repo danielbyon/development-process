@@ -15,6 +15,14 @@ def evidence_operation(name):
 def evidence_call(name,*args,**kwargs):
     return evidence_operation(name)(*args,**kwargs)
 
+def committed_transform_version(root, source_revision):
+    import json
+    import skill_distribution as package
+
+    manifest = json.loads(release.git(
+        root, 'show', f'{source_revision}:{package.MANIFEST_PATH.as_posix()}'))
+    return package.release_transform_version(manifest)
+
 
 
 
@@ -30,11 +38,16 @@ class ReleaseTests(unittest.TestCase):
         for pin in ('a' * 40, '2026.11.18'):
             with self.subTest(pin=pin):
                 self.assertEqual(release.resolve_task(None, existing_pin=pin), {'task_pin': pin})
-    def test_no_release_blocks(self):
+    def test_unpinned_task_requires_an_explicit_reference(self):
         class API:
-            def releases(self): return []
-        with self.assertRaisesRegex(release.ReleaseError, 'NO_IMMUTABLE_RELEASE'):
-            release.resolve_task(API())
+            release_calls = 0
+            def releases(self):
+                self.release_calls += 1
+                return []
+        api = API()
+        with self.assertRaisesRegex(release.ReleaseError, 'EXPLICIT_TASK_PIN_REQUIRED'):
+            release.resolve_task(api)
+        self.assertEqual(api.release_calls, 0)
     def test_skipped_qualification_blocks(self):
         result = unittest.TestResult(); result.testsRun=1; result.skipped=[('test','reason')]
         with self.assertRaises(release.ReleaseError): release.require_tests(result)
@@ -468,11 +481,12 @@ class PreflightRetryTests(unittest.TestCase):
         source=release.git(root,'rev-parse','HEAD').decode().strip()
         policy=release.git(root,'log','--first-parent','-1','--format=%H',source,
                            '--','docs/PROCESS.md').decode().strip()
+        transform_version=committed_transform_version(root,source)
         created='2026-11-17T09:00:00Z'
         original={'release_context_schema_version':1,'repository':release.REPOSITORY,
             'source_revision':source,'builder_revision':source,'policy_revision':policy,
             'owner_id':123,'run_id':41,'run_attempt':1,'validation_attempt':1,
-            'created_at':created,'transform_version':1,'supersedes':'',
+            'created_at':created,'transform_version':transform_version,'supersedes':'',
             'correction_reason':'','release_version':'2026.11.17'}
         api=Mock()
         api.run.return_value={'id':41,'event':'workflow_dispatch','head_branch':'main',
@@ -495,6 +509,7 @@ class PreflightRetryTests(unittest.TestCase):
         self.assertEqual(context['release_version'],'2026.11.17')
         self.assertEqual(context['run_attempt'],1)
         self.assertEqual(context['validation_attempt'],2)
+        self.assertEqual(context['transform_version'],transform_version)
         api.releases.assert_not_called()
         api.tags.assert_not_called()
 
@@ -531,11 +546,12 @@ class PreflightRetryTests(unittest.TestCase):
         source=release.git(root,'rev-parse','HEAD').decode().strip()
         policy=release.git(root,'log','--first-parent','-1','--format=%H',source,
                            '--','docs/PROCESS.md').decode().strip()
+        transform_version=committed_transform_version(root,source)
         created='2026-11-17T09:00:00Z'
         original={'release_context_schema_version':1,'repository':release.REPOSITORY,
             'source_revision':source,'builder_revision':source,'policy_revision':policy,
             'owner_id':123,'run_id':41,'run_attempt':1,'validation_attempt':1,
-            'created_at':created,'transform_version':1,'supersedes':'',
+            'created_at':created,'transform_version':transform_version,'supersedes':'',
             'correction_reason':'','release_version':'2026.11.17','evidence':{}}
         api=Mock()
         api.run.return_value={'id':41,'event':'workflow_dispatch','head_branch':'main',
@@ -601,7 +617,7 @@ class PackagingIntegrationTests(unittest.TestCase):
             'release_version':'2026.11.16','source_revision':source,
             'builder_revision':source,'policy_revision':policy,'owner_id':123,
             'run_id':7,'run_attempt':1,'created_at':'2026-11-16T01:00:00Z',
-            'transform_version':1}
+            'transform_version':committed_transform_version(root,source)}
         with tempfile.TemporaryDirectory() as tmp:
             directory=Path(tmp)/'bundle'
             packaging.build_release_packages(root,directory,context)
@@ -642,6 +658,7 @@ class AdversarialProvenanceTests(unittest.TestCase):
         def identity(c):return release.digest(release.canonical({k:v for k,v in c.items() if k not in ('qualified_artifacts','validation_attempt','current_validation')}))
         self.assertEqual(identity(original),identity(retried))
     def test_reconstructed_but_unqualified_release_is_rejected(self):
+        import json
         import tempfile
         import skill_distribution as packaging
         from unittest.mock import Mock
@@ -651,7 +668,8 @@ class AdversarialProvenanceTests(unittest.TestCase):
                            '--','docs/PROCESS.md').decode().strip()
         context={'repository':release.REPOSITORY,'release_version':'2026.11.16',
             'source_revision':source,'builder_revision':source,
-            'policy_revision':policy,'owner_id':123,'transform_version':1}
+            'policy_revision':policy,'owner_id':123,
+            'transform_version':committed_transform_version(root,source)}
         with tempfile.TemporaryDirectory() as tmp:
             directory=Path(tmp)/'bundle';packaging.build_release_packages(root,directory,context)
             assets=[{'name':p.name,'id':n} for n,p in enumerate(directory.iterdir())]
@@ -1061,151 +1079,19 @@ class SuiteExecutionTests(unittest.TestCase):
 
 class RuntimeResolutionTests(unittest.TestCase):
     def setUp(self):
-        import hashlib
-        import json
         from unittest.mock import Mock, patch
 
         self.api = Mock()
-        self.context = {
-            'release_context_schema_version': 1,
-            'repository': release.REPOSITORY,
-            'release_version': '2026.11.20',
-            'source_revision': 'a' * 40,
-            'policy_revision': 'b' * 40,
-            'builder_revision': 'a' * 40,
-            'owner_id': 123,
-            'run_id': 77,
-            'run_attempt': 1,
-            'created_at': '2026-11-20T09:00:00Z',
-            'transform_version': 1,
-            'qualification': {
-                'run_attempt': 2,
-                'suites': [
-                    {'suite': suite, 'tests': 1} for suite in release.SUITES
-                ],
-            },
-        }
-        skill_names = (
-            'development-orchestrator',
-            'development-review',
-            'delegation-executor',
-        )
-        self.payloads = {}
-        sidecars = {}
-        package_hashes = {}
-        for skill in skill_names:
-            members = {
-                f'{skill}/SKILL.md': hashlib.sha256((skill + ' instructions').encode()).hexdigest(),
-                f'{skill}/agents/openai.yaml': hashlib.sha256((skill + ' metadata').encode()).hexdigest(),
-            }
-            self.payloads[skill] = {
-                member.removeprefix(skill + '/'): value
-                for member, value in members.items()
-            }
-            sidecar = {
-                'schema_version': 2,
-                'skill_name': skill,
-                'release_version': self.context['release_version'],
-                'source_revision': self.context['source_revision'],
-                'policy_revision': self.context['policy_revision'],
-                'builder_revision': self.context['builder_revision'],
-                'transform_version': 1,
-                'source_files': {
-                    f'{skill}/SKILL.md': f'skills/{skill}/SKILL.md',
-                    f'{skill}/agents/openai.yaml': f'skills/{skill}/agents/openai.yaml',
-                },
-                'payload_sha256': members,
-                'archive_sha256': 'd' * 64,
-            }
-            sidecar_name = f'{skill}.provenance.json'
-            sidecars[sidecar_name] = (
-                json.dumps(sidecar, sort_keys=True, indent=2) + '\n'
-            ).encode()
-            package_hashes[sidecar_name] = hashlib.sha256(sidecars[sidecar_name]).hexdigest()
-            package_hashes[f'{skill}.zip'] = 'd' * 64
-
-        asset_names = sorted([
-            *(f'{skill}.zip' for skill in skill_names),
-            *(f'{skill}.provenance.json' for skill in skill_names),
-            'release-manifest.json',
-            'SHA256SUMS',
-        ])
-        manifest = {
-            'schema_version': 2,
-            'context': self.context,
-            'assets': asset_names,
-            'asset_sha256': package_hashes,
-        }
-        self.asset_bytes = {
-            'release-manifest.json': (
-                json.dumps(manifest, sort_keys=True, indent=2) + '\n'
-            ).encode(),
-            **sidecars,
-        }
-        self.release_detail = {
-            'id': 20,
-            'tag_name': self.context['release_version'],
-            'name': self.context['release_version'],
-            'body': 'Release context: ' + hashlib.sha256(
-                json.dumps(self.context, sort_keys=True, separators=(',', ':')).encode()
-            ).hexdigest(),
-            'draft': False,
-            'prerelease': False,
-            'immutable': True,
-            'assets': [
-                {'id': index + 1, 'name': name}
-                for index, name in enumerate(asset_names)
-            ],
-        }
         self.api.releases.return_value = [
-            {'id': 18, 'tag_name': '2026.11.18.10', 'draft': False, 'prerelease': False},
-            {'id': 20, 'tag_name': '2026.11.20', 'draft': False, 'prerelease': False},
-            {'id': 21, 'tag_name': '2026.11.21', 'draft': True, 'prerelease': False},
-            {'id': 22, 'tag_name': '2026.11.22', 'draft': False, 'prerelease': True},
+            {'tag_name': '2026.11.20', 'draft': False, 'prerelease': False}
         ]
-        self.api.release.return_value = self.release_detail
-        self.api.tags.return_value = [{
-            'ref': 'refs/tags/2026.11.20',
-            'object': {'sha': self.context['source_revision'], 'type': 'commit'},
-        }]
-        self.api.record.return_value = {'owner': {'id': self.context['owner_id']}}
-        self.api.run.return_value = {
-            'id': self.context['run_id'],
-            'run_attempt': 3,
-            'event': 'workflow_dispatch',
-            'head_branch': 'main',
-            'head_sha': self.context['source_revision'],
-            'path': '.github/workflows/skill-release.yml@refs/heads/main',
-            'actor': {'id': self.context['owner_id']},
-            'triggering_actor': {'id': self.context['owner_id']},
-            'created_at': self.context['created_at'],
-            'status': 'completed',
-            'conclusion': 'success',
-            'html_url': 'https://github.com/danielbyon/development-process/actions/runs/77',
-        }
-        self.workflow_attempts = {
-            attempt_number: {
-                **self.api.run.return_value,
-                'run_attempt': attempt_number,
-                'status': 'completed',
-                'conclusion': conclusion,
-            }
-            for attempt_number, conclusion in (
-                (1, 'failure'),
-                (2, 'failure'),
-                (3, 'success'),
-            )
-        }
-        self.api.run_attempt.side_effect = (
-            lambda run_id, attempt_number: self.workflow_attempts[attempt_number]
-        )
-        self.api.asset.side_effect = lambda asset: self.asset_bytes[asset['name']]
+        self.context = {"release_version": "2026.11.20"}
         self.verify_release = self.enterContext(
-            patch.object(release, 'verify_release', side_effect=AssertionError(
-                'ordinary task resolution must not run the full release audit'
+            patch.object(release, "verify_release", side_effect=AssertionError(
+                "ordinary task resolution must not run the full release audit"
             ))
         )
-        self.enterContext(patch.object(release, 'GitHubAPI', return_value=self.api))
+        self.enterContext(patch.object(release, "GitHubAPI", return_value=self.api))
 
     def run_cli(self, *arguments):
         import io
@@ -1221,284 +1107,774 @@ class RuntimeResolutionTests(unittest.TestCase):
 
         self.verify_release.side_effect = None
         self.verify_release.return_value = self.context
-        status, output, error = self.run_cli('verify-release')
-        self.assertEqual((status, error), (0, ''))
+        status, output, error = self.run_cli("verify-release")
+        self.assertEqual((status, error), (0, ""))
         self.assertEqual(json.loads(output), self.context)
-        self.assertNotIn('task_pin', json.loads(output))
-        self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.20')
+        self.assertNotIn("task_pin", json.loads(output))
+        self.assertEqual(self.verify_release.call_args.args[-1], "2026.11.20")
 
     def test_release_only_keeps_explicit_historical_tag(self):
         self.verify_release.side_effect = None
         self.verify_release.return_value = self.context
-        status, _, error = self.run_cli('verify-release', '--tag', '2026.11.18.2')
-        self.assertEqual((status, error), (0, ''))
-        self.assertEqual(self.verify_release.call_args.args[-1], '2026.11.18.2')
-        self.api.releases.assert_not_called()
+        status, _, error = self.run_cli("verify-release", "--tag", "2026.11.18.2")
+        self.assertEqual((status, error), (0, ""))
+        self.assertEqual(self.verify_release.call_args.args[-1], "2026.11.18.2")
 
-    def test_new_task_returns_release_provenance_and_qualification_basis(self):
+    def test_unpinned_task_admission_fails_without_release_discovery(self):
+        with self.assertRaisesRegex(release.ReleaseError, "EXPLICIT_TASK_PIN_REQUIRED"):
+            release.resolve_task(self.api)
+        for name in (
+            "releases", "release", "release_by_tag", "tags", "asset", "record",
+            "request", "run", "run_attempt", "verify_attestation", "verify_qualification_attestation",
+        ):
+            getattr(self.api, name).assert_not_called()
+
+
+class ExplicitNativeResolutionTests(unittest.TestCase):
+    def setUp(self):
         import json
+        from unittest.mock import Mock
         import skill_distribution as package
+
+        self.tag = '2026.11.25'
+        self.context = {
+            'release_context_schema_version': 1,
+            'repository': release.REPOSITORY,
+            'release_version': self.tag,
+            'source_revision': 'a' * 40,
+            'policy_revision': 'b' * 40,
+            'builder_revision': 'a' * 40,
+            'owner_id': 123,
+            'run_id': 77,
+            'run_attempt': 1,
+            'created_at': '2026-11-25T09:00:00Z',
+            'transform_version': 2,
+        }
+        self.api = Mock()
+        self.api.base = '/repos/' + release.REPOSITORY
+        skill_names = tuple(package.SKILL_NAMES)
+        self.payload_bytes = {
+            'SKILL.md': b'delegation-executor instructions',
+            'agents/openai.yaml': b'delegation-executor metadata',
+        }
+        self.payloads = {
+            member: release.digest(content)
+            for member, content in self.payload_bytes.items()
+        }
+        asset_bytes = {}
+        asset_hashes = {}
+        for skill in skill_names:
+            members = {
+                f'{skill}/SKILL.md': release.digest((skill + ' instructions').encode()),
+                f'{skill}/agents/openai.yaml': release.digest((skill + ' metadata').encode()),
+            }
+            sidecar = {
+                'schema_version': 2,
+                'skill_name': skill,
+                'release_version': self.tag,
+                'source_revision': self.context['source_revision'],
+                'policy_revision': self.context['policy_revision'],
+                'builder_revision': self.context['builder_revision'],
+                'transform_version': 2,
+                'source_files': {
+                    f'{skill}/SKILL.md': f'skills/{skill}/SKILL.md',
+                    f'{skill}/agents/openai.yaml': f'skills/{skill}/agents/openai.yaml',
+                },
+                'payload_sha256': members,
+                'archive_sha256': 'd' * 64,
+            }
+            sidecar_name = f'{skill}.provenance.json'
+            sidecar_bytes = (json.dumps(sidecar, sort_keys=True, indent=2) + '\n').encode()
+            asset_bytes[sidecar_name] = sidecar_bytes
+            asset_hashes[sidecar_name] = release.digest(sidecar_bytes)
+            asset_hashes[f'{skill}.zip'] = 'd' * 64
+
+        self.asset_bytes = asset_bytes
+        self.asset_names = sorted([
+            *(f'{skill}.zip' for skill in skill_names),
+            *(f'{skill}.provenance.json' for skill in skill_names),
+            'release-manifest.json', 'SHA256SUMS',
+        ])
+        manifest = {
+            'schema_version': 2,
+            'context': dict(self.context),
+            'assets': self.asset_names,
+            'asset_sha256': asset_hashes,
+        }
+        self.manifest = manifest
+        self._write_manifest()
+        self.release_detail = {
+            'id': 20,
+            'tag_name': self.tag,
+            'name': self.tag,
+            'body': 'Release context: ' + release.digest(
+                release.canonical(release.frozen_release_context(self.context))
+            ),
+            'draft': False,
+            'prerelease': False,
+            'immutable': True,
+            'assets': [],
+        }
+        self._refresh_release_assets()
+        self.api.release_by_tag.return_value = self.release_detail
+        self.api.tags.return_value = [{
+            'ref': 'refs/tags/' + self.tag,
+            'object': {'sha': self.context['source_revision'], 'type': 'commit'},
+        }]
+        self.api.asset.side_effect = lambda asset: self.asset_bytes[asset['name']]
+
+    def _write_manifest(self):
+        import json
+
+        self.asset_bytes['release-manifest.json'] = (
+            json.dumps(self.manifest, sort_keys=True, indent=2) + '\n'
+        ).encode()
+
+    def _refresh_release_assets(self):
+        asset_digests = self.manifest['asset_sha256']
+        manifest_digest = release.digest(self.asset_bytes['release-manifest.json'])
+        digests = {
+            'release-manifest.json': manifest_digest,
+            **asset_digests,
+            'SHA256SUMS': 'e' * 64,
+        }
+        self.release_detail['assets'] = [
+            {
+                'id': index + 1,
+                'name': name,
+                'digest': 'sha256:' + digests[name],
+            }
+            for index, name in enumerate(self.asset_names)
+        ]
+
+    def _set_tag(self, tag):
+        import json
+
+        self.tag = tag
+        self.context['release_version'] = tag
+        self.manifest['context']['release_version'] = tag
+        for name, content in list(self.asset_bytes.items()):
+            if not name.endswith('.provenance.json'):
+                continue
+            sidecar = json.loads(content)
+            sidecar['release_version'] = tag
+            encoded = (json.dumps(sidecar, sort_keys=True, indent=2) + '\n').encode()
+            self.asset_bytes[name] = encoded
+            self.manifest['asset_sha256'][name] = release.digest(encoded)
+        self._write_manifest()
+        self.release_detail['tag_name'] = tag
+        self.release_detail['name'] = tag
+        self.release_detail['body'] = 'Release context: ' + release.digest(
+            release.canonical(release.frozen_release_context(self.manifest['context']))
+        )
+        self.api.tags.return_value = [{
+            'ref': 'refs/tags/' + tag,
+            'object': {'sha': self.context['source_revision'], 'type': 'commit'},
+        }]
+        self._refresh_release_assets()
+
+    def _install(self, directory, *, payload_bytes=None, marker=False):
+        import json
+        from pathlib import Path
+
+        installed = self.payload_bytes if payload_bytes is None else payload_bytes
+        for member, content in installed.items():
+            path = Path(directory) / member
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        if marker:
+            metadata = {
+                'schema_version': 1,
+                'skill_name': 'delegation-executor',
+                'policy_revision': self.context['policy_revision'],
+                'source_revision': self.context['source_revision'],
+                'archive_sha256': 'd' * 64,
+                'payload_sha256': {member: release.digest(data) for member, data in installed.items()},
+            }
+            (Path(directory) / '.skill-distribution.json').write_text(json.dumps(metadata))
+
+    def _resolve(self, directory, **options):
+        return release.resolve_task(
+            self.api,
+            task_pin=self.tag,
+            source_revision=self.context['source_revision'],
+            policy_revision=self.context['policy_revision'],
+            builder_revision=self.context['builder_revision'],
+            skill='delegation-executor',
+            installed_path=directory,
+            **options,
+        )
+
+    def _run_cli(self, *arguments):
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
         from unittest.mock import patch
 
-        with patch.object(package, 'verify_release_packages', side_effect=AssertionError(
-            'ordinary task resolution must not rebuild release packages'
-        )) as package_verifier:
-            status, output, error = self.run_cli(
-                'resolve-task', '--skill', 'development-orchestrator'
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(release, 'GitHubAPI', return_value=self.api), \
+                redirect_stdout(stdout), redirect_stderr(stderr):
+            status = release.main(arguments)
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def _assert_no_qualification_calls(self):
+        for name in ('releases', 'release', 'run', 'run_attempt', 'record',
+                     'request', 'verify_attestation', 'verify_qualification_attestation'):
+            getattr(self.api, name).assert_not_called()
+
+    def test_native_success_uses_only_the_selected_calver_and_authenticated_assets(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            result = self._resolve(directory)
+
+        self.assertEqual(result['task_pin'], self.tag)
+        self.assertTrue(result['local_installation_verified'])
+        self.assertEqual(result['provenance']['source_revision'], self.context['source_revision'])
+        self.assertEqual(
+            result['provenance']['verified_payload_identities']['delegation-executor'],
+            self.payloads,
+        )
+        self.api.release_by_tag.assert_called_once_with(self.tag)
+        self.assertEqual(
+            [call.args[0]['name'] for call in self.api.asset.call_args_list],
+            ['release-manifest.json', 'delegation-executor.provenance.json'],
+        )
+        self.api.tags.assert_called_once()
+        self._assert_no_qualification_calls()
+
+    def test_exact_installation_rejects_well_formed_wrong_marker_identity(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory, marker=True)
+            marker_path = Path(directory) / '.skill-distribution.json'
+            original = json.loads(marker_path.read_text())
+            self.assertTrue(self._resolve(directory)['local_installation_verified'])
+            wrong_values = {
+                'source_revision': 'f' * 40,
+                'policy_revision': 'e' * 40,
+                'archive_sha256': 'c' * 64,
+            }
+            for key, value in wrong_values.items():
+                marker = {**original, key: value}
+                marker_path.write_text(json.dumps(marker))
+                with self.subTest(key=key), self.assertRaisesRegex(
+                    release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'
+                ):
+                    self._resolve(directory)
+
+    def test_sequenced_calver_uses_exact_release_by_tag_endpoint(self):
+        import tempfile
+
+        tag = self.tag + '.2'
+        self._set_tag(tag)
+        self.api.request.return_value = self.release_detail
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            result = self._resolve(directory)
+        self.assertEqual(result['task_pin'], tag)
+        self.api.request.assert_called_once_with(
+            'GET', self.api.base + '/releases/tags/' + tag
+        )
+        self.api.release_by_tag.assert_not_called()
+
+    def test_existing_pin_is_exact_passthrough_and_rejects_native_options(self):
+        import json
+        from unittest.mock import patch
+
+        pin = 'c' * 40
+        with patch.object(release, '_verify_local_installation') as inspect:
+            self.assertEqual(release.resolve_task(self.api, existing_pin=pin), {'task_pin': pin})
+            inspect.assert_not_called()
+        self._assert_no_qualification_calls()
+        self.api.release_by_tag.assert_not_called()
+        status, output, error = self._run_cli('resolve-task', '--existing-pin', pin)
+        self.assertEqual((status, error), (0, ''))
+        self.assertEqual(json.loads(output), {'task_pin': pin})
+        with self.assertRaisesRegex(release.ReleaseError, 'EXISTING_PIN_INCOMPATIBLE_OPTIONS'):
+            release.resolve_task(self.api, existing_pin=pin, skill='delegation-executor')
+        status, output, error = self._run_cli(
+            'resolve-task', '--existing-pin', pin, '--task-pin', self.tag
+        )
+        self.assertEqual(status, 1)
+        self.assertEqual(output, '')
+        self.assertIn('EXISTING_PIN_INCOMPATIBLE_OPTIONS', error)
+        self.api.release_by_tag.assert_not_called()
+
+    def test_cli_accepts_explicit_native_identity(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            status, output, error = self._run_cli(
+                'resolve-task', '--task-pin', self.tag,
+                '--source-revision', self.context['source_revision'],
+                '--policy-revision', self.context['policy_revision'],
+                '--builder-revision', self.context['builder_revision'],
+                '--skill', 'delegation-executor', '--installed-path', directory,
             )
         self.assertEqual((status, error), (0, ''))
-        result = json.loads(output)
-        self.assertEqual(set(result), {'task_pin', 'provenance'})
-        self.assertEqual(result['task_pin'], '2026.11.20')
-        provenance = result['provenance']
-        self.assertEqual(provenance['source_revision'], 'a' * 40)
-        self.assertEqual(provenance['policy_revision'], 'b' * 40)
-        self.assertEqual(provenance['builder_revision'], 'a' * 40)
-        self.assertEqual(provenance['owner_id'], 123)
-        self.assertEqual(provenance['verified_payload_identities'], self.payloads)
-        self.assertEqual(
-            provenance['qualification_basis'],
-            'successful_release_workflow_and_immutable_publication',
+        self.assertEqual(json.loads(output)['task_pin'], self.tag)
+
+    def test_cli_rejects_incomplete_native_options_before_remote_calls(self):
+        status, output, error = self._run_cli(
+            'resolve-task', '--skill', 'delegation-executor'
         )
-        self.assertEqual(provenance['workflow_run']['id'], 77)
-        self.assertEqual(provenance['workflow_run']['attempt'], 3)
-        self.assertEqual(provenance['workflow_run']['original_attempt'], 1)
-        self.assertEqual(provenance['workflow_run']['qualification_attempt'], 2)
-        self.assertEqual(provenance['workflow_run']['publication_attempt'], 3)
-        self.assertEqual(provenance['workflow_run']['latest_attempt'], 3)
-        self.assertEqual(provenance['workflow_run']['conclusion'], 'success')
-        self.verify_release.assert_not_called()
-        package_verifier.assert_not_called()
-        self.api.verify_attestation.assert_not_called()
-        self.api.verify_qualification_attestation.assert_not_called()
-        self.api.release.assert_called_once_with(20)
-        self.api.run.assert_called_once_with(77)
-        fetched_names = [call.args[0]['name'] for call in self.api.asset.call_args_list]
-        self.assertEqual(set(fetched_names), {
-            'release-manifest.json',
-            'development-orchestrator.provenance.json',
-            'development-review.provenance.json',
-            'delegation-executor.provenance.json',
-        })
-        self.assertFalse(any(name.endswith('.zip') for name in fetched_names))
-        self.assertEqual(
-            [(call.args[0], call.args[1]) for call in self.api.run_attempt.call_args_list],
-            [(77, 1), (77, 3)],
+        self.assertEqual(status, 1)
+        self.assertEqual(output, '')
+        self.assertIn('NATIVE_VERIFICATION_ARGUMENTS_REQUIRED', error)
+        self.api.release_by_tag.assert_not_called()
+        self.api.tags.assert_not_called()
+        self.api.asset.assert_not_called()
+
+    def test_cli_does_not_accept_caller_supplied_payload_hashes(self):
+        import io
+        from unittest.mock import patch
+
+        with patch.object(release, 'GitHubAPI', return_value=self.api) as api_factory, \
+                patch('sys.stderr', io.StringIO()):
+            with self.assertRaises(SystemExit):
+                release.main([
+                    'resolve-task', '--task-pin', self.tag,
+                    '--installed-payload', 'a' * 64,
+                ])
+        api_factory.assert_not_called()
+        self.api.release_by_tag.assert_not_called()
+
+    def test_native_arguments_are_validated_before_remote_calls(self):
+        import tempfile
+
+        cases = (
+            ({'task_pin': self.tag}, 'NATIVE_VERIFICATION_ARGUMENTS_REQUIRED'),
+            ({'task_pin': self.tag, 'source_revision': 'bad'}, 'INVALID_RECORDED_IDENTITY'),
+            ({'task_pin': self.tag, 'skill': 'development-review'}, 'NATIVE_VERIFICATION_ARGUMENTS_REQUIRED'),
+            ({'task_pin': self.tag, 'source_revision': self.context['source_revision'],
+              'policy_revision': self.context['policy_revision'],
+              'builder_revision': self.context['builder_revision'],
+              'skill': 'development-review', 'installed_path': '.'},
+             'NATIVE_VERIFICATION_SKILL_UNSUPPORTED'),
+            ({'task_pin': self.tag, 'source_revision': self.context['source_revision'],
+              'policy_revision': self.context['policy_revision'],
+              'builder_revision': self.context['builder_revision'],
+              'skill': 'delegation-executor'},
+             'NATIVE_VERIFICATION_ARGUMENTS_REQUIRED'),
+            ({'task_pin': '2026.02.30'}, 'INVALID_CALVER_TASK_PIN'),
         )
+        for options, expected in cases:
+            with self.subTest(options=options), self.assertRaisesRegex(release.ReleaseError, expected):
+                release.resolve_task(self.api, **options)
+            self.api.release_by_tag.assert_not_called()
+            self.api.tags.assert_not_called()
+            self.api.asset.assert_not_called()
+            self.api.request.assert_not_called()
 
-    def test_both_chatgpt_skills_resolve_without_installation_or_session_evidence(self):
-        for skill in ('development-orchestrator', 'development-review'):
-            with self.subTest(skill=skill):
-                result = release.resolve_task(self.api, skill=skill)
-                self.assertEqual(result['task_pin'], '2026.11.20')
-                self.assertIn('provenance', result)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(release.ReleaseError, 'INVALID_COMPATIBILITY_EVIDENCE'):
+                release.resolve_task(
+                    self.api,
+                    task_pin=self.tag,
+                    source_revision=self.context['source_revision'],
+                    policy_revision=self.context['policy_revision'],
+                    builder_revision=self.context['builder_revision'],
+                    skill='delegation-executor',
+                    installed_path=directory,
+                    compatibility={'ref': 'comment', 'sha256': 'invalid'},
+                )
+        self.api.release_by_tag.assert_not_called()
+        self.api.request.assert_not_called()
 
-    def test_failed_newest_release_blocks_without_falling_back(self):
-        self.api.run.return_value['conclusion'] = 'failure'
-        self.workflow_attempts[3]['conclusion'] = 'failure'
-        with self.assertRaisesRegex(
-            release.ReleaseError, 'RELEASE_QUALIFICATION_FAILED'
-        ):
-            release.resolve_task(self.api, skill='development-review')
-        self.api.release.assert_called_once_with(20)
+    def test_release_calver_immutability_and_tag_target_are_required(self):
+        import tempfile
 
-    def test_successful_publication_survives_a_failed_later_rerun(self):
-        self.workflow_attempts[2]['conclusion'] = 'success'
-        self.workflow_attempts[3]['conclusion'] = 'failure'
-        self.workflow_attempts[3]['actor'] = {
-            **self.workflow_attempts[3]['actor'], 'id': 999,
-        }
-        self.workflow_attempts[3]['triggering_actor'] = {
-            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
-        }
-        self.api.run.return_value.update(status='completed', conclusion='failure')
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            self.release_detail['tag_name'] = '2026.11.24'
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
+            self.release_detail['tag_name'] = self.tag
+            self.release_detail['immutable'] = False
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
+            self.release_detail['immutable'] = True
+            self.api.tags.return_value[0]['object']['sha'] = 'f' * 40
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
+        self.api.release_by_tag.assert_called_with(self.tag)
 
-        result = release.resolve_task(self.api, skill='development-review')
-        workflow = result['provenance']['workflow_run']
+    def test_downloaded_manifest_and_sidecar_must_match_github_asset_digests(self):
+        import tempfile
 
-        self.assertEqual(workflow['original_attempt'], 1)
-        self.assertEqual(workflow['qualification_attempt'], 2)
-        self.assertEqual(workflow['publication_attempt'], 2)
-        self.assertEqual(workflow['attempt'], 2)
-        self.assertEqual(workflow['latest_attempt'], 3)
-        self.assertEqual(workflow['status'], 'completed')
-        self.assertEqual(workflow['conclusion'], 'success')
-        self.assertEqual(
-            [(call.args[0], call.args[1]) for call in self.api.run_attempt.call_args_list],
-            [(77, 1), (77, 3), (77, 2)],
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            original = self.asset_bytes['release-manifest.json']
+            self.asset_bytes['release-manifest.json'] = original + b' '
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
+            self.asset_bytes['release-manifest.json'] = original
+            self.asset_bytes['delegation-executor.provenance.json'] += b' '
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-    def test_non_owner_success_does_not_replace_owner_qualified_publication(self):
-        self.workflow_attempts[2]['conclusion'] = 'success'
-        self.workflow_attempts[3]['conclusion'] = 'success'
-        self.workflow_attempts[3]['actor'] = {
-            **self.workflow_attempts[3]['actor'], 'id': 999,
-        }
-        self.workflow_attempts[3]['triggering_actor'] = {
-            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
-        }
+    def test_manifest_must_bind_the_executor_sidecar_and_recorded_identity(self):
+        import json
+        import tempfile
 
-        result = release.resolve_task(self.api, skill='development-review')
-        workflow = result['provenance']['workflow_run']
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            self.manifest['asset_sha256']['delegation-executor.provenance.json'] = '0' * 64
+            self._write_manifest()
+            self._refresh_release_assets()
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-        self.assertEqual(workflow['publication_attempt'], 2)
-        self.assertEqual(workflow['latest_attempt'], 3)
-        self.assertEqual(workflow['triggering_actor_id'], 123)
+            self.manifest['asset_sha256']['delegation-executor.provenance.json'] = release.digest(
+                self.asset_bytes['delegation-executor.provenance.json']
+            )
+            self.manifest['context']['policy_revision'] = 'f' * 40
+            self._write_manifest()
+            self._refresh_release_assets()
+            self.release_detail['body'] = 'Release context: ' + release.digest(
+                release.canonical(release.frozen_release_context(self.manifest['context']))
+            )
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-    def test_successful_publication_survives_an_in_progress_later_rerun(self):
-        self.workflow_attempts[2]['conclusion'] = 'success'
-        self.workflow_attempts[3].update(status='in_progress', conclusion=None)
-        self.workflow_attempts[3]['actor'] = {
-            **self.workflow_attempts[3]['actor'], 'id': 999,
-        }
-        self.workflow_attempts[3]['triggering_actor'] = {
-            **self.workflow_attempts[3]['triggering_actor'], 'id': 999,
-        }
-        self.api.run.return_value.update(status='in_progress', conclusion=None)
+    def test_executor_sidecar_identity_must_match_the_manifest_context(self):
+        import json
+        import tempfile
 
-        result = release.resolve_task(self.api, skill='development-review')
-        workflow = result['provenance']['workflow_run']
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            name = 'delegation-executor.provenance.json'
+            sidecar = json.loads(self.asset_bytes[name])
+            sidecar['source_revision'] = 'f' * 40
+            sidecar_bytes = (json.dumps(sidecar, sort_keys=True, indent=2) + '\n').encode()
+            self.asset_bytes[name] = sidecar_bytes
+            self.manifest['asset_sha256'][name] = release.digest(sidecar_bytes)
+            self._write_manifest()
+            self._refresh_release_assets()
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-        self.assertEqual(workflow['publication_attempt'], 2)
-        self.assertEqual(workflow['latest_attempt'], 3)
-        self.assertEqual(workflow['conclusion'], 'success')
+    def test_pinned_manifest_rejects_attempt_local_context_fields(self):
+        import tempfile
 
-    def test_incomplete_workflow_blocks(self):
-        self.api.run.return_value.update(status='in_progress', conclusion=None)
-        self.workflow_attempts[3].update(status='in_progress', conclusion=None)
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            self.manifest['context']['validation_attempt'] = 2
+            self._write_manifest()
+            self._refresh_release_assets()
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-    def test_workflow_attempt_cannot_precede_qualification_attempt(self):
-        self.api.run.return_value.update(run_attempt=1)
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+    def test_executor_sidecar_transform_must_match_the_manifest(self):
+        import json
+        import tempfile
 
-    def test_non_immutable_release_blocks(self):
-        self.release_detail.update(immutable=False)
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            name = 'delegation-executor.provenance.json'
+            sidecar = json.loads(self.asset_bytes[name])
+            sidecar['transform_version'] = 1
+            sidecar_bytes = (json.dumps(sidecar, sort_keys=True, indent=2) + '\n').encode()
+            self.asset_bytes[name] = sidecar_bytes
+            self.manifest['asset_sha256'][name] = release.digest(sidecar_bytes)
+            self._write_manifest()
+            self._refresh_release_assets()
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-    def test_workflow_or_tag_identity_mismatch_blocks(self):
-        self.api.run.return_value.update(head_sha='f' * 40)
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
-        self.api.release.assert_called_once_with(20)
+    def test_executor_sidecar_transform_version_must_be_an_integer(self):
+        import json
+        import tempfile
 
-    def test_original_dispatch_owner_mismatch_blocks(self):
-        self.workflow_attempts[1]['triggering_actor']['id'] = 999
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            self.context['transform_version'] = 1
+            self.manifest['context']['transform_version'] = 1
+            self.release_detail['body'] = 'Release context: ' + release.digest(
+                release.canonical(release.frozen_release_context(self.manifest['context']))
+            )
+            name = 'delegation-executor.provenance.json'
+            sidecar = json.loads(self.asset_bytes[name])
+            sidecar['transform_version'] = True
+            sidecar_bytes = (json.dumps(sidecar, sort_keys=True, indent=2) + '\n').encode()
+            self.asset_bytes[name] = sidecar_bytes
+            self.manifest['asset_sha256'][name] = release.digest(sidecar_bytes)
+            self._write_manifest()
+            self._refresh_release_assets()
 
-    def test_tag_target_mismatch_blocks(self):
-        self.api.tags.return_value[0]['object']['sha'] = 'f' * 40
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
 
-    def test_missing_provenance_sidecar_blocks(self):
-        self.release_detail['assets'] = [
-            asset for asset in self.release_detail['assets']
-            if asset['name'] != 'development-review.provenance.json'
-        ]
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+    def test_missing_executor_payload_hashes_are_unavailable(self):
+        import json
+        import tempfile
 
-    def test_provenance_sidecar_hash_mismatch_blocks(self):
-        self.asset_bytes['development-review.provenance.json'] = b'{}'
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            name = 'delegation-executor.provenance.json'
+            sidecar = json.loads(self.asset_bytes[name])
+            del sidecar['payload_sha256']
+            sidecar_bytes = (json.dumps(sidecar, sort_keys=True, indent=2) + '\n').encode()
+            self.asset_bytes[name] = sidecar_bytes
+            self.manifest['asset_sha256'][name] = release.digest(sidecar_bytes)
+            self._write_manifest()
+            self._refresh_release_assets()
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_UNAVAILABLE'):
+                self._resolve(directory)
 
-    def test_frozen_context_body_mismatch_blocks(self):
-        self.release_detail['body'] = 'Release context: ' + '0' * 64
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+    def test_missing_sidecar_digest_is_unavailable(self):
+        import tempfile
 
-    def test_owner_binding_mismatch_blocks(self):
-        self.api.record.return_value['owner']['id'] = 999
-        with self.assertRaises(release.ReleaseError):
-            release.resolve_task(self.api, skill='development-review')
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            sidecar = next(
+                asset for asset in self.release_detail['assets']
+                if asset['name'] == 'delegation-executor.provenance.json'
+            )
+            sidecar['digest'] = None
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_UNAVAILABLE'):
+                self._resolve(directory)
+            self._refresh_release_assets()
+            self.release_detail['assets'] = [
+                asset for asset in self.release_detail['assets']
+                if asset['name'] != 'delegation-executor.provenance.json'
+            ]
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_UNAVAILABLE'):
+                self._resolve(directory)
 
-    def test_local_codex_requires_an_installed_directory(self):
-        status, output, error = self.run_cli('resolve-task', '--skill', 'delegation-executor')
-        self.assertEqual((status, output), (1, ''))
-        self.assertIn('LOCAL_INSTALLATION_UNAVAILABLE', error)
-        self.assertIn('--installed-path', error)
+    def test_changed_payload_needs_authenticated_compatibility_evidence(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            changed = {**self.payload_bytes, 'SKILL.md': b'older instructions'}
+            self._install(directory, payload_bytes=changed, marker=True)
+            marker_path = Path(directory) / '.skill-distribution.json'
+            marker = json.loads(marker_path.read_text())
+            marker.update(
+                source_revision='c' * 40,
+                policy_revision='d' * 40,
+                archive_sha256='e' * 64,
+            )
+            marker_path.write_text(json.dumps(marker))
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory)
+
+            inspected = {member: release.digest(content) for member, content in changed.items()}
+            report = {
+                'gate': 'compatibility',
+                'skill': 'delegation-executor',
+                'revision': self.context['source_revision'],
+                'policy_revision': self.context['policy_revision'],
+                'installed_payload': release.digest(release.canonical(inspected)),
+                'installed_source': 'f' * 40,
+                'differences': 'older executor instructions',
+                'validation': 'compatibility checks passed',
+                'execution_id': 'inspection',
+                'verdict': 'pass',
+            }
+            record = {
+                'user': {'id': self.context['owner_id']},
+                'body': '<!-- release-evidence\n' + json.dumps(report) + '\n-->',
+            }
+            self.api.record.return_value = record
+            evidence = {'ref': 'issue-comment', 'sha256': release.digest(release.canonical(record))}
+            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
+                self._resolve(directory, compatibility=evidence)
+
+            report['installed_source'] = marker['source_revision']
+            record['body'] = '<!-- release-evidence\n' + json.dumps(report) + '\n-->'
+            evidence['sha256'] = release.digest(release.canonical(record))
+            result = self._resolve(directory, compatibility=evidence)
+            self.assertTrue(result['local_installation_verified'])
+            self.assertEqual(report['revision'], self.context['source_revision'])
+            self.assertEqual(report['policy_revision'], self.context['policy_revision'])
+
+    def test_historical_sha_pin_uses_manual_fallback_without_release_lookup(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            self._install(directory)
+            with self.assertRaisesRegex(
+                release.ReleaseError,
+                'LOCAL_INSTALLATION_UNAVAILABLE.*manual execution',
+            ):
+                release.resolve_task(
+                    self.api,
+                    task_pin='c' * 40,
+                    source_revision=self.context['source_revision'],
+                    policy_revision=self.context['policy_revision'],
+                    builder_revision=self.context['builder_revision'],
+                    skill='delegation-executor',
+                    installed_path=directory,
+                    compatibility={'ref': 'comment', 'sha256': 'c' * 64},
+                )
+        self.api.release_by_tag.assert_not_called()
+        self.api.tags.assert_not_called()
+        self.api.asset.assert_not_called()
+        self.api.record.assert_not_called()
 
 
 class InstalledSkillTests(unittest.TestCase):
     def test_inspected_skill_bytes_and_compatibility(self):
-        import tempfile,json
-        from unittest.mock import Mock,patch
-        names=['delegation-executor','development-review']
-        hashes={'SKILL.md':release.digest(b'current'),'agents/openai.yaml':release.digest(b'agent')}
-        context={'release_version':'2026.11.16',
-                 'verified_payload_identities':{names[0]:hashes,names[1]:{'SKILL.md':release.digest(b'other')}},
-                 'source_revision':'a'*40,'policy_revision':'b'*40,'owner_id':123}
-        api=Mock()
-        with tempfile.TemporaryDirectory() as temporary,patch.object(release,'_resolve_qualified_release',return_value=context):
-            path=Path(temporary);(path/'agents').mkdir();(path/'SKILL.md').write_bytes(b'current');(path/'agents/openai.yaml').write_bytes(b'agent')
-            self.assertEqual(release.resolve_task(api,root=path,skill=names[0],installed_path=path)['task_pin'],'2026.11.16')
-            with patch.object(release,'GitHubAPI',return_value=api),patch('sys.stdout'), \
-                    patch.object(release,'_resolve_qualified_release',return_value=context):
-                self.assertEqual(release.main(['resolve-task','--root',str(path),'--skill',names[0],'--installed-path',str(path)]),0)
-            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,installed_payload=release.digest(release.canonical(hashes)))
-            (path/'SKILL.md').unlink()
-            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_UNAVAILABLE.*Installed Skill file missing'):
-                release.resolve_task(api,root=path,skill=names[0],installed_path=path)
-            (path/'SKILL.md').write_bytes(b'older')
-            inspected={**hashes,'SKILL.md':release.digest(b'older')}
-            report={'gate':'compatibility','skill':names[0],'revision':'a'*40,'policy_revision':'b'*40,
-                    'installed_payload':release.digest(release.canonical(inspected)),'installed_source':'c'*40,
-                    'differences':'inspected older instructions','validation':'applicable checks passed','execution_id':'inspection','verdict':'pass'}
-            record={'user':{'id':123},'body':'<!-- release-evidence\n'+json.dumps(report)+'\n-->'}
-            api.record.return_value=record
-            compatibility={'ref':'record','sha256':release.digest(release.canonical(record))}
-            self.assertEqual(release.resolve_task(api,root=path,skill=names[0],installed_path=path,compatibility=compatibility)['task_pin'],'2026.11.16')
-            report['skill']=names[1];record['body']='<!-- release-evidence\n'+json.dumps(report)+'\n-->'
-            compatibility['sha256']=release.digest(release.canonical(record))
-            with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=path,skill=names[0],installed_path=path,compatibility=compatibility)
-            record['body'] = '<!-- release-evidence\n[]\n-->'
-            compatibility['sha256'] = release.digest(release.canonical(record))
-            with self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
-                release.resolve_task(api, root=path, skill=names[0], installed_path=path,
-                                     compatibility=compatibility)
+        import json
+        import tempfile
+        from unittest.mock import Mock
+
+        skill = "delegation-executor"
+        expected = {
+            "SKILL.md": release.digest(b"current"),
+            "agents/openai.yaml": release.digest(b"agent"),
+        }
+        context = {
+            "source_revision": "a" * 40,
+            "policy_revision": "b" * 40,
+            "owner_id": 123,
+        }
+        api = Mock()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)
+            (path / "agents").mkdir()
+            (path / "SKILL.md").write_bytes(b"current")
+            (path / "agents/openai.yaml").write_bytes(b"agent")
+            release._verify_local_installation(api, context, skill, expected, path, None)
+
+            (path / "SKILL.md").unlink()
+            with self.assertRaisesRegex(release.ReleaseError, "Installed Skill file missing"):
+                release._verify_local_installation(api, context, skill, expected, path, None)
+            (path / "SKILL.md").write_bytes(b"older")
+            with self.assertRaisesRegex(release.ReleaseError, "compatibility unverified"):
+                release._verify_local_installation(api, context, skill, expected, path, None)
+
+            inspected = {**expected, "SKILL.md": release.digest(b"older")}
+            report = {
+                "gate": "compatibility",
+                "skill": skill,
+                "revision": context["source_revision"],
+                "policy_revision": context["policy_revision"],
+                "installed_payload": release.digest(release.canonical(inspected)),
+                "installed_source": "c" * 40,
+                "differences": "inspected older instructions",
+                "validation": "applicable checks passed",
+                "execution_id": "inspection",
+                "verdict": "pass",
+            }
+            record = {
+                "user": {"id": context["owner_id"]},
+                "body": "<!-- release-evidence\n" + json.dumps(report) + "\n-->",
+            }
+            api.record.return_value = record
+            compatibility = {
+                "ref": "record",
+                "sha256": release.digest(release.canonical(record)),
+            }
+            release._verify_local_installation(api, context, skill, expected, path, compatibility)
+
+            report["skill"] = "development-review"
+            record["body"] = "<!-- release-evidence\n" + json.dumps(report) + "\n-->"
+            compatibility["sha256"] = release.digest(release.canonical(record))
+            with self.assertRaises(release.ReleaseError):
+                release._verify_local_installation(api, context, skill, expected, path, compatibility)
+
+            record["body"] = "<!-- release-evidence\n[]\n-->"
+            compatibility["sha256"] = release.digest(release.canonical(record))
+            with self.assertRaises(release.ReleaseError):
+                release._verify_local_installation(api, context, skill, expected, path, compatibility)
 
 
 class ManagedInstallationTests(unittest.TestCase):
     def test_real_installer_metadata_binds_payload_and_skill(self):
-        import tempfile,json,copy
-        from unittest.mock import Mock,patch
+        import copy
+        import json
+        import tempfile
         import skill_distribution as package
-        root=Path(__file__).resolve().parents[1]
-        revision=release.git(root,'rev-parse','HEAD').decode().strip()
-        policy=release.git(root,'log','--first-parent','-1','--format=%H',revision,'--','docs/PROCESS.md').decode().strip()
-        context={'release_version':'2026.11.16','source_revision':revision,'policy_revision':policy,'builder_revision':revision}
-        api=Mock()
+
+        root = Path(__file__).resolve().parents[1]
+        revision = release.git(root, "rev-parse", "HEAD").decode().strip()
+        policy = release.git(
+            root, "log", "--first-parent", "-1", "--format=%H", revision,
+            "--", "docs/PROCESS.md",
+        ).decode().strip()
+        transform_version = committed_transform_version(root, revision)
+        context = {
+            "release_version": "2026.11.16",
+            "source_revision": revision,
+            "policy_revision": policy,
+            "owner_id": 123,
+            "transform_version": transform_version,
+        }
+        api = type("API", (), {"record": lambda self, ref: None})()
         with tempfile.TemporaryDirectory() as temporary:
-            base=Path(temporary);bundle=base/'bundle';stage=base/'stage';stage.mkdir()
-            package.build_release_packages(root,bundle,context)
-            package.initialize_staging_root(root,stage)
-            package.stage_release_packages(root,bundle,stage,context)
-            name='delegation-executor';installed=stage/'.agents/skills'/name
-            marker=installed/'.skill-distribution.json';original=marker.read_text();metadata=json.loads(original)
-            verified={**context,'verified_payload_identities':{name:metadata['payload_sha256']}}
-            verified['release_version'] = '2026.11.16'
-            with patch.object(release,'_resolve_qualified_release',return_value=verified):
-                self.assertEqual(release.resolve_task(api,root=root,skill=name,installed_path=installed)['task_pin'],'2026.11.16')
-                for key,value in [('skill_name','development-review'),('schema_version',2),('source_revision','invalid'),('policy_revision','invalid'),('archive_sha256','invalid'),('payload_sha256',{'../outside':'a'*64})]:
-                    changed=copy.deepcopy(metadata);changed[key]=value;marker.write_text(json.dumps(changed))
-                    with self.subTest(key=key),self.assertRaisesRegex(release.ReleaseError, 'LOCAL_INSTALLATION_MISMATCH'):
-                        release.resolve_task(api,root=root,skill=name,installed_path=installed)
-                marker.write_text('not JSON')
-                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
-                marker.write_text(original)
-                payload=installed/'SKILL.md';original_payload=payload.read_bytes();payload.write_bytes(b'drift')
-                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
-                payload.write_bytes(original_payload)
-                marker.write_text(original);(installed/'unrelated').write_text('extra')
-                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
-                (installed/'unrelated').unlink();marker.unlink();marker.symlink_to(bundle/'release-manifest.json')
-                with self.assertRaises(release.ReleaseError):release.resolve_task(api,root=root,skill=name,installed_path=installed)
+            base = Path(temporary)
+            bundle = base / "bundle"
+            stage = base / "stage"
+            stage.mkdir()
+            package.build_release_packages(root, bundle, {
+                "release_version": "2026.11.16",
+                "source_revision": revision,
+                "policy_revision": policy,
+                "builder_revision": revision,
+                "transform_version": transform_version,
+            })
+            package.initialize_staging_root(root, stage)
+            package.stage_release_packages(root, bundle, stage, {
+                "release_version": "2026.11.16",
+                "source_revision": revision,
+                "policy_revision": policy,
+                "builder_revision": revision,
+                "transform_version": transform_version,
+            })
+            skill = "delegation-executor"
+            installed = stage / ".agents/skills" / skill
+            marker = installed / ".skill-distribution.json"
+            original = marker.read_text()
+            metadata = json.loads(original)
+            expected = metadata["payload_sha256"]
+            archive_sha256 = release.digest((bundle / "delegation-executor.zip").read_bytes())
+            release._verify_local_installation(
+                api, context, skill, expected, installed, None,
+                archive_sha256=archive_sha256,
+            )
+
+            for key, value in (
+                ("skill_name", "development-review"),
+                ("schema_version", 2),
+                ("source_revision", "invalid"),
+                ("policy_revision", "invalid"),
+                ("archive_sha256", "invalid"),
+                ("payload_sha256", {"../outside": "a" * 64}),
+            ):
+                changed = copy.deepcopy(metadata)
+                changed[key] = value
+                marker.write_text(json.dumps(changed))
+                with self.subTest(key=key), self.assertRaises(release.ReleaseError):
+                    release._verify_local_installation(api, context, skill, expected, installed, None)
+
+            marker.write_text("not JSON")
+            with self.assertRaises(release.ReleaseError):
+                release._verify_local_installation(api, context, skill, expected, installed, None)
+            marker.write_text(original)
+            payload = installed / "SKILL.md"
+            original_payload = payload.read_bytes()
+            payload.write_bytes(b"drift")
+            with self.assertRaises(release.ReleaseError):
+                release._verify_local_installation(api, context, skill, expected, installed, None)
+            payload.write_bytes(original_payload)
+            (installed / "unrelated").write_text("extra")
+            with self.assertRaises(release.ReleaseError):
+                release._verify_local_installation(api, context, skill, expected, installed, None)
+            (installed / "unrelated").unlink()
+            marker.unlink()
+            marker.symlink_to(bundle / "release-manifest.json")
+            with self.assertRaises(release.ReleaseError):
+                release._verify_local_installation(api, context, skill, expected, installed, None)
 
 
 class CLIEntrypointTests(unittest.TestCase):
@@ -1516,3 +1892,15 @@ class CLIEntrypointTests(unittest.TestCase):
         for command in ('preflight','qualify','verify-bundle','publish',
                         'verify-release','resolve-task'):
             self.assertIn(command,output.getvalue())
+
+    def test_resolve_task_help_describes_the_native_contract(self):
+        import io
+        from unittest.mock import patch
+
+        output = io.StringIO()
+        with patch('sys.stdout', output), self.assertRaises(SystemExit) as result:
+            release.main(['resolve-task', '--help'])
+        self.assertEqual(result.exception.code, 0)
+        for option in ('--existing-pin', '--task-pin', '--source-revision',
+                       '--policy-revision', '--builder-revision', '--installed-path'):
+            self.assertIn(option, output.getvalue())

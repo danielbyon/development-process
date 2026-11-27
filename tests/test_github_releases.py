@@ -16,6 +16,46 @@ class AdapterTests(unittest.TestCase):
             github.GitHubAPI().request('GET','/user')
             self.assertIn('GET',run.call_args.args[0])
 
+    def test_release_by_tag_uses_exact_endpoint_and_returns_release(self):
+        api = github.GitHubAPI()
+        tag = '2026.11.25'
+        release = {'id': 49, 'tag_name': tag}
+        with patch.object(api, 'request', return_value=release) as request:
+            self.assertEqual(api.release_by_tag(tag), release)
+        request.assert_called_once_with('GET', api.base + '/releases/tags/' + tag)
+
+    def test_release_by_tag_rejects_invalid_calver_before_request(self):
+        api = github.GitHubAPI()
+        invalid_tags = (None, '', '2026.1.25', '2026.02.30', '../2026.11.25',
+                        '2026.11.25?per_page=100')
+        with patch.object(api, 'request') as request:
+            for tag in invalid_tags:
+                with self.subTest(tag=tag), self.assertRaises(github.APIError):
+                    api.release_by_tag(tag)
+        request.assert_not_called()
+
+    def test_release_by_tag_rejects_malformed_or_mismatched_response(self):
+        api = github.GitHubAPI()
+        tag = '2026.11.25'
+        malformed_responses = (None, [], {}, {'id': 49, 'tag_name': '2026.11.24'},
+                               {'id': '49', 'tag_name': tag})
+        for response in malformed_responses:
+            with self.subTest(response=response), patch.object(api, 'request', return_value=response):
+                with self.assertRaises(github.APIError):
+                    api.release_by_tag(tag)
+
+    def test_release_by_tag_converts_invalid_json_body_to_api_error(self):
+        result = subprocess.CompletedProcess([], 0, b'{invalid json', b'')
+        with patch('subprocess.run', return_value=result):
+            with self.assertRaises(github.APIError):
+                github.GitHubAPI().release_by_tag('2026.11.25')
+
+    def test_release_by_tag_preserves_transport_failure_as_api_error(self):
+        failure = subprocess.CalledProcessError(1, ['gh'], stderr=b'Forbidden')
+        with patch('subprocess.run', side_effect=failure):
+            with self.assertRaises(github.APIError):
+                github.GitHubAPI().release_by_tag('2026.11.25')
+
     def test_workflow_run_attempt_uses_attempt_specific_endpoint(self):
         with patch('subprocess.run', return_value=subprocess.CompletedProcess([],0,b'{}',b'')) as run:
             github.GitHubAPI().run_attempt(77, 2)

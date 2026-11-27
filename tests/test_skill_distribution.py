@@ -46,6 +46,15 @@ SKILL_NAMES = (
     "development-review",
     "delegation-executor",
 )
+ACTIVATED_POLICY_IDENTITY_TEMPLATE = (
+    "<!-- activated-policy-identity -->\n"
+    "Release CalVer: {{release_tag}}\n"
+    "Source revision: {{source_revision}}\n"
+    "Policy revision: {{policy_revision}}\n"
+    "Builder revision: {{builder_revision}}\n"
+    "Canonical policy: [docs/PROCESS.md](https://github.com/danielbyon/development-process/blob/{{policy_revision}}/docs/PROCESS.md)\n"
+    "<!-- /activated-policy-identity -->"
+)
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -92,6 +101,29 @@ class SkillDistributionTests(unittest.TestCase):
             set(validate_distribution(self.source_root)),
             set(SKILL_NAMES),
         )
+
+    def test_schema1_transform_version_must_be_integer_one(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        self.assertEqual(manifest["schema_version"], 1)
+        manifest["transform_version"] = True
+        manifest_path.write_text(json.dumps(manifest))
+
+        with self.assertRaises(DistributionError):
+            validate_distribution(self.source_root)
+
+    def test_manifest_schema_version_must_be_an_integer(self) -> None:
+        manifest_path = self.source_root / "skills" / "distribution.json"
+        original = json.loads(manifest_path.read_text())
+
+        for invalid_version in (True, 1.0):
+            with self.subTest(schema_version=invalid_version):
+                manifest = json.loads(json.dumps(original))
+                manifest["schema_version"] = invalid_version
+                manifest_path.write_text(json.dumps(manifest))
+
+                with self.assertRaises(DistributionError):
+                    validate_distribution(self.source_root)
 
     def test_manifest_rejects_invalid_distribution_shapes(self) -> None:
         manifest_path = self.source_root / "skills" / "distribution.json"
@@ -1016,6 +1048,165 @@ class ReleasePackageTests(unittest.TestCase):
         self.context = dict(release_version="2026.11.16", source_revision=git(self.root, "rev-parse", "HEAD"),
                             policy_revision=POLICY_REVISION, builder_revision=revision, transform_version=1)
 
+    def _prepare_transform2_source(self):
+        manifest_path = self.root / "skills/distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["policy_reference"] = "{{policy_revision}}"
+        manifest["transform_version"] = 2
+        manifest_path.write_text(json.dumps(manifest))
+        old_policy_url = "https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md"
+        for name in SKILL_NAMES:
+            path = self.root / "skills" / name / "SKILL.md"
+            text = "\n".join(
+                line for line in path.read_text().splitlines() if old_policy_url not in line
+            ).rstrip()
+            path.write_text(text + "\n\n" + ACTIVATED_POLICY_IDENTITY_TEMPLATE + "\n")
+        git(self.root, "add", "skills")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Version 2 identity template")
+        self.context = self.context | {
+            "source_revision": git(self.root, "rev-parse", "HEAD"),
+            "transform_version": 2,
+        }
+
+    def test_transform2_materializes_activated_policy_identity_in_every_skill(self):
+        self._prepare_transform2_source()
+        output = self.base / "transform2"
+        artifacts = distribution_module.build_release_packages(self.root, output, self.context)
+
+        self.assertEqual(len(artifacts), 8)
+        self.assertEqual(ACTIVATED_POLICY_IDENTITY_TEMPLATE.count("{{policy_revision}}"), 2)
+        for name in SKILL_NAMES:
+            with zipfile.ZipFile(output / f"{name}.zip") as archive:
+                skill = archive.read(f"{name}/SKILL.md").decode()
+            expected = ACTIVATED_POLICY_IDENTITY_TEMPLATE
+            for token, value in (
+                ("{{release_tag}}", self.context["release_version"]),
+                ("{{source_revision}}", self.context["source_revision"]),
+                ("{{policy_revision}}", self.context["policy_revision"]),
+                ("{{builder_revision}}", self.context["builder_revision"]),
+            ):
+                expected = expected.replace(token, value)
+            self.assertEqual(skill.count(expected), 1)
+            for token in ("{{release_tag}}", "{{source_revision}}", "{{policy_revision}}", "{{builder_revision}}"):
+                self.assertNotIn(token, skill)
+            sidecar = json.loads((output / f"{name}.provenance.json").read_text())
+            self.assertEqual(sidecar["transform_version"], 2)
+            self.assertEqual(sidecar["source_revision"], self.context["source_revision"])
+            self.assertEqual(sidecar["policy_revision"], self.context["policy_revision"])
+            self.assertEqual(sidecar["builder_revision"], self.context["builder_revision"])
+        self.assertEqual(len(distribution_module.verify_release_packages(self.root, output, self.context)), 8)
+
+    def test_transform2_rejects_missing_duplicate_misplaced_conflicting_and_unresolved_identity_fields(self):
+        self._prepare_transform2_source()
+        base_revision = self.context["source_revision"]
+        cases = (
+            ("missing", lambda text: text.replace(ACTIVATED_POLICY_IDENTITY_TEMPLATE + "\n", "", 1)),
+            ("duplicate", lambda text: text.rstrip() + "\n\n" + ACTIVATED_POLICY_IDENTITY_TEMPLATE + "\n"),
+            ("misplaced", lambda text: text.rstrip() + "\nSource revision: conflicting\n"),
+            (
+                "conflicting",
+                lambda text: text.replace(
+                    "Policy revision: {{policy_revision}}", "Policy revision: " + "0" * 40, 1
+                ),
+            ),
+            (
+                "unresolved",
+                lambda text: text.replace(
+                    "Builder revision: {{builder_revision}}", "Builder revision: {{builder_sha}}", 1
+                ),
+            ),
+            (
+                "misordered",
+                lambda text: text.replace(
+                    "Source revision: {{source_revision}}\nPolicy revision: {{policy_revision}}",
+                    "Policy revision: {{policy_revision}}\nSource revision: {{source_revision}}",
+                    1,
+                ),
+            ),
+        )
+        for name, mutate in cases:
+            with self.subTest(identity_field=name):
+                git(self.root, "checkout", "--quiet", "--detach", base_revision)
+                path = self.root / "skills/development-review/SKILL.md"
+                path.write_text(mutate(path.read_text()))
+                git(self.root, "add", "skills/development-review/SKILL.md")
+                git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+                    "user.email=skill-distribution-test@example.invalid", "commit", "-qm", f"Invalid {name} identity")
+                context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+                with self.assertRaises(DistributionError):
+                    distribution_module.build_release_packages(
+                        self.root, self.base / "invalid-identities" / name, context
+                    )
+
+    def test_transform_version_must_match_committed_manifest(self):
+        self._prepare_transform2_source()
+        with self.assertRaisesRegex(DistributionError, "transform_version.*committed manifest"):
+            distribution_module.build_release_packages(
+                self.root, self.base / "mismatched-transform", self.context | {"transform_version": 1}
+            )
+
+    def test_release_package_rejects_non_integer_manifest_schema_version(self):
+        manifest_path = self.root / "skills" / "distribution.json"
+        original = json.loads(manifest_path.read_text())
+
+        for label, invalid_version in (("boolean", True), ("float", 2.0)):
+            with self.subTest(schema_version=invalid_version):
+                manifest = json.loads(json.dumps(original))
+                manifest["schema_version"] = invalid_version
+                manifest_path.write_text(json.dumps(manifest))
+                git(self.root, "add", "skills/distribution.json")
+                git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+                    "user.email=skill-distribution-test@example.invalid", "commit", "-qm",
+                    f"Invalid {label} schema version")
+                context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+
+                with self.assertRaises(DistributionError):
+                    distribution_module.build_release_packages(
+                        self.root, self.base / f"invalid-schema-{label}", context
+                    )
+
+    def test_transform2_rejects_a_policy_revision_with_different_source_bytes(self):
+        self._prepare_transform2_source()
+        policy_path = self.root / "docs/PROCESS.md"
+        policy_path.write_text(policy_path.read_text() + "\nPolicy identity regression fixture.\n")
+        git(self.root, "add", "docs/PROCESS.md")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Different policy identity")
+        wrong_policy_revision = git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(DistributionError, "Source and policy content differ"):
+            distribution_module.build_release_packages(
+                self.root,
+                self.base / "mismatched-policy",
+                self.context | {"policy_revision": wrong_policy_revision},
+            )
+
+    def test_transform2_rejects_an_unknown_manifest_version(self):
+        self._prepare_transform2_source()
+        manifest_path = self.root / "skills/distribution.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["transform_version"] = 3
+        manifest_path.write_text(json.dumps(manifest))
+        git(self.root, "add", "skills/distribution.json")
+        git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
+            "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Unknown transform")
+        context = self.context | {"source_revision": git(self.root, "rev-parse", "HEAD")}
+        with self.assertRaises(DistributionError):
+            distribution_module.build_release_packages(self.root, self.base / "unknown-manifest-transform", context)
+
+    def test_resolve_task_policy_diagnostic_uses_the_activated_skill_reference(self):
+        with self.assertRaisesRegex(DistributionError, "activated Skill policy reference"):
+            resolve_task_policy(self.root)
+
+    def test_schema1_and_transform1_rebuild_approved_artifact_digests(self):
+        fixture = json.loads((ROOT / "tests/fixtures/release_artifact_baseline_digests.json").read_text())
+        for name, record in fixture["fixtures"].items():
+            with self.subTest(fixture=name):
+                output = self.base / "baselines" / name
+                artifacts = distribution_module.build_release_packages(self.root, output, record["context"])
+                actual = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in artifacts}
+                self.assertEqual(actual, record["sha256"])
+
     def test_reconstructs_eight_identical_artifacts_without_working_sources(self):
         first, second = self.base / "first", self.base / "second"
         paths = distribution_module.build_release_packages(self.root, first, self.context)
@@ -1040,7 +1231,7 @@ class ReleasePackageTests(unittest.TestCase):
             distribution_module.build_release_packages(self.root, output, self.context)
 
     def test_rejects_unknown_transform_and_invalid_version(self):
-        for changes in ({"transform_version": 2}, {"release_version": "2026.02.30"}, {"release_version": "2026.11.16.1"}):
+        for changes in ({"transform_version": 3}, {"release_version": "2026.02.30"}, {"release_version": "2026.11.16.1"}):
             with self.subTest(changes=changes), self.assertRaises(DistributionError):
                 distribution_module.build_release_packages(self.root, self.base / "out", self.context | changes)
 
@@ -1203,6 +1394,7 @@ class ReleasePackageTests(unittest.TestCase):
     def test_actual_templates_validate_and_package_from_committed_inputs(self):
         self.assertEqual(set(validate_distribution(ROOT)), set(SKILL_NAMES))
         manifest_path = Path("skills/distribution.json")
+        manifest = json.loads((ROOT / manifest_path).read_text())
         (self.root / manifest_path).write_bytes((ROOT / manifest_path).read_bytes())
         for name in SKILL_NAMES:
             for relative in ("SKILL.md", "agents/openai.yaml"):
@@ -1213,7 +1405,11 @@ class ReleasePackageTests(unittest.TestCase):
         git(self.root, "-c", "user.name=Skill Distribution Test", "-c",
             "user.email=skill-distribution-test@example.invalid", "commit", "-qm", "Actual release inputs")
         revision = git(self.root, "rev-parse", "HEAD")
-        context = self.context | {"source_revision": revision, "policy_revision": revision}
+        context = self.context | {
+            "source_revision": revision,
+            "policy_revision": revision,
+            "transform_version": manifest.get("transform_version", 1),
+        }
         output = self.base / "actual-template-packages"
         self.assertEqual(len(distribution_module.build_release_packages(self.root, output, context)), 8)
         self.assertEqual(len(distribution_module.verify_release_packages(self.root, output, context)), 8)
@@ -1221,9 +1417,21 @@ class ReleasePackageTests(unittest.TestCase):
             original = (ROOT / "skills" / name / "SKILL.md").read_bytes()
             with zipfile.ZipFile(output / f"{name}.zip") as archive:
                 self.assertEqual(set(archive.namelist()), {f"{name}/SKILL.md", f"{name}/agents/openai.yaml"})
-                url = b"https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md"
-                self.assertEqual(archive.read(f"{name}/SKILL.md"),
-                    original.replace(url, url.replace(b"{{release_tag}}", context["release_version"].encode())))
+                if context["transform_version"] == 1:
+                    url = b"https://github.com/danielbyon/development-process/blob/{{release_tag}}/docs/PROCESS.md"
+                    expected = original.replace(
+                        url, url.replace(b"{{release_tag}}", context["release_version"].encode())
+                    )
+                else:
+                    expected = original
+                    for token, value in (
+                        (b"{{release_tag}}", context["release_version"].encode()),
+                        (b"{{source_revision}}", revision.encode()),
+                        (b"{{policy_revision}}", revision.encode()),
+                        (b"{{builder_revision}}", context["builder_revision"].encode()),
+                    ):
+                        expected = expected.replace(token, value)
+                self.assertEqual(archive.read(f"{name}/SKILL.md"), expected)
                 self.assertEqual(archive.read(f"{name}/agents/openai.yaml"),
                     (ROOT / "skills" / name / "agents/openai.yaml").read_bytes())
 

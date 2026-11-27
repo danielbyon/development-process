@@ -138,6 +138,7 @@ jobs:
           candidate_root="$(mktemp -d "${RUNNER_TEMP}/skill-distribution-candidate.XXXXXX")"
           package_dir="$candidate_root/packages"
           export CANDIDATE_CONTEXT="$candidate_root/context.json"
+          export PACKAGE_SOURCE_ROOT="$source_root"
           test "$(git -C "$source_root" rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$EXPECTED_BUILDER_SHA"
           git -C "$source_root" fetch --no-tags "$GITHUB_WORKSPACE" "$EXPECTED_BUILDER_SHA"
@@ -148,11 +149,14 @@ jobs:
           import json
           import os
           from pathlib import Path
+          from scripts.skill_distribution import load_manifest, release_transform_version
+          manifest = load_manifest(Path(os.environ["PACKAGE_SOURCE_ROOT"]))
           context = {
               "release_version": "2000.01.01",
               "source_revision": os.environ["EXPECTED_SOURCE_SHA"],
               "policy_revision": os.environ["POLICY_REVISION"],
               "builder_revision": os.environ["EXPECTED_BUILDER_SHA"],
+              "transform_version": release_transform_version(manifest),
               "qualification_only": True,
           }
           Path(os.environ["CANDIDATE_CONTEXT"]).write_text(json.dumps(context))

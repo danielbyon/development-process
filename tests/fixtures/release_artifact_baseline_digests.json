@@ -1,0 +1,43 @@
+{
+  "baseline_builder_revision": "8e391636cb50f9bfe6e8def2d0f54eeb65d1d157",
+  "fixtures": {
+    "schema1": {
+      "context": {
+        "builder_revision": "8e391636cb50f9bfe6e8def2d0f54eeb65d1d157",
+        "policy_revision": "e2afa055d1126763c69f0e0392d25b86bab98014",
+        "release_version": "2026.11.13",
+        "source_revision": "e47c8882e590c3ec41d2d46f461d18ed73132534",
+        "transform_version": 1
+      },
+      "sha256": {
+        "SHA256SUMS": "d0f851abeee872972dd54de0082e9da24410d6f5dc78670d5cc843c6beb9f074",
+        "delegation-executor.provenance.json": "838603c87a23351cee9bd58f07b7a6ca984bf49664e745e708e93569598d4684",
+        "delegation-executor.zip": "e64bb9ab32c390da4d4fd5ac811184cf02cba6fe75a52a8d7f54a76e82fe7f91",
+        "development-orchestrator.provenance.json": "cde4053b915628ae0d369551414c936d2eebfee86605a216ed204b3c0f27f27a",
+        "development-orchestrator.zip": "7b9beee1ccfd5af2652dae7cb8378496e49f653c282a35ccb1baadca8a3ec743",
+        "development-review.provenance.json": "867c95aeafad6ffb55757034322763a43fb5840f83cb0c6ff3f81567c8b55046",
+        "development-review.zip": "ec967966ab8e1984f8e0a76e1a9b51a0560d7c2904d6fa92607c032274378329",
+        "release-manifest.json": "ab41a32f9c5b405ea60a4d6dc8bdab4f47cb810ed647c20baf620809c2a57c42"
+      }
+    },
+    "schema2_transform1": {
+      "context": {
+        "builder_revision": "8e391636cb50f9bfe6e8def2d0f54eeb65d1d157",
+        "policy_revision": "8e391636cb50f9bfe6e8def2d0f54eeb65d1d157",
+        "release_version": "2026.11.25",
+        "source_revision": "8e391636cb50f9bfe6e8def2d0f54eeb65d1d157",
+        "transform_version": 1
+      },
+      "sha256": {
+        "SHA256SUMS": "b98365d3f4134cfe22aa063d85e3aeeea085870144450fb1784d310350dffae5",
+        "delegation-executor.provenance.json": "0c460aa37294796a6b9af233378857388bbaba49269c461f8ff2074f22bdd7bb",
+        "delegation-executor.zip": "736fd0de21cf22461dd38bacc0e89f18690d555a5a3c9a97d0dd06cb62063f74",
+        "development-orchestrator.provenance.json": "791d111d633bad79fa1674a983ffc9e9c593bebb45d8c9806f2be01ac0813813",
+        "development-orchestrator.zip": "590743f8e0cc7c93008f90b08b6461bff6d7af4c5be8e1762d7d7f92d549c8ca",
+        "development-review.provenance.json": "d514411c12186ad11a24b96789d04209bc07812468476a0dc3e963aa609a6567",
+        "development-review.zip": "c3d7b667f40abff59f66da5c220401f6ea26f48a83c3811675205abff7e35110",
+        "release-manifest.json": "b564c513adc2e82891a93bcf945520f11ec2b90b7e6999692fed5ef057cc80a3"
+      }
+    }
+  }
+}
